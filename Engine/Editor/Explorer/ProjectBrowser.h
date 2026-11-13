@@ -27,6 +27,12 @@
 
 struct ImTextureData;
 
+namespace Frontier::GeometricRaster
+{
+class VulkanInterchange;
+class VulkanWorldRenderSequence;
+}
+
 namespace Frontier::Editor::Explorer
 {
 
@@ -114,6 +120,10 @@ public:
     ProjectBrowser(const ProjectBrowser&)            = delete;
     ProjectBrowser& operator=(const ProjectBrowser&) = delete;
 
+    void AttachVulkanWorldRenderer(
+        GeometricRaster::VulkanInterchange* DeviceInterchange,
+        const std::filesystem::path&        CompiledShaderDirectory);
+
     void InitializeDefaultCollection(
         const std::filesystem::path& DefaultProjectsDirectory = {},
         const std::filesystem::path& FrontierRootDirectory    = {},
@@ -150,11 +160,12 @@ private:
     void RenderNewProjectModal(PixelSpace& Surface, Rectangle2D LogicalBounds, const ControlPointer& Pointer);
     void RenderDiskPathModal(PixelSpace& Surface, Rectangle2D LogicalBounds, const ControlPointer& Pointer);
 
-    Workspaces::WorkspaceCapabilityRegister                      CapabilityRegister   {};
-    std::vector<BrowserCollectionEntry>                          Collection           {};
-    std::unique_ptr<GeometricRaster::ShowcaseWorldSceneBundle>   PreviewSceneBundle   {};
-    std::unique_ptr<GeometricRaster::TieredWorldRenderSequence>  PreviewWorldRenderer {};
-    std::unique_ptr<ImTextureData>                               ReaderPreviewTex     {};
+    Workspaces::WorkspaceCapabilityRegister                         CapabilityRegister   {};
+    std::vector<BrowserCollectionEntry>                             Collection           {};
+    std::unique_ptr<GeometricRaster::ShowcaseWorldSceneBundle>      PreviewSceneBundle   {};
+    std::unique_ptr<GeometricRaster::TieredWorldRenderSequence>     PreviewWorldRenderer {};
+    std::unique_ptr<GeometricRaster::VulkanWorldRenderSequence>     GpuPreviewRenderer   {};
+    std::unique_ptr<ImTextureData>                                  ReaderPreviewTex     {};
     std::vector<std::unique_ptr<ImTextureData>>                  ReaderViewThumbs     {};
     std::vector<uint8_t>                                         ReaderPreviewRgba    {};
     uint32_t                                                     ReaderPreviewW       = 0u;

@@ -13,6 +13,8 @@
 #include "Engine/Components/Controls/DropdownSelector.h"
 #include "Engine/Components/Controls/ExclusiveSelector.h"
 #include "Engine/Configuration/ProjectSpaceRepository.h"
+#include "Engine/GeometricRaster/GlobalIllumination/VulkanWorldRenderSequence.h"
+#include "Engine/GeometricRaster/VulkanInterchange.h"
 
 #include <imgui.h>
 
@@ -295,6 +297,27 @@ void ProjectBrowser::ReleaseGpuTextures() noexcept
         }
     }
     ReaderViewThumbs.clear();
+    GpuPreviewRenderer.reset();
+}
+
+void ProjectBrowser::AttachVulkanWorldRenderer(
+    GeometricRaster::VulkanInterchange* DeviceInterchange,
+    const std::filesystem::path&        CompiledShaderDirectory)
+{
+    GpuPreviewRenderer.reset();
+    if (DeviceInterchange == nullptr || !DeviceInterchange->Ready())
+    {
+        return;
+    }
+    auto Candidate = std::make_unique<GeometricRaster::VulkanWorldRenderSequence>();
+    if (Candidate->InitializeSequence(*DeviceInterchange, CompiledShaderDirectory))
+    {
+        GpuPreviewRenderer = std::move(Candidate);
+        if (PreviewSceneBundle != nullptr)
+        {
+            GpuPreviewRenderer->SynchronizeSceneResources(PreviewSceneBundle->Scene, nullptr, true);
+        }
+    }
 }
 
 void ProjectBrowser::AssignLaunchWorkspaceCallback(LaunchWorkspaceCallback Callback)
@@ -314,7 +337,14 @@ void ProjectBrowser::EnsurePreviewRendererReady()
         PreviewSceneBundle   = std::make_unique<GeometricRaster::ShowcaseWorldSceneBundle>();
         PreviewWorldRenderer = std::make_unique<GeometricRaster::TieredWorldRenderSequence>();
         GeometricRaster::BuildShowcaseGalleryScene(*PreviewSceneBundle, 320u, 194u);
-        PreviewWorldRenderer->PrepareWorldScene(PreviewSceneBundle->Scene);
+        if (GpuPreviewRenderer != nullptr && GpuPreviewRenderer->QueryReady())
+        {
+            GpuPreviewRenderer->SynchronizeSceneResources(PreviewSceneBundle->Scene, nullptr, true);
+        }
+        else
+        {
+            PreviewWorldRenderer->PrepareWorldScene(PreviewSceneBundle->Scene);
+        }
     }
 }
 
@@ -351,33 +381,52 @@ void ProjectBrowser::RenderThumbnailForEntry(BrowserCollectionEntry& Entry, uint
         break;
     }
 
-    auto Frame = PreviewWorldRenderer->RenderWorldFrame(
-        GeometricRaster::WorldRenderTier::Tier1GtxCalibrated,
-        Cam,
-        Cam,
-        PreviewSceneBundle->Scene);
+    std::vector<uint8_t> DisplayRgba {};
+    uint32_t             OutW        = Cam.ViewportWidthPx;
+    uint32_t             OutH        = Cam.ViewportHeightPx;
+    bool                 GpuRendered = false;
+    if (GpuPreviewRenderer != nullptr && GpuPreviewRenderer->QueryReady())
+    {
+        GpuRendered = GpuPreviewRenderer->RenderWorldViewportRgba8(
+            GeometricRaster::WorldRenderTier::Tier1GtxCalibrated,
+            Cam,
+            PreviewSceneBundle->Scene,
+            0u,
+            DisplayRgba);
+    }
+    if (!GpuRendered)
+    {
+        auto CpuOutput = PreviewWorldRenderer->RenderWorldFrame(
+            GeometricRaster::WorldRenderTier::Tier1GtxCalibrated,
+            Cam,
+            Cam,
+            PreviewSceneBundle->Scene);
+        OutW        = CpuOutput.WidthPx;
+        OutH        = CpuOutput.HeightPx;
+        DisplayRgba = std::move(CpuOutput.DisplayRgba8);
+    }
 
     // Subtle UV grid accent overlay on UV/Geometry entries so Geometry vs Project formats read distinctly at a glance
-    if (Entry.Category == BrowserEntryCategory::Geometry && Frame.WidthPx > 0u && Frame.HeightPx > 0u)
+    if (Entry.Category == BrowserEntryCategory::Geometry && OutW > 0u && OutH > 0u)
     {
-        for (uint32_t Py = 0u; Py < Frame.HeightPx; ++Py)
+        for (uint32_t Py = 0u; Py < OutH; ++Py)
         {
-            for (uint32_t Px = 0u; Px < Frame.WidthPx; ++Px)
+            for (uint32_t Px = 0u; Px < OutW; ++Px)
             {
                 if ((Px % 22u == 0u) || (Py % 22u == 0u))
                 {
-                    const std::size_t Off = (static_cast<std::size_t>(Py) * Frame.WidthPx + Px) * 4u;
-                    Frame.DisplayRgba8[Off + 0u] = static_cast<uint8_t>((Frame.DisplayRgba8[Off + 0u] * 3u + 160u) / 4u);
-                    Frame.DisplayRgba8[Off + 1u] = static_cast<uint8_t>((Frame.DisplayRgba8[Off + 1u] * 3u + 190u) / 4u);
-                    Frame.DisplayRgba8[Off + 2u] = static_cast<uint8_t>((Frame.DisplayRgba8[Off + 2u] * 3u + 175u) / 4u);
+                    const std::size_t Off = (static_cast<std::size_t>(Py) * OutW + Px) * 4u;
+                    DisplayRgba[Off + 0u] = static_cast<uint8_t>((DisplayRgba[Off + 0u] * 3u + 160u) / 4u);
+                    DisplayRgba[Off + 1u] = static_cast<uint8_t>((DisplayRgba[Off + 1u] * 3u + 190u) / 4u);
+                    DisplayRgba[Off + 2u] = static_cast<uint8_t>((DisplayRgba[Off + 2u] * 3u + 175u) / 4u);
                 }
             }
         }
     }
 
-    Entry.ThumbnailRgba = std::move(Frame.DisplayRgba8);
-    Entry.ThumbnailW    = Frame.WidthPx;
-    Entry.ThumbnailH    = Frame.HeightPx;
+    Entry.ThumbnailRgba = std::move(DisplayRgba);
+    Entry.ThumbnailW    = OutW;
+    Entry.ThumbnailH    = OutH;
     if (Entry.ThumbnailTex == nullptr)
     {
         Entry.ThumbnailTex = std::make_unique<ImTextureData>();
@@ -406,15 +455,35 @@ void ProjectBrowser::RefreshReaderPreviewTexture()
     };
     Cam.TargetPoint = { 0.00f, 0.48f, 0.08f };
 
-    auto Frame = PreviewWorldRenderer->RenderWorldFrame(
-        GeometricRaster::WorldRenderTier::Tier1GtxCalibrated,
-        Cam,
-        Cam,
-        PreviewSceneBundle->Scene);
+    std::vector<uint8_t> MainRgba {};
+    uint32_t             MainW    = Cam.ViewportWidthPx;
+    uint32_t             MainH    = Cam.ViewportHeightPx;
+    bool                 GpuReady = (GpuPreviewRenderer != nullptr && GpuPreviewRenderer->QueryReady());
+    bool                 MainDone = false;
+    if (GpuReady)
+    {
+        MainDone = GpuPreviewRenderer->RenderWorldViewportRgba8(
+            GeometricRaster::WorldRenderTier::Tier1GtxCalibrated,
+            Cam,
+            PreviewSceneBundle->Scene,
+            0u,
+            MainRgba);
+    }
+    if (!MainDone)
+    {
+        auto CpuOutput = PreviewWorldRenderer->RenderWorldFrame(
+            GeometricRaster::WorldRenderTier::Tier1GtxCalibrated,
+            Cam,
+            Cam,
+            PreviewSceneBundle->Scene);
+        MainW    = CpuOutput.WidthPx;
+        MainH    = CpuOutput.HeightPx;
+        MainRgba = std::move(CpuOutput.DisplayRgba8);
+    }
 
-    ReaderPreviewRgba = std::move(Frame.DisplayRgba8);
-    ReaderPreviewW    = Frame.WidthPx;
-    ReaderPreviewH    = Frame.HeightPx;
+    ReaderPreviewRgba = std::move(MainRgba);
+    ReaderPreviewW    = MainW;
+    ReaderPreviewH    = MainH;
     if (ReaderPreviewTex == nullptr)
     {
         ReaderPreviewTex = std::make_unique<ImTextureData>();
@@ -439,20 +508,39 @@ void ProjectBrowser::RefreshReaderPreviewTexture()
             0.42f + static_cast<float>(VIdx) * 0.16f,
         };
         ThumbCam.TargetPoint = { 0.00f, 0.48f, 0.08f };
-        const auto ThumbFrame = PreviewWorldRenderer->RenderWorldFrame(
-            GeometricRaster::WorldRenderTier::Tier1GtxCalibrated,
-            ThumbCam,
-            ThumbCam,
-            PreviewSceneBundle->Scene);
+        std::vector<uint8_t> ThumbRgba {};
+        uint32_t             ThumbW    = ThumbCam.ViewportWidthPx;
+        uint32_t             ThumbH    = ThumbCam.ViewportHeightPx;
+        bool                 ThumbDone = false;
+        if (GpuReady)
+        {
+            ThumbDone = GpuPreviewRenderer->RenderWorldViewportRgba8(
+                GeometricRaster::WorldRenderTier::Tier1GtxCalibrated,
+                ThumbCam,
+                PreviewSceneBundle->Scene,
+                0u,
+                ThumbRgba);
+        }
+        if (!ThumbDone)
+        {
+            const auto ThumbOutput = PreviewWorldRenderer->RenderWorldFrame(
+                GeometricRaster::WorldRenderTier::Tier1GtxCalibrated,
+                ThumbCam,
+                ThumbCam,
+                PreviewSceneBundle->Scene);
+            ThumbW    = ThumbOutput.WidthPx;
+            ThumbH    = ThumbOutput.HeightPx;
+            ThumbRgba = ThumbOutput.DisplayRgba8;
+        }
         if (ReaderViewThumbs[VIdx] == nullptr)
         {
             ReaderViewThumbs[VIdx] = std::make_unique<ImTextureData>();
         }
         UploadRgbaToTextureData(
             *ReaderViewThumbs[VIdx],
-            ThumbFrame.DisplayRgba8.data(),
-            ThumbFrame.WidthPx,
-            ThumbFrame.HeightPx);
+            ThumbRgba.data(),
+            ThumbW,
+            ThumbH);
     }
 }
 
@@ -470,7 +558,31 @@ void ProjectBrowser::InitializeDefaultCollection(
     DiskPathInput.Begin(DefaultProjectsDir.generic_string().c_str());
     DiskPathInput.Active = false;
 
-    ReleaseGpuTextures();
+    for (auto& Entry : Collection)
+    {
+        if (Entry.ThumbnailTex != nullptr)
+        {
+            Entry.ThumbnailTex->DestroyPixels();
+            Entry.ThumbnailTex->SetStatus(ImTextureStatus_Destroyed);
+            Entry.ThumbnailTex.reset();
+        }
+    }
+    if (ReaderPreviewTex != nullptr)
+    {
+        ReaderPreviewTex->DestroyPixels();
+        ReaderPreviewTex->SetStatus(ImTextureStatus_Destroyed);
+        ReaderPreviewTex.reset();
+    }
+    for (auto& ViewTex : ReaderViewThumbs)
+    {
+        if (ViewTex != nullptr)
+        {
+            ViewTex->DestroyPixels();
+            ViewTex->SetStatus(ImTextureStatus_Destroyed);
+            ViewTex.reset();
+        }
+    }
+    ReaderViewThumbs.clear();
     Collection.clear();
 
     auto AddSample = [&](

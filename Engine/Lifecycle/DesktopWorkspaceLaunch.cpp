@@ -14,6 +14,7 @@
 #include "Engine/Components/ContentBrowser/ContentBrowserPanel.h"
 #include "Engine/Components/ControlCentre/ControlCentrePanel.h"
 #include "Engine/Components/Docking/WorkspaceDockContainer.h"
+#include "Engine/Components/Panes/WorkspaceAppearance.h"
 #include "Engine/GeometricRaster/VulkanInterchange.h"
 #include "Engine/GeometricRaster/Rasterization/ImGuiOverlayRasterization.h"
 #include "Engine/GeometricRaster/UV/UVWorkspaceRasterizer.h"
@@ -197,26 +198,42 @@ DesktopResourcePaths ResolveDesktopResourcePaths(
     AddPathAndAncestors(FallbackShaderDirectory);
 
     DesktopResourcePaths Resolved { FallbackRepositoryRoot, FallbackShaderDirectory };
+    bool RepoLocated   = false;
+    bool ShaderLocated = false;
     for (const auto& Root : SearchRoots)
     {
-        const bool HasGeometry = std::filesystem::exists(Root / "EngineContent/Geometry/ControlledIntegrator.GeometrySpace");
-        const bool HasFontIndex = std::filesystem::exists(Root / "EngineContent/FontsArchives/FontRepository.FontSpace");
-        if (HasGeometry || HasFontIndex)
+        const bool GeometryPresent  = std::filesystem::exists(Root / "EngineContent/Geometry/ControlledIntegrator.GeometrySpace");
+        const bool FontIndexPresent = std::filesystem::exists(Root / "EngineContent/FontsArchives/FontRepository.FontSpace");
+        if (!RepoLocated && (GeometryPresent || FontIndexPresent))
         {
             Resolved.RepositoryRootPath = Root;
+            RepoLocated                 = true;
         }
 
         const std::filesystem::path ShaderFolder = Root / "CompiledShaders";
-        if (std::filesystem::exists(ShaderFolder / "SurfaceShading.vert.spv") &&
-            std::filesystem::exists(ShaderFolder / "UVTileRasterization.frag.spv"))
+        if (!ShaderLocated &&
+            std::filesystem::exists(ShaderFolder / "SurfaceShading.vert.spv") &&
+            std::filesystem::exists(ShaderFolder / "WorldViewportRadiometricCompute.comp.spv"))
+        {
+            Resolved.CompiledShaderDirectory = ShaderFolder;
+            ShaderLocated                    = true;
+        }
+        else if (!ShaderLocated &&
+                 std::filesystem::exists(ShaderFolder / "SurfaceShading.vert.spv") &&
+                 std::filesystem::exists(ShaderFolder / "UVTileRasterization.frag.spv"))
         {
             Resolved.CompiledShaderDirectory = ShaderFolder;
         }
-        if ((HasGeometry || HasFontIndex) &&
+
+        if (!ShaderLocated && (GeometryPresent || FontIndexPresent) &&
             std::filesystem::exists(Root / "SurfaceShading.vert.spv") &&
             std::filesystem::exists(Root / "UVTileRasterization.frag.spv"))
         {
             Resolved.CompiledShaderDirectory = Root;
+            if (std::filesystem::exists(Root / "WorldViewportRadiometricCompute.comp.spv"))
+            {
+                ShaderLocated = true;
+            }
         }
     }
     return Resolved;
@@ -313,6 +330,13 @@ int LaunchDesktopWorkspace(
         std::fprintf(stderr, "[FrontierHost] Vulkan initialization failed: %s\n", VkDiag.c_str());
         return 1;
     }
+    std::fprintf(
+        stdout,
+        "[FrontierHost] Active Vulkan Adapter: %.*s (Hardware GPU: %s)\n",
+        static_cast<int>(DeviceInterchange.QueryAdapterName().size()),
+        DeviceInterchange.QueryAdapterName().data(),
+        DeviceInterchange.QueryHardwareAccelerated() ? "YES" : "NO (Software ICD)");
+    std::fflush(stdout);
 
 #if FRONTIER_EDITOR_ENABLED
     enum class ActiveHostSurface : uint8_t
@@ -413,6 +437,7 @@ int LaunchDesktopWorkspace(
         {
             return;
         }
+        HostProjectBrowser.AttachVulkanWorldRenderer(&DeviceInterchange, CompiledShaderDir);
         HostProjectBrowser.InitializeDefaultCollection(
             RepositoryRootPath / "Projects",
             RepositoryRootPath,
@@ -435,15 +460,16 @@ int LaunchDesktopWorkspace(
             Lifecycle::EditorStartupConfiguration EditorCfg {};
             EditorCfg.WindowDescriptor = Windowing::WindowConfigurationDescriptor::ConstructApplicationWindow(
                 InitialOptions.WindowTitle, InitialOptions.InitialWidthPx, InitialOptions.InitialHeightPx);
-            EditorCfg.FontRepositoryRoot    = RepositoryRootPath / "EngineContent/FontsArchives";
-            EditorCfg.ProjectSpacePath      = ProjectSpaceFile.empty() ? InitialOptions.StartupProjectSpacePath : ProjectSpaceFile;
-            EditorCfg.PopulateShowcaseScene = true;
+            EditorCfg.FontRepositoryRoot      = RepositoryRootPath / "EngineContent/FontsArchives";
+            EditorCfg.ProjectSpacePath        = ProjectSpaceFile.empty() ? InitialOptions.StartupProjectSpacePath : ProjectSpaceFile;
+            EditorCfg.PopulateShowcaseScene   = true;
+            EditorCfg.VulkanDevice            = &DeviceInterchange;
+            EditorCfg.CompiledShaderDirectory = CompiledShaderDir;
             if (!EditorLoop.Initialize(EditorCfg))
             {
                 std::fprintf(stderr, "[FrontierHost] EditorLifecycle initialization failed.\n");
                 return false;
             }
-            (void)EditorLoop.AttachVulkanGizmoOverlay(&DeviceInterchange, CompiledShaderDir);
             EditorLoop.AssignReturnToProjectBrowserCallback(
                 [&]()
                 {
@@ -702,20 +728,35 @@ int LaunchDesktopWorkspace(
         }
         else
         {
+            const float UvUiScale = std::clamp(StandaloneControlCentre.QueryInterfaceScaleFactor(), 0.75f, 2.0f);
             Components::ConfigureImGuiWorkspaceTheme(
                 StandaloneDock.ActiveTabMetrics(),
                 StandaloneControlCentre.QueryThemeRepository());
+            auto& UvBrowserPanel = StandaloneBrowser.AccessPanel();
+            UvBrowserPanel.SynchronizeHostBounds(FullBounds, UvUiScale);
+            if (StandaloneControlCentre.QueryOpen())
+            {
+                WorkspaceAppearance::AssignOverlayPointerShield(FullBounds);
+            }
+            else
+            {
+                WorkspaceAppearance::AssignOverlayPointerShield(
+                    UvBrowserPanel.QueryDrawerPhysicalBounds(),
+                    UvBrowserPanel.QueryNotchPhysicalBounds());
+            }
             StandaloneDock.PresentWindowImGuiPanes(Components::HostWindowToken{ 0u });
-            StandaloneBrowser.Render(FullBounds, Dt, 1.0f);
+            WorkspaceAppearance::ClearOverlayPointerShield();
+            StandaloneBrowser.Render(FullBounds, Dt, UvUiScale);
             StandaloneControlCentre.Render(FullBounds, Dt, static_cast<float>(1.0 / Dt));
 
             if (!StandaloneControlCentre.QueryOpen())
             {
-                PixelSpace TopOverlay(ImGui::GetForegroundDrawList(), Point2D{ 0.0f, 0.0f }, 1.0f);
+                PixelSpace TopOverlay(ImGui::GetForegroundDrawList(), Point2D{ 0.0f, 0.0f }, UvUiScale);
                 const Point2D MouseLogical = TopOverlay.QueryMousePosition();
                 ControlPointer Ptr { MouseLogical.X, MouseLogical.Y, TopOverlay.QueryMouseDown(0), TopOverlay.QueryMouseClicked(0), TopOverlay.QueryMouseReleased(0) };
                 ButtonDescriptor Desc { "Projects", ButtonTone::Secondary, 10.5f, 12.0f };
-                if (CapsuleButton::Construct(TopOverlay, { std::max(320.0f, static_cast<float>(SurfaceW) * 0.5f + 98.0f), 3.0f, 82.0f, 23.0f }, Desc, Ptr).Pressed)
+                const float LogicalW = FullBounds.Width / UvUiScale;
+                if (CapsuleButton::Construct(TopOverlay, { std::max(320.0f, LogicalW * 0.5f + 98.0f), 3.0f, 82.0f, 23.0f }, Desc, Ptr).Pressed)
                 {
                     EnsureProjectBrowserReady();
                     CurrentSurface = ActiveHostSurface::ProjectBrowserSurface;
@@ -723,11 +764,24 @@ int LaunchDesktopWorkspace(
             }
         }
 #else
+        const float UvUiScale = std::clamp(StandaloneControlCentre.QueryInterfaceScaleFactor(), 0.75f, 2.0f);
         Components::ConfigureImGuiWorkspaceTheme(
             StandaloneDock.ActiveTabMetrics(),
             StandaloneControlCentre.QueryThemeRepository());
+        StandaloneBrowserPanel.SynchronizeHostBounds(FullBounds, UvUiScale);
+        if (StandaloneControlCentre.QueryOpen())
+        {
+            WorkspaceAppearance::AssignOverlayPointerShield(FullBounds);
+        }
+        else
+        {
+            WorkspaceAppearance::AssignOverlayPointerShield(
+                StandaloneBrowserPanel.QueryDrawerPhysicalBounds(),
+                StandaloneBrowserPanel.QueryNotchPhysicalBounds());
+        }
         StandaloneDock.PresentWindowImGuiPanes(Components::HostWindowToken{ 0u });
-        StandaloneBrowserPanel.Render(FullBounds, Dt, 1.0f);
+        WorkspaceAppearance::ClearOverlayPointerShield();
+        StandaloneBrowserPanel.Render(FullBounds, Dt, UvUiScale);
         StandaloneControlCentre.Render(FullBounds, Dt, static_cast<float>(1.0 / Dt));
 #endif
         ImGui::Render();

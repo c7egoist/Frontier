@@ -247,6 +247,10 @@ bool EditorLifecycle::Initialize(const EditorStartupConfiguration& Configuration
 
     Initialized = true;
     AttachForceFieldAuthoringToActivePanes();
+    if (StartupConfig.VulkanDevice != nullptr && !StartupConfig.CompiledShaderDirectory.empty())
+    {
+        (void)AttachVulkanGizmoOverlay(StartupConfig.VulkanDevice, StartupConfig.CompiledShaderDirectory);
+    }
     if (StartupConfig.PopulateShowcaseScene)
     {
         PopulateShowcaseGallerySession();
@@ -438,7 +442,12 @@ void EditorLifecycle::AttachForceFieldAuthoringToActivePanes()
                     }
                     const auto Pos = GeometricRaster::RaycastShowcasePlacementAtUv(*ShowcaseBundle, 0.50f, 0.72f, 0.36f);
                     (void)GeometricRaster::ConstructShowcasePrimitiveInOutliner(ActivePanes->Outliner, *ShowcaseBundle, Shape, Pos);
-                    if (ShowcaseRenderer != nullptr)
+                    RtxLatticePrepared = false;
+                    if (GpuWorldRenderer != nullptr && GpuWorldRenderer->QueryReady())
+                    {
+                        GpuWorldRenderer->SynchronizeSceneResources(ShowcaseBundle->Scene, nullptr, true);
+                    }
+                    else if (ShowcaseRenderer != nullptr)
                     {
                         ShowcaseRenderer->PrepareWorldScene(ShowcaseBundle->Scene);
                     }
@@ -580,15 +589,39 @@ bool EditorLifecycle::AttachVulkanGizmoOverlay(
     {
         return false;
     }
-    WorldGizmoRasterizer = std::make_unique<GeometricRaster::WorldGizmoOverlayRasterization>();
-    if (!WorldGizmoRasterizer->InitializeOverlay(BoundDevice, CompiledShaderDirectory))
+
+    if (GpuWorldRenderer == nullptr || !GpuWorldRenderer->QueryReady())
     {
-        WorldGizmoRasterizer.reset();
-        return false;
+        auto CandidateWorldGpu = std::make_unique<GeometricRaster::VulkanWorldRenderSequence>();
+        if (CandidateWorldGpu->InitializeSequence(*BoundDevice, CompiledShaderDirectory))
+        {
+            GpuWorldRenderer = std::move(CandidateWorldGpu);
+            if (ShowcaseBundle != nullptr)
+            {
+                GpuWorldRenderer->SynchronizeSceneResources(
+                    ShowcaseBundle->Scene,
+                    (ShowcaseRenderer != nullptr && RtxLatticePrepared) ? &ShowcaseRenderer->InspectIrradianceLattice() : nullptr,
+                    true);
+            }
+        }
     }
+
+    if (WorldGizmoRasterizer == nullptr || !WorldGizmoRasterizer->QueryReady())
+    {
+        WorldGizmoRasterizer = std::make_unique<GeometricRaster::WorldGizmoOverlayRasterization>();
+        if (!WorldGizmoRasterizer->InitializeOverlay(BoundDevice, CompiledShaderDirectory))
+        {
+            WorldGizmoRasterizer.reset();
+            return false;
+        }
+    }
+
     WorldTransformGizmo.ConfigureDimensionMode(Editor::GizmoDimensionMode::Spatial3D);
     WorldTransformGizmo.ConfigureHandleFilter(Editor::GizmoHandleFilter::Universal);
-    RefreshShowcaseViewportRaster();
+    if (ShowcaseBundle != nullptr)
+    {
+        RefreshShowcaseViewportRaster();
+    }
     return true;
 }
 
@@ -617,13 +650,25 @@ void EditorLifecycle::PopulateShowcaseGallerySession(uint32_t RenderWidthPx, uin
         return;
     }
 
-    ShowcaseBundle   = std::make_unique<GeometricRaster::ShowcaseWorldSceneBundle>();
-    ShowcaseRenderer = std::make_unique<GeometricRaster::TieredWorldRenderSequence>();
+    ShowcaseBundle     = std::make_unique<GeometricRaster::ShowcaseWorldSceneBundle>();
+    ShowcaseRenderer   = std::make_unique<GeometricRaster::TieredWorldRenderSequence>();
+    RtxLatticePrepared = false;
+    CachedWorldRgba8.clear();
+    CachedWorldWidthPx  = 0u;
+    CachedWorldHeightPx = 0u;
     WorldTransformGizmo.ConfigureDimensionMode(Editor::GizmoDimensionMode::Spatial3D);
     WorldTransformGizmo.ConfigureHandleFilter(Editor::GizmoHandleFilter::Universal);
 
     GeometricRaster::BuildShowcaseGalleryScene(*ShowcaseBundle, RenderWidthPx, RenderHeightPx);
-    ShowcaseRenderer->PrepareWorldScene(ShowcaseBundle->Scene);
+    if (GpuWorldRenderer != nullptr && GpuWorldRenderer->QueryReady())
+    {
+        GpuWorldRenderer->SynchronizeSceneResources(ShowcaseBundle->Scene, nullptr, true);
+    }
+    else
+    {
+        ShowcaseRenderer->PrepareWorldScene(ShowcaseBundle->Scene);
+        RtxLatticePrepared = true;
+    }
     GeometricRaster::RegisterShowcaseGalleryInOutliner(Panes->Outliner, *ShowcaseBundle, true);
     Panes->Viewport.ConfigureSceneTitle(
         ActiveProjectTitle.empty() ? "Cornell-Studio Gallery" : (ActiveProjectTitle + " · Cornell-Studio Gallery"));
@@ -852,27 +897,29 @@ void EditorLifecycle::HandleShowcaseViewportInteraction(
     }
 
     // 2. Gizmo & Frame-Selection Keyboard Shortcuts (when not flying RMB and not typing in text fields)
+    bool GizmoOverlayOnly = false;
+    bool GizmoDragEnded   = false;
     if (!RightHeld && !Io.WantTextInput)
     {
         if (ImGui::IsKeyPressed(ImGuiKey_W, false))
         {
             WorldTransformGizmo.ConfigureHandleFilter(Editor::GizmoHandleFilter::TranslateOnly);
-            SceneChanged = true;
+            GizmoOverlayOnly = true;
         }
         else if (ImGui::IsKeyPressed(ImGuiKey_E, false))
         {
             WorldTransformGizmo.ConfigureHandleFilter(Editor::GizmoHandleFilter::RotateOnly);
-            SceneChanged = true;
+            GizmoOverlayOnly = true;
         }
         else if (ImGui::IsKeyPressed(ImGuiKey_R, false))
         {
             WorldTransformGizmo.ConfigureHandleFilter(Editor::GizmoHandleFilter::ScaleOnly);
-            SceneChanged = true;
+            GizmoOverlayOnly = true;
         }
         else if (ImGui::IsKeyPressed(ImGuiKey_U, false))
         {
             WorldTransformGizmo.ConfigureHandleFilter(Editor::GizmoHandleFilter::Universal);
-            SceneChanged = true;
+            GizmoOverlayOnly = true;
         }
         else if (ImGui::IsKeyPressed(ImGuiKey_F, false))
         {
@@ -917,6 +964,7 @@ void EditorLifecycle::HandleShowcaseViewportInteraction(
         {
             WorldTransformGizmo.EndDragInteraction();
             CameraInteractiveDrag = false;
+            GizmoDragEnded        = true;
             SceneChanged          = true;
         }
     }
@@ -932,7 +980,7 @@ void EditorLifecycle::HandleShowcaseViewportInteraction(
         if (Hovered != WorldTransformGizmo.QueryHoveredHandle())
         {
             WorldTransformGizmo.AssignHoveredHandle(Hovered);
-            SceneChanged = true;
+            GizmoOverlayOnly = true;
         }
 
         if (Input.PrimaryPointer.Pressed)
@@ -946,7 +994,7 @@ void EditorLifecycle::HandleShowcaseViewportInteraction(
                     GizmoActiveTransform.Scale    = { SelectedEntry->ScaleX, SelectedEntry->ScaleY, SelectedEntry->ScaleZ };
                     (void)WorldTransformGizmo.BeginDragInteraction(Hovered, CursorRay, GizmoActiveTransform, Right, Up);
                     CameraInteractiveDrag = true;
-                    SceneChanged          = true;
+                    GizmoOverlayOnly      = true;
                 }
             }
             else
@@ -960,7 +1008,7 @@ void EditorLifecycle::HandleShowcaseViewportInteraction(
                 {
                     Panes->Outliner.SelectSingle(Picked);
                     SynchronizeShowcaseGizmoAnchor();
-                    SceneChanged = true;
+                    GizmoOverlayOnly = true;
                 }
             }
         }
@@ -979,13 +1027,32 @@ void EditorLifecycle::HandleShowcaseViewportInteraction(
 
     if (CameraMoved || SceneChanged)
     {
-        bool NeedsPrep = false;
-        (void)GeometricRaster::SynchronizeShowcaseGallerySceneLive(Panes->Outliner, *ShowcaseBundle, NeedsPrep);
-        if (NeedsPrep && ShowcaseRenderer != nullptr)
+        const bool FastDrag = WorldTransformGizmo.QueryDragging();
+        bool NeedsPrep      = false;
+        (void)GeometricRaster::SynchronizeShowcaseGallerySceneLive(Panes->Outliner, *ShowcaseBundle, NeedsPrep, !FastDrag);
+        if (GizmoDragEnded)
         {
-            ShowcaseRenderer->PrepareWorldScene(ShowcaseBundle->Scene);
+            GeometricRaster::RebuildShowcaseSceneAcceleration(*ShowcaseBundle, true);
+            NeedsPrep = true;
+        }
+        if (NeedsPrep)
+        {
+            RtxLatticePrepared = false;
+            if (GpuWorldRenderer != nullptr && GpuWorldRenderer->QueryReady())
+            {
+                GpuWorldRenderer->SynchronizeSceneResources(ShowcaseBundle->Scene, nullptr, !FastDrag);
+            }
+            else if (ShowcaseRenderer != nullptr)
+            {
+                ShowcaseRenderer->PrepareWorldScene(ShowcaseBundle->Scene);
+                RtxLatticePrepared = true;
+            }
         }
         RefreshShowcaseViewportRaster();
+    }
+    else if (GizmoOverlayOnly)
+    {
+        RefreshGizmoOverlayFromCachedWorld();
     }
 }
 
@@ -1023,15 +1090,48 @@ void EditorLifecycle::SynchronizeContentBrowserColourTargets()
                 AssignedColor,
                 SwatchEntry.AliasName))
         {
-            if (ShowcaseRenderer != nullptr)
+            RtxLatticePrepared = false;
+            if (GpuWorldRenderer != nullptr && GpuWorldRenderer->QueryReady())
+            {
+                GpuWorldRenderer->SynchronizeSceneResources(ShowcaseBundle->Scene, nullptr, false);
+            }
+            else if (ShowcaseRenderer != nullptr)
             {
                 ShowcaseRenderer->PrepareWorldScene(ShowcaseBundle->Scene);
+                RtxLatticePrepared = true;
             }
             RefreshShowcaseViewportRaster();
         }
     };
     BrowserPanel.RegisterColourSlot(WorldSlot);
     BrowserPanel.FocusColourSlot("ActiveWorldSurfaceColour");
+}
+
+void EditorLifecycle::RefreshGizmoOverlayFromCachedWorld()
+{
+    WorkspaceSessionPanes* Panes = Workspaces.AccessActivePanes();
+    if (Panes == nullptr || ShowcaseBundle == nullptr)
+    {
+        return;
+    }
+    if (CachedWorldRgba8.empty() || CachedWorldWidthPx == 0u || CachedWorldHeightPx == 0u)
+    {
+        RefreshShowcaseViewportRaster();
+        return;
+    }
+
+    SynchronizeShowcaseGizmoAnchor();
+    std::vector<uint8_t> ViewportRgba = CachedWorldRgba8;
+    if (WorldGizmoRasterizer != nullptr && WorldGizmoRasterizer->QueryReady() && LastGizmoSlot.Valid())
+    {
+        (void)WorldGizmoRasterizer->RasterizeGizmoOntoWorldBuffer(
+            ViewportRgba,
+            CachedWorldWidthPx,
+            CachedWorldHeightPx,
+            ShowcaseBundle->EditorCamera,
+            WorldTransformGizmo);
+    }
+    Panes->Viewport.AssignCanvasRasterImage(ViewportRgba.data(), CachedWorldWidthPx, CachedWorldHeightPx);
 }
 
 void EditorLifecycle::RefreshShowcaseViewportRaster()
@@ -1042,42 +1142,100 @@ void EditorLifecycle::RefreshShowcaseViewportRaster()
         return;
     }
 
+    const auto& DisplayCfg = Panes->Viewport.QueryDisplaySettings();
+    const bool  GpuReady   = (GpuWorldRenderer != nullptr && GpuWorldRenderer->QueryReady());
+    const bool  HwGpu      = GpuReady && GpuWorldRenderer->QueryHardwareGpuActive();
+
     const Rectangle2D CanvasBounds = Panes->Viewport.QueryLastCanvasPaneBounds();
     if (CanvasBounds.Width >= 120.0f && CanvasBounds.Height >= 90.0f)
     {
-        const float Aspect = std::clamp(CanvasBounds.Width / CanvasBounds.Height, 0.5f, 3.2f);
-        const uint32_t BaseW = CameraInteractiveDrag ? 384u : 640u;
-        const uint32_t BaseH = std::max(180u, static_cast<uint32_t>(std::round(static_cast<float>(BaseW) / Aspect)));
-        ShowcaseBundle->EditorCamera.ViewportWidthPx  = BaseW;
-        ShowcaseBundle->EditorCamera.ViewportHeightPx = BaseH;
+        const float Aspect    = std::clamp(CanvasBounds.Width / CanvasBounds.Height, 0.5f, 3.2f);
+        const float ScaleNorm = std::clamp(DisplayCfg.RenderScalePercent / 100.0f, 0.50f, 1.25f);
+        uint32_t    RasterW   = 384u;
+        if (HwGpu)
+        {
+            const float TargetW = (CameraInteractiveDrag ? 680.0f : 960.0f) * ScaleNorm;
+            RasterW             = static_cast<uint32_t>(std::clamp(std::round(TargetW), 420.0f, 1280.0f));
+        }
+        else if (GpuReady)
+        {
+            RasterW = CameraInteractiveDrag ? 280u : 384u;
+        }
+        else
+        {
+            RasterW = CameraInteractiveDrag ? 280u : 384u;
+        }
+        uint32_t RasterH = std::max(180u, static_cast<uint32_t>(std::round(static_cast<float>(RasterW) / Aspect)));
+        RasterW          = std::max(240u, static_cast<uint32_t>(std::round(static_cast<float>(RasterH) * Aspect)));
+        ShowcaseBundle->EditorCamera.ViewportWidthPx  = RasterW;
+        ShowcaseBundle->EditorCamera.ViewportHeightPx = RasterH;
+    }
+    else if (!HwGpu)
+    {
+        ShowcaseBundle->EditorCamera.ViewportWidthPx  = 320u;
+        ShowcaseBundle->EditorCamera.ViewportHeightPx = 190u;
     }
 
-    const auto& DisplayCfg = Panes->Viewport.QueryDisplaySettings();
-    const auto  ActiveTier = (DisplayCfg.QualityTier >= 4u)
-                                 ? GeometricRaster::WorldRenderTier::Tier2RtxDeterministic
-                                 : GeometricRaster::WorldRenderTier::Tier1GtxCalibrated;
+    const auto ActiveTier = (DisplayCfg.QualityTier >= 4u)
+                                ? GeometricRaster::WorldRenderTier::Tier2RtxDeterministic
+                                : GeometricRaster::WorldRenderTier::Tier1GtxCalibrated;
 
-    auto GtxFrame = ShowcaseRenderer->RenderWorldFrame(
-        ActiveTier,
-        ShowcaseBundle->EditorCamera,
-        ShowcaseBundle->EditorCamera,
-        ShowcaseBundle->Scene);
+    if (ActiveTier == GeometricRaster::WorldRenderTier::Tier2RtxDeterministic && !RtxLatticePrepared)
+    {
+        ShowcaseRenderer->PrepareWorldScene(ShowcaseBundle->Scene);
+        RtxLatticePrepared = true;
+        if (GpuReady)
+        {
+            GpuWorldRenderer->SynchronizeSceneResources(
+                ShowcaseBundle->Scene,
+                &ShowcaseRenderer->InspectIrradianceLattice(),
+                false);
+        }
+    }
+
+    std::vector<uint8_t> CleanWorldRgba {};
+    uint32_t             OutWidthPx     = ShowcaseBundle->EditorCamera.ViewportWidthPx;
+    uint32_t             OutHeightPx    = ShowcaseBundle->EditorCamera.ViewportHeightPx;
+    bool                 RenderedOnGpu  = false;
+
+    if (GpuReady)
+    {
+        RenderedOnGpu = GpuWorldRenderer->RenderWorldViewportRgba8(
+            ActiveTier,
+            ShowcaseBundle->EditorCamera,
+            ShowcaseBundle->Scene,
+            DisplayCfg.DebugChannelIndex,
+            CleanWorldRgba);
+    }
+
+    if (!RenderedOnGpu)
+    {
+        auto CpuOutput = ShowcaseRenderer->RenderWorldFrame(
+            ActiveTier,
+            ShowcaseBundle->EditorCamera,
+            ShowcaseBundle->EditorCamera,
+            ShowcaseBundle->Scene);
+        OutWidthPx     = CpuOutput.WidthPx;
+        OutHeightPx    = CpuOutput.HeightPx;
+        CleanWorldRgba = std::move(CpuOutput.DisplayRgba8);
+    }
+
+    CachedWorldRgba8    = CleanWorldRgba;
+    CachedWorldWidthPx  = OutWidthPx;
+    CachedWorldHeightPx = OutHeightPx;
 
     SynchronizeShowcaseGizmoAnchor();
     if (WorldGizmoRasterizer != nullptr && WorldGizmoRasterizer->QueryReady() && LastGizmoSlot.Valid())
     {
         (void)WorldGizmoRasterizer->RasterizeGizmoOntoWorldBuffer(
-            GtxFrame.DisplayRgba8,
-            GtxFrame.WidthPx,
-            GtxFrame.HeightPx,
+            CleanWorldRgba,
+            OutWidthPx,
+            OutHeightPx,
             ShowcaseBundle->EditorCamera,
             WorldTransformGizmo);
     }
 
-    Panes->Viewport.AssignCanvasRasterImage(
-        GtxFrame.DisplayRgba8.data(),
-        GtxFrame.WidthPx,
-        GtxFrame.HeightPx);
+    Panes->Viewport.AssignCanvasRasterImage(CleanWorldRgba.data(), OutWidthPx, OutHeightPx);
 
     const float SunElevDeg = std::asin(std::clamp(ShowcaseBundle->Scene.Sun.DirectionToSun.Z, -1.0f, 1.0f)) * 57.2957795f;
     uint32_t    ActiveLtc  = 0u;
@@ -1090,8 +1248,22 @@ void EditorLifecycle::RefreshShowcaseViewportRaster()
     }
 
     OutlinerFooterReadings Footer {};
-    Footer.RealtimeText  = "60 fps";
-    Footer.QualityText   = (ActiveTier == GeometricRaster::WorldRenderTier::Tier2RtxDeterministic) ? "RTX Tier 2" : "GTX Tier 1";
+    if (RenderedOnGpu)
+    {
+        const float GpuMs  = std::max(0.2f, GpuWorldRenderer->QueryLastDispatchMilliseconds());
+        const int   EstFps = std::clamp(static_cast<int>(std::lround(1000.0f / std::max(4.16f, GpuMs))), 1, 240);
+        char FpsBuf[32]{};
+        std::snprintf(FpsBuf, sizeof(FpsBuf), "%d fps", EstFps);
+        Footer.RealtimeText = FpsBuf;
+        Footer.QualityText  = (ActiveTier == GeometricRaster::WorldRenderTier::Tier2RtxDeterministic)
+                                  ? (HwGpu ? "GPU RTX Tier 2" : "VK RTX Tier 2")
+                                  : (HwGpu ? "GPU GTX Tier 1" : "VK GTX Tier 1");
+    }
+    else
+    {
+        Footer.RealtimeText = "CPU GI";
+        Footer.QualityText  = (ActiveTier == GeometricRaster::WorldRenderTier::Tier2RtxDeterministic) ? "RTX Tier 2" : "GTX Tier 1";
+    }
     char SunBuf[32]{};
     std::snprintf(SunBuf, sizeof(SunBuf), "Sun %.0f°", std::max(0.0f, SunElevDeg));
     Footer.PrimarySlot = SunBuf;
@@ -1128,18 +1300,57 @@ bool EditorLifecycle::ExecuteExternalDesktopTick(double Δt)
         if (WorkspaceSessionPanes* Panes = Workspaces.AccessActivePanes())
         {
             const OutlinerSlotToken CurrentSel = Panes->Outliner.QueryPrimarySelection();
+            const Rectangle2D       CanvasRect = Panes->Viewport.QueryLastCanvasPaneBounds();
+            const auto&             DisplayCfg = Panes->Viewport.QueryDisplaySettings();
+            const uint32_t          CurCanvasW = static_cast<uint32_t>(std::max(0.0f, std::round(CanvasRect.Width)));
+            const uint32_t          CurCanvasH = static_cast<uint32_t>(std::max(0.0f, std::round(CanvasRect.Height)));
+            const int32_t           CurScale   = static_cast<int32_t>(std::lround(DisplayCfg.RenderScalePercent));
+            const bool              DisplayChanged =
+                (CurCanvasW >= 120u && CurCanvasH >= 90u &&
+                 (std::abs(static_cast<int>(CurCanvasW) - static_cast<int>(LastCanvasPaneWidth)) > 8 ||
+                  std::abs(static_cast<int>(CurCanvasH) - static_cast<int>(LastCanvasPaneHeight)) > 8)) ||
+                DisplayCfg.QualityTier != LastViewportTier ||
+                DisplayCfg.DebugChannelIndex != LastViewportDebug ||
+                CurScale != LastRenderScalePct;
+
+            if (CurCanvasW >= 120u && CurCanvasH >= 90u)
+            {
+                LastCanvasPaneWidth  = CurCanvasW;
+                LastCanvasPaneHeight = CurCanvasH;
+            }
+            LastViewportTier   = DisplayCfg.QualityTier;
+            LastViewportDebug  = DisplayCfg.DebugChannelIndex;
+            LastRenderScalePct = CurScale;
+
             bool NeedsPrep = false;
             const bool SceneMutated = GeometricRaster::SynchronizeShowcaseGallerySceneLive(
                 Panes->Outliner,
                 *ShowcaseBundle,
-                NeedsPrep);
-            if (NeedsPrep && ShowcaseRenderer != nullptr)
+                NeedsPrep,
+                !WorldTransformGizmo.QueryDragging());
+            if (NeedsPrep)
             {
-                ShowcaseRenderer->PrepareWorldScene(ShowcaseBundle->Scene);
+                RtxLatticePrepared = false;
+                if (GpuWorldRenderer != nullptr && GpuWorldRenderer->QueryReady())
+                {
+                    GpuWorldRenderer->SynchronizeSceneResources(
+                        ShowcaseBundle->Scene,
+                        nullptr,
+                        !WorldTransformGizmo.QueryDragging());
+                }
+                else if (ShowcaseRenderer != nullptr)
+                {
+                    ShowcaseRenderer->PrepareWorldScene(ShowcaseBundle->Scene);
+                    RtxLatticePrepared = true;
+                }
             }
-            if (SceneMutated || CurrentSel != LastGizmoSlot)
+            if (SceneMutated || DisplayChanged)
             {
                 RefreshShowcaseViewportRaster();
+            }
+            else if (CurrentSel != LastGizmoSlot)
+            {
+                RefreshGizmoOverlayFromCachedWorld();
             }
         }
     }
@@ -1194,7 +1405,37 @@ void EditorLifecycle::PresentPrimaryEditorImGui(double Δt)
 
     Components::ConfigureImGuiWorkspaceTheme(DockContainer.ActiveTabMetrics(), ControlCentre.QueryThemeRepository());
     ContentBrowserDrawer.AttachThemeRepository(&ControlCentre.QueryThemeRepository());
+
+    const float UiScale = std::clamp(ControlCentre.QueryInterfaceScaleFactor(), 0.75f, 2.0f);
+    const Components::HostWindowReading HostReading = DockContainer.InspectHostWindow(Components::HostWindowToken{ 0u });
+    const bool HostValid = HostReading.Active && HostReading.SurfaceExtent.PixelWidth > 0u && HostReading.SurfaceExtent.PixelHeight > 0u;
+    const Rectangle2D Bounds = HostValid
+                                   ? Rectangle2D{
+                                         0.0f,
+                                         0.0f,
+                                         static_cast<float>(HostReading.SurfaceExtent.PixelWidth),
+                                         static_cast<float>(HostReading.SurfaceExtent.PixelHeight),
+                                     }
+                                   : Rectangle2D{};
+
+    if (HostValid)
+    {
+        auto& BrowserPanel = ContentBrowserDrawer.AccessPanel();
+        BrowserPanel.SynchronizeHostBounds(Bounds, UiScale);
+        if (ControlCentre.QueryOpen())
+        {
+            WorkspaceAppearance::AssignOverlayPointerShield(Bounds);
+        }
+        else
+        {
+            WorkspaceAppearance::AssignOverlayPointerShield(
+                BrowserPanel.QueryDrawerPhysicalBounds(),
+                BrowserPanel.QueryNotchPhysicalBounds());
+        }
+    }
+
     DockContainer.PresentWindowImGuiPanes(Components::HostWindowToken{ 0u });
+    WorkspaceAppearance::ClearOverlayPointerShield();
 
     if (WorkspaceSessionPanes* ActivePanes = Workspaces.AccessActivePanes())
     {
@@ -1202,27 +1443,17 @@ void EditorLifecycle::PresentPrimaryEditorImGui(double Δt)
         SynchronizeContentBrowserColourTargets();
     }
 
-    const Components::HostWindowReading HostReading = DockContainer.InspectHostWindow(Components::HostWindowToken{ 0u });
-    if (HostReading.Active && HostReading.SurfaceExtent.PixelWidth > 0u && HostReading.SurfaceExtent.PixelHeight > 0u)
+    if (HostValid)
     {
-        const Rectangle2D Bounds{
-            0.0f,
-            0.0f,
-            static_cast<float>(HostReading.SurfaceExtent.PixelWidth),
-            static_cast<float>(HostReading.SurfaceExtent.PixelHeight),
-        };
         const float RefreshHz = HostReading.SurfaceExtent.RefreshRateHz > 0u
                                     ? static_cast<float>(HostReading.SurfaceExtent.RefreshRateHz)
                                     : 60.0f;
-        const float ScaleFactor = HostReading.SurfaceExtent.DpiScaleFactor > 0.5f
-                                      ? HostReading.SurfaceExtent.DpiScaleFactor
-                                      : 1.0f;
-        ContentBrowserDrawer.Render(Bounds, SafeStep, ScaleFactor);
+        ContentBrowserDrawer.Render(Bounds, SafeStep, UiScale);
         ControlCentre.Render(Bounds, SafeStep, RefreshHz);
 
         if (ReturnToBrowserCallback && !ControlCentre.QueryOpen())
         {
-            PixelSpace TopOverlay(ImGui::GetForegroundDrawList(), Point2D{ 0.0f, 0.0f }, ScaleFactor);
+            PixelSpace TopOverlay(ImGui::GetForegroundDrawList(), Point2D{ 0.0f, 0.0f }, UiScale);
             const Point2D MouseLogical = TopOverlay.QueryMousePosition();
             ControlPointer Ptr {};
             Ptr.X        = MouseLogical.X;
@@ -1231,7 +1462,7 @@ void EditorLifecycle::PresentPrimaryEditorImGui(double Δt)
             Ptr.Pressed  = TopOverlay.QueryMouseClicked(0);
             Ptr.Released = TopOverlay.QueryMouseReleased(0);
 
-            const float LogicalW = Bounds.Width / ScaleFactor;
+            const float LogicalW = Bounds.Width / UiScale;
             const Rectangle2D BtnBounds { std::max(320.0f, LogicalW * 0.5f + 98.0f), 3.0f, 82.0f, 23.0f };
             ButtonDescriptor Desc {};
             Desc.Label    = "Projects";
@@ -1285,7 +1516,9 @@ void EditorLifecycle::Finalize() noexcept
     EditorSequence.Finalize();
     AuthoredForces.clear();
     DefaultForcesFolder = {};
+    CachedWorldRgba8.clear();
     WorldGizmoRasterizer.reset();
+    GpuWorldRenderer.reset();
     ShowcaseRenderer.reset();
     ShowcaseBundle.reset();
     Workspaces.Finalize();

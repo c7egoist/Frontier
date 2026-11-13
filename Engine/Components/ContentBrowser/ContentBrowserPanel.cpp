@@ -739,6 +739,53 @@ float ContentBrowserPanel::QueryVisibleDrawerHeightRatio() const noexcept
     return std::clamp(static_cast<float>(ShelfSpring.Axis(ShelfAxis).Current), 0.0f, 1.0f);
 }
 
+void ContentBrowserPanel::SynchronizeHostBounds(Rectangle2D HostBoundsPhysical, float ScaleFactor) noexcept
+{
+    LastHostBoundsPhysical = HostBoundsPhysical;
+    LastSafeScale          = std::clamp(ScaleFactor, 0.75f, 2.0f);
+}
+
+Rectangle2D ContentBrowserPanel::QueryDrawerPhysicalBounds() const noexcept
+{
+    const float SafeScale      = std::max(0.25f, LastSafeScale);
+    const float LogicalHeight  = LastHostBoundsPhysical.Height / SafeScale;
+    const float Progress       = QueryVisibleDrawerHeightRatio();
+    const float DrawerHLogical = (Progress > 0.005f) ? std::round(LogicalHeight * Progress) : 0.0f;
+    if (DrawerHLogical <= 2.0f)
+    {
+        return {};
+    }
+    const float DrawerHPhys = DrawerHLogical * SafeScale;
+    return {
+        LastHostBoundsPhysical.X,
+        LastHostBoundsPhysical.Bottom() - DrawerHPhys,
+        LastHostBoundsPhysical.Width,
+        DrawerHPhys,
+    };
+}
+
+Rectangle2D ContentBrowserPanel::QueryNotchPhysicalBounds() const noexcept
+{
+    if (DraggingColour || DraggingMatCap)
+    {
+        return {};
+    }
+    const float SafeScale = std::max(0.25f, LastSafeScale);
+    const Rectangle2D LogicalViewport{
+        0.0f,
+        0.0f,
+        LastHostBoundsPhysical.Width / SafeScale,
+        LastHostBoundsPhysical.Height / SafeScale,
+    };
+    const Rectangle2D LogicalNotch = QueryNotchTabBounds(LogicalViewport);
+    return {
+        LastHostBoundsPhysical.X + LogicalNotch.X * SafeScale,
+        LastHostBoundsPhysical.Y + LogicalNotch.Y * SafeScale,
+        LogicalNotch.Width * SafeScale,
+        LogicalNotch.Height * SafeScale,
+    };
+}
+
 float ContentBrowserPanel::QueryDrawerTopPhysicalY() const noexcept
 {
     const float SafeScale      = std::max(0.25f, LastSafeScale);
@@ -2314,6 +2361,13 @@ void ContentBrowserPanel::Render(Rectangle2D HostBoundsPhysical, double DeltaSec
     };
 
     const auto& Snapshot = Input::InputExtension::InspectActiveEditorSnapshot();
+    if (Snapshot.ControlHeld && Snapshot.QueryKeyPressed(Input::InputLogicalKey::Space, false))
+    {
+        ConfigureShelfExtent(
+            TargetExtent == ContentShelfExtent::Closed ? ContentShelfExtent::SplitHalf : ContentShelfExtent::Closed,
+            false);
+    }
+
     if (QueryOpen())
     {
         if (Snapshot.ControlHeld && Snapshot.QueryKeyPressed(Input::InputLogicalKey::F, false))
@@ -2322,6 +2376,10 @@ void ContentBrowserPanel::Render(Rectangle2D HostBoundsPhysical, double DeltaSec
             SearchEditor.Active     = true;
             SearchEditor.BlinkPhase = 0.0f;
             SearchEditor.SelectAll();
+        }
+        else if (!SearchEditor.Active && Snapshot.QueryKeyPressed(Input::InputLogicalKey::Escape, false))
+        {
+            ConfigureShelfExtent(ContentShelfExtent::Closed, false);
         }
 
         if (SearchEditor.Active)
@@ -2378,7 +2436,13 @@ void ContentBrowserPanel::Render(Rectangle2D HostBoundsPhysical, double DeltaSec
     }
 
     ContentBrowserPointerInput Pointer{};
-    const bool                 BlockedByOtherPane = WorkspaceAppearance::QueryPointerBlockedForPane(this);
+    const Point2D              PhysicalCursor{ Snapshot.PositionX, Snapshot.PositionY };
+    const bool                 CursorOnDrawerOrNotch = Snapshot.PointerSeeded && QueryBlocksPointerAt(PhysicalCursor);
+    if (CursorOnDrawerOrNotch && Snapshot.QueryButtonPressed(0u))
+    {
+        WorkspaceAppearance::ResetAllPanePointerOwnership();
+    }
+    const bool BlockedByOtherPane = !CursorOnDrawerOrNotch && WorkspaceAppearance::QueryPointerBlockedForPane(this);
     if (!BlockedByOtherPane)
     {
         Pointer.CursorX       = (Snapshot.PositionX - HostBoundsPhysical.X) / SafeScale;

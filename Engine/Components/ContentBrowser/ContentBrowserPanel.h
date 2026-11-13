@@ -157,7 +157,10 @@ public:
     [[nodiscard]] ContentBrowserReading               InspectReading() const noexcept;
     [[nodiscard]] bool                                QueryOpen() const noexcept;
     [[nodiscard]] bool                                QueryBlocksUnderlyingWorkspace() const noexcept;
+    void SynchronizeHostBounds(Rectangle2D HostBoundsPhysical, float ScaleFactor) noexcept;
     [[nodiscard]] bool                                QueryBlocksPointerAt(Point2D PhysicalCursor) const noexcept;
+    [[nodiscard]] Rectangle2D                         QueryDrawerPhysicalBounds() const noexcept;
+    [[nodiscard]] Rectangle2D                         QueryNotchPhysicalBounds() const noexcept;
     [[nodiscard]] float                               QueryVisibleDrawerHeightRatio() const noexcept;
     [[nodiscard]] float                               QueryDrawerTopPhysicalY() const noexcept;
     [[nodiscard]] Rectangle2D                         MapPhysicalToLogicalBounds(Rectangle2D PhysicalBounds) const noexcept;

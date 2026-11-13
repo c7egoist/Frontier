@@ -873,7 +873,9 @@ void RegisterShowcaseGalleryInOutliner(
     }
 }
 
-void RebuildShowcaseSceneAcceleration(ShowcaseWorldSceneBundle& InOutBundle)
+void RebuildShowcaseSceneAcceleration(
+    ShowcaseWorldSceneBundle& InOutBundle,
+    bool                      RebuildSdfVolume)
 {
     GeometrySpace::PolygonNetwork UnifiedWorldNetwork {};
     for (const ShowcaseWorldObjectEntry& Obj : InOutBundle.Objects)
@@ -895,7 +897,10 @@ void RebuildShowcaseSceneAcceleration(ShowcaseWorldSceneBundle& InOutBundle)
         GeometrySpace::AppendBoxPrimitive(UnifiedWorldNetwork, { 0.0f, 0.20f, -50.0f }, { 0.05f, 0.05f, 0.05f }, {}, {});
     }
     (void)InOutBundle.Scene.SceneTree.BuildFromPolygonNetwork(UnifiedWorldNetwork);
-    (void)InOutBundle.Scene.SceneSdf.BuildFromWideBoundingTree(InOutBundle.Scene.SceneTree, 0.09f, 0.45f);
+    if (RebuildSdfVolume)
+    {
+        (void)InOutBundle.Scene.SceneSdf.BuildFromWideBoundingTree(InOutBundle.Scene.SceneTree, 0.09f, 0.45f);
+    }
 }
 
 bool SynchronizeShowcaseGalleryFromOutliner(
@@ -1017,7 +1022,7 @@ bool SynchronizeShowcaseGalleryFromOutliner(
 
     if (AccelInvalidated)
     {
-        RebuildShowcaseSceneAcceleration(InOutBundle);
+        RebuildShowcaseSceneAcceleration(InOutBundle, true);
     }
 
     return Changed;
@@ -1026,7 +1031,8 @@ bool SynchronizeShowcaseGalleryFromOutliner(
 bool SynchronizeShowcaseGallerySceneLive(
     OutlinerPanel&            InOutOutliner,
     ShowcaseWorldSceneBundle& InOutBundle,
-    bool&                     OutRequiresAccelerationRebuild)
+    bool&                     OutRequiresAccelerationRebuild,
+    bool                      RebuildSdfVolume)
 {
     OutRequiresAccelerationRebuild = false;
     bool Changed                   = false;
@@ -1193,6 +1199,53 @@ bool SynchronizeShowcaseGallerySceneLive(
     }
 
     // 3. Synchronize existing gallery & constructed objects + camera + sun + softbox
+    bool AccelInvalidated = false;
+    for (ShowcaseWorldObjectEntry& Obj : InOutBundle.Objects)
+    {
+        if (!Obj.SlotToken.Valid() || Obj.ClusterInstanceIndex >= InOutBundle.Scene.ClusterInstances.size())
+        {
+            continue;
+        }
+        const OutlinerRecordEntry* Entry = InOutOutliner.FindEntry(Obj.SlotToken);
+        auto&                      Inst  = InOutBundle.Scene.ClusterInstances[Obj.ClusterInstanceIndex];
+
+        const bool  EffectiveVis      = (Entry != nullptr) && InOutOutliner.QueryEffectiveVisibility(Obj.SlotToken);
+        const float AuthoredMaxExtent = std::max(0.05f, std::max({ Obj.AuthoredDimensions.X, Obj.AuthoredDimensions.Y, Obj.AuthoredDimensions.Z }));
+        float       UserScale         = 1.0f;
+        if (Entry != nullptr && Obj.AuthoredDimensions.X > 1.0e-4f)
+        {
+            const float MaxDim = std::max(0.05f, std::max({ Entry->ScaleX, Entry->ScaleY, Entry->ScaleZ }));
+            UserScale          = std::clamp(MaxDim / AuthoredMaxExtent, 0.10f, 8.0f);
+        }
+        const float TargetScale = EffectiveVis ? UserScale : 0.0f;
+        if (!NearlyEqualFloat(Inst.UniformScale, TargetScale))
+        {
+            Inst.UniformScale = TargetScale;
+            Changed           = true;
+            AccelInvalidated  = true;
+        }
+        if (Entry != nullptr)
+        {
+            const Mathematics::Axis3D NextPos{ Entry->PositionX, Entry->PositionY, Entry->PositionZ };
+            if (!NearlyEqualFloat(Inst.WorldTranslation.X, NextPos.X) ||
+                !NearlyEqualFloat(Inst.WorldTranslation.Y, NextPos.Y) ||
+                !NearlyEqualFloat(Inst.WorldTranslation.Z, NextPos.Z))
+            {
+                Inst.PreviousTranslation = Inst.WorldTranslation;
+                Inst.WorldTranslation    = NextPos;
+                Obj.CenterWorld          = NextPos;
+                Changed                  = true;
+                AccelInvalidated         = true;
+            }
+        }
+    }
+
+    if (AccelInvalidated)
+    {
+        RebuildShowcaseSceneAcceleration(InOutBundle, RebuildSdfVolume);
+        OutRequiresAccelerationRebuild = true;
+    }
+
     if (SynchronizeShowcaseGalleryFromOutliner(InOutOutliner, InOutBundle))
     {
         Changed                        = true;

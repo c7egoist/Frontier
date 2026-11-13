@@ -6,6 +6,8 @@
 #include "Engine/Configuration/ProjectGenerator.h"
 #include "Engine/Configuration/ProjectSpaceRepository.h"
 #include "Engine/GeometricRaster/GlobalIllumination/ShowcaseGalleryScene.h"
+#include "Engine/GeometricRaster/GlobalIllumination/VulkanWorldRenderSequence.h"
+#include "Engine/GeometricRaster/VulkanInterchange.h"
 #include "Engine/Lifecycle/ProjectExecutionRunner.h"
 #include "Engine/Workspaces/WorkspaceCapabilityRegister.h"
 
@@ -287,9 +289,220 @@ int main()
         Browser.ReleaseGpuTextures();
         ImGui::DestroyContext(Ctx);
     }
+
+    // 7. Validate ContentBrowser close controls (X button over Inspector, top notch over Viewport, 1.25x UI scale, Escape, Ctrl+Space)
+    {
+        IMGUI_CHECKVERSION();
+        ImGuiContext* Ctx = ImGui::CreateContext();
+        ImGui::SetCurrentContext(Ctx);
+        ImGuiIO& Io    = ImGui::GetIO();
+        Io.DisplaySize = ImVec2(1920.0f, 1080.0f);
+        unsigned char* FontPixels = nullptr;
+        int FontW = 0, FontH = 0;
+        Io.Fonts->GetTexDataAsRGBA32(&FontPixels, &FontW, &FontH);
+
+        Lifecycle::EditorStartupConfiguration EditorCfg {};
+        EditorCfg.HostWidthPx        = 1920u;
+        EditorCfg.HostHeightPx       = 1080u;
+        EditorCfg.FontRepositoryRoot = RepoRoot / "EngineContent/FontsArchives";
+
+        Lifecycle::EditorLifecycle EditorSession {};
+        if (!EditorSession.Initialize(EditorCfg))
+        {
+            std::fprintf(stderr, "[FAIL] EditorLifecycle failed to initialize for ContentBrowser close validation.\n");
+            ImGui::DestroyContext(Ctx);
+            return 1;
+        }
+        EditorSession.PopulateShowcaseGallerySession(160u, 96u);
+
+        auto StepEditorFrame = [&](ImVec2 MousePos, bool ClickDown, bool ClickPrev, double Dt = 1.0 / 60.0)
+        {
+            Io.MousePos     = MousePos;
+            Io.MouseDown[0] = ClickDown;
+            ImGui::NewFrame();
+            if (ClickDown && !ClickPrev)
+            {
+                Io.MouseClicked[0] = true;
+            }
+            EditorSession.PresentPrimaryEditorImGui(Dt);
+            ImGui::Render();
+        };
+
+        auto& Drawer = EditorSession.AccessContentBrowser().AccessPanel();
+
+        // Settle open at SplitHalf
+        Drawer.SetShelfExtent(Components::ContentShelfExtent::SplitHalf, true);
+        StepEditorFrame(ImVec2(100.0f, 100.0f), false, false);
+
+        // (a) Click X close button on right side (directly over docked InspectorPanel at X ~ 1879, Y ~ 562)
+        const Components::Rectangle2D SplitPhys = Drawer.QueryDrawerPhysicalBounds();
+        const ImVec2 CloseBtnCenter(SplitPhys.Right() - 41.0f, SplitPhys.Y + 22.0f);
+        StepEditorFrame(CloseBtnCenter, true, false);
+        StepEditorFrame(CloseBtnCenter, false, true);
+        if (Drawer.QueryTargetShelfExtent() != Components::ContentShelfExtent::Closed)
+        {
+            std::fprintf(stderr, "[FAIL] Clicking ContentBrowser X button over InspectorPanel failed to close drawer.\n");
+            EditorSession.Finalize();
+            ImGui::DestroyContext(Ctx);
+            return 1;
+        }
+
+        // (b) Re-open to SplitHalf and click top notch over ViewportPanel
+        Drawer.SetShelfExtent(Components::ContentShelfExtent::SplitHalf, true);
+        StepEditorFrame(ImVec2(100.0f, 100.0f), false, false);
+        const Components::Rectangle2D NotchPhys = Drawer.QueryNotchPhysicalBounds();
+        const ImVec2 NotchCenter(NotchPhys.X + NotchPhys.Width * 0.5f, NotchPhys.Y + NotchPhys.Height * 0.5f);
+        StepEditorFrame(NotchCenter, true, false);
+        StepEditorFrame(NotchCenter, false, true);
+        if (Drawer.QueryTargetShelfExtent() != Components::ContentShelfExtent::Closed)
+        {
+            std::fprintf(stderr, "[FAIL] Clicking ContentBrowser top notch over ViewportPanel failed to close drawer.\n");
+            EditorSession.Finalize();
+            ImGui::DestroyContext(Ctx);
+            return 1;
+        }
+
+        // (c) Re-open to SplitHalf at Windows 125% UI Scale (1.25f) and click X close button
+        EditorSession.AccessControlCentre().AccessSettings().UiScale = 1.25f;
+        Drawer.SetShelfExtent(Components::ContentShelfExtent::SplitHalf, true);
+        StepEditorFrame(ImVec2(100.0f, 100.0f), false, false);
+        const Components::Rectangle2D ScaledPhys = Drawer.QueryDrawerPhysicalBounds();
+        const ImVec2 ScaledCloseCenter(ScaledPhys.Right() - 41.0f * 1.25f, ScaledPhys.Y + 22.0f * 1.25f);
+        StepEditorFrame(ScaledCloseCenter, true, false);
+        StepEditorFrame(ScaledCloseCenter, false, true);
+        if (Drawer.QueryTargetShelfExtent() != Components::ContentShelfExtent::Closed)
+        {
+            std::fprintf(stderr, "[FAIL] Clicking ContentBrowser X button at 1.25x UI scale failed to close drawer.\n");
+            EditorSession.Finalize();
+            ImGui::DestroyContext(Ctx);
+            return 1;
+        }
+        EditorSession.AccessControlCentre().AccessSettings().UiScale = 1.0f;
+
+        // (d) Re-open to SplitHalf and press Escape key
+        Drawer.SetShelfExtent(Components::ContentShelfExtent::SplitHalf, true);
+        StepEditorFrame(ImVec2(100.0f, 100.0f), false, false);
+        Io.AddKeyEvent(ImGuiKey_Escape, true);
+        StepEditorFrame(ImVec2(960.0f, 700.0f), false, false);
+        Io.AddKeyEvent(ImGuiKey_Escape, false);
+        StepEditorFrame(ImVec2(960.0f, 700.0f), false, false);
+        if (Drawer.QueryTargetShelfExtent() != Components::ContentShelfExtent::Closed)
+        {
+            std::fprintf(stderr, "[FAIL] Pressing Escape failed to close ContentBrowser drawer.\n");
+            EditorSession.Finalize();
+            ImGui::DestroyContext(Ctx);
+            return 1;
+        }
+
+        // (e) Settle fully closed, then toggle open & closed with Ctrl+Space
+        Drawer.SetShelfExtent(Components::ContentShelfExtent::Closed, true);
+        StepEditorFrame(ImVec2(500.0f, 300.0f), false, false);
+        Io.AddKeyEvent(ImGuiMod_Ctrl, true);
+        Io.AddKeyEvent(ImGuiKey_Space, true);
+        StepEditorFrame(ImVec2(500.0f, 300.0f), false, false);
+        Io.AddKeyEvent(ImGuiKey_Space, false);
+        Io.AddKeyEvent(ImGuiMod_Ctrl, false);
+        StepEditorFrame(ImVec2(500.0f, 300.0f), false, false);
+        if (Drawer.QueryTargetShelfExtent() != Components::ContentShelfExtent::SplitHalf)
+        {
+            std::fprintf(stderr, "[FAIL] Ctrl+Space failed to open ContentBrowser drawer.\n");
+            EditorSession.Finalize();
+            ImGui::DestroyContext(Ctx);
+            return 1;
+        }
+
+        EditorSession.Finalize();
+        ImGui::DestroyContext(Ctx);
+    }
 #endif
 
+    // 8. Validate VulkanWorldRenderSequence GPU compute shader (WorldViewportRadiometricCompute.comp.spv) across Tier 1 GTX, Tier 2 RTX & Debug Views
+    {
+        std::string VkDiag {};
+        GeometricRaster::VulkanInterchange VkDevice {};
+        if (!VkDevice.InitializeInterchange(RepoRoot, &VkDiag))
+        {
+            std::fprintf(stderr, "[FAIL] VulkanInterchange failed to initialize: %s\n", VkDiag.c_str());
+            return 1;
+        }
+
+        GeometricRaster::VulkanWorldRenderSequence GpuWorldSeq {};
+        const std::filesystem::path CompiledShaderDir(FRONTIER_COMPILED_SHADER_DIR);
+        if (!GpuWorldSeq.InitializeSequence(VkDevice, CompiledShaderDir))
+        {
+            std::fprintf(stderr, "[FAIL] VulkanWorldRenderSequence failed to load WorldViewportRadiometricCompute.comp.spv.\n");
+            VkDevice.TeardownInterchange();
+            return 1;
+        }
+
+        GeometricRaster::ShowcaseWorldSceneBundle GpuGallery {};
+        GeometricRaster::BuildShowcaseGalleryScene(GpuGallery, 160u, 96u);
+        GeometricRaster::TieredWorldRenderSequence LatticeSequence {};
+        LatticeSequence.PrepareWorldScene(GpuGallery.Scene);
+        GpuWorldSeq.SynchronizeSceneResources(GpuGallery.Scene, &LatticeSequence.InspectIrradianceLattice(), true);
+
+        std::vector<uint8_t> RgbaTier1 {};
+        if (!GpuWorldSeq.RenderWorldViewportRgba8(
+                GeometricRaster::WorldRenderTier::Tier1GtxCalibrated,
+                GpuGallery.EditorCamera,
+                GpuGallery.Scene,
+                0u,
+                RgbaTier1) ||
+            RgbaTier1.size() != 160u * 96u * 4u)
+        {
+            std::fprintf(stderr, "[FAIL] VulkanWorldRenderSequence Tier 1 GTX dispatch failed.\n");
+            GpuWorldSeq.TeardownSequence();
+            VkDevice.TeardownInterchange();
+            return 1;
+        }
+
+        // Verify left Crimson wall (X=8, Y=48) is red-dominant and right Emerald wall (X=151, Y=48) is green-dominant
+        const std::size_t LeftIdx  = (48u * 160u + 8u) * 4u;
+        const std::size_t RightIdx = (48u * 160u + 151u) * 4u;
+        if (RgbaTier1[LeftIdx + 0u] <= RgbaTier1[LeftIdx + 1u] + 40u ||
+            RgbaTier1[RightIdx + 1u] <= RgbaTier1[RightIdx + 0u] + 40u)
+        {
+            std::fprintf(
+                stderr,
+                "[FAIL] VulkanWorldRenderSequence wall color check failed (Left RGB=%u,%u,%u Right RGB=%u,%u,%u).\n",
+                RgbaTier1[LeftIdx + 0u], RgbaTier1[LeftIdx + 1u], RgbaTier1[LeftIdx + 2u],
+                RgbaTier1[RightIdx + 0u], RgbaTier1[RightIdx + 1u], RgbaTier1[RightIdx + 2u]);
+            GpuWorldSeq.TeardownSequence();
+            VkDevice.TeardownInterchange();
+            return 1;
+        }
+
+        // Verify Tier 2 RTX + dynamic resolution resize (200x120) + Normal debug channel (channel 3)
+        GpuGallery.EditorCamera.ViewportWidthPx  = 200u;
+        GpuGallery.EditorCamera.ViewportHeightPx = 120u;
+        std::vector<uint8_t> RgbaTier2 {};
+        std::vector<uint8_t> RgbaNormal {};
+        if (!GpuWorldSeq.RenderWorldViewportRgba8(
+                GeometricRaster::WorldRenderTier::Tier2RtxDeterministic,
+                GpuGallery.EditorCamera,
+                GpuGallery.Scene,
+                0u,
+                RgbaTier2) ||
+            RgbaTier2.size() != 200u * 120u * 4u ||
+            !GpuWorldSeq.RenderWorldViewportRgba8(
+                GeometricRaster::WorldRenderTier::Tier1GtxCalibrated,
+                GpuGallery.EditorCamera,
+                GpuGallery.Scene,
+                3u,
+                RgbaNormal) ||
+            RgbaNormal.size() != 200u * 120u * 4u)
+        {
+            std::fprintf(stderr, "[FAIL] VulkanWorldRenderSequence Tier 2 RTX or Normal debug dispatch failed.\n");
+            GpuWorldSeq.TeardownSequence();
+            VkDevice.TeardownInterchange();
+            return 1;
+        }
+
+        GpuWorldSeq.TeardownSequence();
+        VkDevice.TeardownInterchange();
+    }
+
     std::filesystem::remove_all(TempBase, CleanupEc);
-    std::printf("[PASS] ProjectBrowserValidation verified WorkspaceCapabilityRegister, ProjectGenerator, ShowcaseGalleryScene & ProjectBrowser.\n");
+    std::printf("[PASS] ProjectBrowserValidation verified WorkspaceCapabilityRegister, ProjectGenerator, ContentBrowser close & VulkanWorldRenderSequence GPU compute.\n");
     return 0;
 }

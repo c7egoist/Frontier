@@ -115,10 +115,13 @@ bool SynchronizeShowcaseGalleryFromOutliner(
 bool SynchronizeShowcaseGallerySceneLive(
     OutlinerPanel&            InOutOutliner,
     ShowcaseWorldSceneBundle& InOutBundle,
-    bool&                     OutRequiresAccelerationRebuild);
+    bool&                     OutRequiresAccelerationRebuild,
+    bool                      RebuildSdfVolume = true);
 
-// Rebuilds SceneTree (WideBoundingTree) and SceneSdf (SignedDistanceVolume) across all visible opaque geometry
-void RebuildShowcaseSceneAcceleration(ShowcaseWorldSceneBundle& InOutBundle);
+// Rebuilds SceneTree (WideBoundingTree) and optionally SceneSdf (SignedDistanceVolume) across all visible opaque geometry
+void RebuildShowcaseSceneAcceleration(
+    ShowcaseWorldSceneBundle& InOutBundle,
+    bool                      RebuildSdfVolume = true);
 
 // Constructs a new analytical primitive directly in Showcase folder + OutlinerPanel and compiles its geometry
 OutlinerSlotToken ConstructShowcasePrimitiveInOutliner(

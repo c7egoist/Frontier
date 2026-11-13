@@ -70,16 +70,16 @@ target_compile_definitions(FrontierCompileSettings INTERFACE
 if(MSVC)
     target_compile_options(FrontierCompileSettings INTERFACE /utf-8 /W4 /permissive-)
     if(FRONTIER_PROFILE STREQUAL "Shipping")
-        target_compile_options(FrontierCompileSettings INTERFACE /O2 /DNDEBUG)
+        target_compile_options(FrontierCompileSettings INTERFACE $<$<NOT:$<CONFIG:Debug>>:/O2> /DNDEBUG)
     else()
-        target_compile_options(FrontierCompileSettings INTERFACE /Zi)
+        target_compile_options(FrontierCompileSettings INTERFACE $<$<NOT:$<CONFIG:Debug>>:/O2> /Zi)
     endif()
 else()
     target_compile_options(FrontierCompileSettings INTERFACE -Wall -Wextra -Wpedantic)
     if(FRONTIER_PROFILE STREQUAL "Shipping")
         target_compile_options(FrontierCompileSettings INTERFACE -O3 -DNDEBUG)
     else()
-        target_compile_options(FrontierCompileSettings INTERFACE -O1 -g)
+        target_compile_options(FrontierCompileSettings INTERFACE -O2 -g)
     endif()
 endif()
 
@@ -258,9 +258,10 @@ frontier_compile_slang_shader(ImGuiOverlayRasterization.slang FragmentEntry frag
 frontier_compile_slang_shader(SelectionMaskCompute.slang     ComputeEntry  compute  SelectionMaskCompute.comp.spv)
 frontier_compile_slang_shader(ViewportPickReduction.slang    ComputeEntry  compute  ViewportPickReduction.comp.spv)
 frontier_compile_slang_shader(UVDistortionInspection.slang   ComputeEntry  compute  UVDistortionInspection.comp.spv)
-frontier_compile_slang_shader(StretchRelaxCompute.slang      ComputeEntry  compute  StretchRelaxCompute.comp.spv)
-frontier_compile_slang_shader(ConcaveSkylineCompute.slang    ComputeEntry  compute  ConcaveSkylineCompute.comp.spv)
-frontier_compile_slang_shader(CameraVisualEffects.slang      ComputeEntry  compute  CameraVisualEffects.comp.spv)
+frontier_compile_slang_shader(StretchRelaxCompute.slang               ComputeEntry  compute  StretchRelaxCompute.comp.spv)
+frontier_compile_slang_shader(ConcaveSkylineCompute.slang             ComputeEntry  compute  ConcaveSkylineCompute.comp.spv)
+frontier_compile_slang_shader(CameraVisualEffects.slang               ComputeEntry  compute  CameraVisualEffects.comp.spv)
+frontier_compile_slang_shader(WorldViewportRadiometricCompute.slang   ComputeEntry  compute  WorldViewportRadiometricCompute.comp.spv)
 
 set(FRONTIER_MODULAR_SHADER_DIR "${CMAKE_SOURCE_DIR}/Engine/Shaders")
 
@@ -391,6 +392,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/GeometricRaster/GlobalIllumination/IrradianceLatticeSequence.cpp
     Engine/GeometricRaster/GlobalIllumination/SpecularReflectionSequence.cpp
     Engine/GeometricRaster/GlobalIllumination/TieredWorldRenderSequence.cpp
+    Engine/GeometricRaster/GlobalIllumination/VulkanWorldRenderSequence.cpp
     Engine/Components/Camera/CameraComponent.cpp
     Engine/Components/Camera/VisualEffects/CameraOpticsEncoder.cpp
     Engine/GeometrySpace/Network/PolygonNetwork.cpp

@@ -8,7 +8,18 @@ All four phases of `Documentation/Plans/ProjectBrowserAndWorkspacePlan.md` have 
 
 ## 2. Architecture & Delivered Units
 
-### 2.1 Live World Editor Wiring (`EditorLifecycle` + `ShowcaseGalleryScene` + `WorldGizmoOverlayRasterization`)
+### 2.1 Live World Editor Wiring (`EditorLifecycle` + `VulkanWorldRenderSequence` + `ShowcaseGalleryScene` + `WorldGizmoOverlayRasterization`)
+- **`Engine/GeometricRaster/Shaders/WorldViewportRadiometricCompute.slang` & `Engine/GeometricRaster/GlobalIllumination/VulkanWorldRenderSequence.{h,cpp}`**
+  - Hardware Vulkan 1.2/1.3 `.slang` compute world renderer (`[numthreads(8, 8, 1)]`, descriptor slots `0..6`) replacing single-threaded CPU per-pixel `TieredWorldRenderSequence` evaluation on both `EditorLifecycle` and `ProjectBrowser` whenever a Vulkan device is attached:
+    - Front-to-back ordered BVH4 (`WideTreeEntry`) closest-hit & shadow-occlusion ray traversal with Phong-interpolated vertex normals and geometric-normal shadow-terminator protection (`SafePrimaryPos`).
+    - 64-byte OpenPBR surface scattering (Oren-Nayar diffuse, anisotropic GGX VNDF specular, F82 conductor edge tint, clearcoat layer).
+    - Heitz 2016 Inverse-LTC upper-hemisphere Sutherland-Hodgman clipped polygonal quad area lights (`EvaluateAreaQuadLight`) with 2-strata BVH visibility gating.
+    - 2-scale SDF cone ambient occlusion (`0.32 m` chassis + `1.85 m` room) + Lagarde specular AO, 4-cone SDF Cornell bounce GI (`Tier1GtxCalibrated`) / trilinear 64-texel octahedral irradiance lattice (`Tier2RtxDeterministic`), secondary glossy conductor/clearcoat reflections, and 2-layer Abbe-dispersed crown glass raytracing (`CrownIor = 1.52`, `Abbe = 26`).
+    - Hardware-adapter detection (`VulkanInterchange::QueryHardwareAccelerated()`) scaling interactive resolution automatically (`960 px` base on hardware GPUs at `120–240+ fps` vs compact fallback on software ICDs) with exact `CanvasBounds` aspect preservation.
+- **`Engine/GeometricRaster/Rasterization/ImGuiOverlayRasterization.cpp`**
+  - Added `SynchronizeApplicationTexture` so dynamically resized `ImTextureData` viewports safely retire existing `VkImage`/`VkDescriptorSet` allocations (`ImTextureStatus_WantDestroy`) prior to `ImTextureStatus_WantCreate`.
+- **`Engine/Components/Panes/WorkspaceAppearance.{h,cpp}` & `Engine/Components/ContentBrowser/ContentBrowserPanel.{h,cpp}`**
+  - Added foreground overlay pointer shielding (`AssignOverlayPointerShield` / `ClearOverlayPointerShield`), `SynchronizeHostBounds`, `QueryDrawerPhysicalBounds`, `QueryNotchPhysicalBounds`, unified `ControlCentre` `UiScale` propagation, `Escape` close, and `Ctrl+Space` drawer toggle so `ContentBrowser` closes reliably from its top-right `X` button (over `InspectorPanel`), top notch (over `ViewportPanel`), or keyboard at any UI scale.
 - **`Engine/GeometricRaster/Gizmo/WorldGizmoOverlayRasterization.{h,cpp}`**
   - Executes compiled Vulkan `.slang` `GizmoRasterization.vert.spv` / `GizmoRasterization.frag.spv` over `TieredWorldRenderSequence` RGBA8 buffers (`VK_ATTACHMENT_LOAD_OP_LOAD`) with an MRT `VK_FORMAT_R32G32B32A32_UINT` handle-pick attachment (`GizmoHandleOrdinal`) and CPU readback (`QueryLastGpuPickAtPixel`), strictly satisfying `CLAUDE.md` §2.1.
 - **`Engine/GeometricRaster/GlobalIllumination/ShowcaseGalleryScene.{h,cpp}`**
