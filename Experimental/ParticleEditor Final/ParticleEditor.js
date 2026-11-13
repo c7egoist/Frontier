@@ -71,6 +71,9 @@ const GlyphForPreset = Preset => Preset?.id === 'snow' ? 'Snowflake'
     : Preset?.id === 'rain' ? 'CloudRain'
     : Preset?.id === 'hail' ? 'CloudHail'
     : Preset?.id === 'car-puddle-splash' ? 'Car'
+    : (Preset?.p?.beadsMode || 0) > 0 ? 'Cloth'
+    : (Preset?.p?.seedHeadMode || 0) > 0 ? 'Leaf'
+    : (Preset?.p?.jellyMode || 0) > 0 ? 'Drop'
     : (Preset?.p?.mudSplashMode || 0) > 0 ? 'Drop'
     : (Preset?.p?.ferroMode || 0) > 0 ? 'Magnet'
     : (Preset?.p?.crackMode || 0) > 0 ? 'Zap'
@@ -102,9 +105,12 @@ const SceneTabs = [
     { Id: 'default', Name: 'Studio Default', Presets: null, Scenario: 'lab' },
     { Id: 'effector_grids', Name: 'Effector Grids & Halftones', Presets: ['effector-grid-cubes', 'effector-sphere-dots', 'effector-hand-halftone'], Scenario: 'lab' },
     { Id: 'rigging_cloth', Name: 'Cloth, Sails, Cables & Vines', Presets: ['flag-banner', 'ship-sail', 'cables-chains', 'vines-ropes'], Scenario: 'lab' },
+    { Id: 'beads_chimes', Name: 'Bead Curtains, Chimes & Drapes', Presets: ['beaded-door-curtain', 'bamboo-wind-chimes', 'velvet-theater-drapes'], Scenario: 'lab' },
     { Id: 'foliage', Name: 'Grass, Reeds, Ferns & Tree', Presets: ['grass-wheat-field', 'tall-reeds', 'interactive-fern', 'interactive-tree'], Scenario: 'lab' },
+    { Id: 'dandelions_blossoms', Name: 'Dandelions & Cherry Blossoms', Presets: ['dandelion-puff', 'blossom-branch-detach'], Scenario: 'lab' },
     { Id: 'underwater_reef', Name: 'Underwater Kelp & Anemones', Presets: ['kelp-forest', 'sea-anemone', 'bubbles'], Scenario: 'lab' },
     { Id: 'mud_car', Name: 'Mud, Car Puddles & Ripples', Presets: ['car-puddle-splash', 'puddle-ripple-splash', 'mud-splatter-heavy'], Scenario: 'lab' },
+    { Id: 'softbody_jelly', Name: 'Soft-Body Jelly & Slime Tendrils', Presets: ['jelly-slime-blob', 'slime-tendril-cluster'], Scenario: 'lab' },
     { Id: 'ferrofluid', Name: 'Magnetic Ferrofluid', Presets: ['ferrofluid-spikes', 'ferrofluid-orb'], Scenario: 'lab' },
     { Id: 'fracture_cracks', Name: 'Cracked Ice & Ground Fracture', Presets: ['cracked-ice-sheet', 'ground-crack-quake'], Scenario: 'blank' },
     { Id: 'spiderwebs', Name: 'Spiderwebs · Orb & Cobwebs', Presets: ['spiderweb-orb', 'spiderweb-cobweb'], Scenario: 'lab' },
@@ -115,7 +121,7 @@ const SceneTabs = [
     { Id: 'shields_aurora', Name: 'Energy Shields & Aurora Sky', Presets: ['energy-shield-hex', 'energy-shield-prism', 'aurora-borealis', 'radar-sweep', 'sonar-ping'], Scenario: 'blank' },
     { Id: 'pyro', Name: 'Pyro & Sparks', Presets: ['sparks', 'fire', 'smoke', 'embers'], Scenario: 'lab' },
     { Id: 'weather', Name: 'Weather · Snow / Rain / Hail', Presets: ['rain', 'snow', 'hail'], Scenario: 'storm' },
-    { Id: 'wind', Name: 'Wind-Blown & Foliage', Presets: ['leaves', 'petals', 'pollen', 'seeds'], Scenario: 'lab' },
+    { Id: 'wind', Name: 'Wind-Blown & Murmuration', Presets: ['starling-murmuration', 'leaves', 'petals', 'pollen', 'seeds'], Scenario: 'lab' },
     { Id: 'storms', Name: 'Storms & Vortex', Presets: ['tornado', 'sandstorm', 'watermist', 'splash'], Scenario: 'storm' },
     { Id: 'blank', Name: 'Blank Canvas', Presets: [], Scenario: 'blank' }
 ];
@@ -280,6 +286,9 @@ function SeedBurstCountFor(PresetId, Params)
     if (Params.kind === 6) return Math.min(Params.capacity || 64, 36);
     if ((Params.crackMode || 0) > 0) return Math.max(48, Params.capacity || 180);
     if ((Params.ferroMode || 0) > 0) return Math.max(128, Params.capacity || 640);
+    if ((Params.beadsMode || 0) > 0) return Math.max(48, Params.capacity || 220);
+    if ((Params.seedHeadMode || 0) > 0) return Math.max(120, Params.capacity || 460);
+    if ((Params.jellyMode || 0) > 0) return Math.max(120, Params.capacity || 440);
     if ((Params.mudSplashMode || 0) > 0) return Math.min(Params.capacity || 600, 140);
     if ((Params.gridMode || 0) > 0) return Math.max(64, Params.capacity || 576);
     if ((Params.webMode || 0) > 0) return Math.max(64, Params.capacity || 320);
@@ -296,7 +305,7 @@ function ConstructEffect(PresetId, Name)
     ApplyWindLink(Preset);
     const P = Preset.p;
     const IsArc = IsArcMode(P?.arcMode);
-    const IsPreseed = PRECIP_IDS.includes(PresetId) || (P?.curlMode || 0) > 0 || (P?.webMode || 0) > 0 || (P?.dynMode || 0) > 0 || (P?.gridMode || 0) > 0 || (P?.ferroMode || 0) > 0 || (P?.crackMode || 0) > 0 || (P?.mudSplashMode || 0) > 0 || !!P?.blackHole;
+    const IsPreseed = PRECIP_IDS.includes(PresetId) || (P?.curlMode || 0) > 0 || (P?.webMode || 0) > 0 || (P?.dynMode || 0) > 0 || (P?.gridMode || 0) > 0 || (P?.ferroMode || 0) > 0 || (P?.crackMode || 0) > 0 || (P?.mudSplashMode || 0) > 0 || (P?.beadsMode || 0) > 0 || (P?.seedHeadMode || 0) > 0 || (P?.jellyMode || 0) > 0 || !!P?.blackHole;
     const SeedBurst = SeedBurstCountFor(PresetId, P);
     const HasImmediateBurst = !!(P?.transition || (P?.shape >= 15 && P?.burstEvery > 0));
     const Interval = Math.max(0.14, P?.arcInterval ?? (P?.arcMode >= 2 ? 0.32 : (P?.arcMode === 1 ? 0.55 : 1.40)));
@@ -330,7 +339,7 @@ function RebuildGpu(Effect)
     Effect.Gpu = Scene.Engine.createSystem(Effect.P);
     const P = Effect.P;
     const IsArc = IsArcMode(P?.arcMode);
-    const IsPreseed = PRECIP_IDS.includes(Effect.PresetId) || (P?.curlMode || 0) > 0 || (P?.webMode || 0) > 0 || (P?.dynMode || 0) > 0 || (P?.gridMode || 0) > 0 || (P?.ferroMode || 0) > 0 || (P?.crackMode || 0) > 0 || (P?.mudSplashMode || 0) > 0 || !!P?.blackHole;
+    const IsPreseed = PRECIP_IDS.includes(Effect.PresetId) || (P?.curlMode || 0) > 0 || (P?.webMode || 0) > 0 || (P?.dynMode || 0) > 0 || (P?.gridMode || 0) > 0 || (P?.ferroMode || 0) > 0 || (P?.crackMode || 0) > 0 || (P?.mudSplashMode || 0) > 0 || (P?.beadsMode || 0) > 0 || (P?.seedHeadMode || 0) > 0 || (P?.jellyMode || 0) > 0 || !!P?.blackHole;
     const SeedBurst = SeedBurstCountFor(Effect.PresetId, P);
     const HasImmediateBurst = !!(P?.transition || (P?.shape >= 15 && P?.burstEvery > 0));
     Object.assign(Effect, {
@@ -493,7 +502,7 @@ function BurstAll()
         const Cls = ClassifyEffect(Effect.P);
         if (Cls.IsArc) { TriggerArcStrike(Effect, Scene.Time); Triggered++; }
         else if (Cls.IsCrack) { Effect.CrackHit = { x: Effect.P.origin[0], z: Effect.P.origin[2], t: Scene.Time }; Triggered++; }
-        else if (Cls.IsTransition || Cls.IsDyn || Cls.IsWeb || Cls.IsGrid || Cls.IsFerro) { RebuildGpu(Effect); Triggered++; }
+        else if (Cls.IsTransition || Cls.IsDyn || Cls.IsWeb || Cls.IsGrid || Cls.IsFerro || Cls.IsBeads || Cls.IsSeedHead || Cls.IsJelly) { RebuildGpu(Effect); Triggered++; }
         else if (Cls.IsSteadyOverlay) continue;
         else if (Cls.IsExpandingWave) { Effect.PendingBurst += Math.max(1, Effect.P.burstCount || 1); Triggered++; }
         else { Effect.PendingBurst += Math.max(80, Math.round(Effect.Gpu.cap * 0.45)); Triggered++; }
@@ -1552,6 +1561,27 @@ function ConstructGeometry()
                 : [0.92 * (0.55 + 0.45 * Pulse), 0.30 * (0.5 + 0.5 * Pulse), 0.05, 0.96];
             Face([O[0] - Ex, 0.008, O[2] - Ez], [O[0] + Ex, 0.008, O[2] - Ez], [O[0] + Ex, 0.008, O[2] + Ez], Abyss);
             Face([O[0] - Ex, 0.008, O[2] - Ez], [O[0] + Ex, 0.008, O[2] + Ez], [O[0] - Ex, 0.008, O[2] + Ez], Abyss);
+        }
+        if ((P.beadsMode || 0) > 0 && P.showObject !== false)
+        {
+            const O = P.origin;
+            const BM = Math.max(1, Math.min(3, P.beadsMode | 0));
+            const DropH = Math.max(0.85, P.dynHeight || 3.0);
+            const YTop = O[1] + DropH;
+            if (BM === 2)
+            {
+                const CrownR = Math.max(0.32, P.radius || 0.56);
+                RingXZ(O[0], YTop, O[2], CrownR, 28, [0.85, 0.68, 0.34, 0.92]);
+                RingXZ(O[0], YTop + 0.16, O[2], CrownR * 0.22, 16, [0.92, 0.78, 0.44, 0.85]);
+                Line([O[0], YTop + 0.32, O[2]], [O[0], YTop, O[2]], [0.88, 0.74, 0.44, 0.9]);
+            }
+            else
+            {
+                const Ex = Math.max(0.45, P.boxHalf?.[0] || 2.0);
+                DrawCylinderPillar(O[0] - Ex * 1.08, YTop, O[2], O[0] + Ex * 1.08, YTop, O[2], 0.048, [0.36, 0.24, 0.16, 0.95]);
+                DrawCylinderPillar(O[0] - Ex * 1.06, 0.0, O[2], O[0] - Ex * 1.06, YTop, O[2], 0.036, [0.28, 0.19, 0.13, 0.82]);
+                DrawCylinderPillar(O[0] + Ex * 1.06, 0.0, O[2], O[0] + Ex * 1.06, YTop, O[2], 0.036, [0.28, 0.19, 0.13, 0.82]);
+            }
         }
         if (Dyn === 3)
         {
@@ -3169,31 +3199,37 @@ function ClassifyEffect(P)
     const IsMud = MudMode > 0;
     const GridMode = !IsTransition && !IsArc && !IsBeam && !IsBoids && !IsCrack && !IsFerro && !IsMud ? Math.max(0, Math.min(2, P.gridMode | 0)) : 0;
     const IsGrid = GridMode > 0;
-    const DynMode = !IsTransition && !IsArc && !IsBeam && !IsBoids && !IsCrack && !IsFerro && !IsMud && !IsGrid ? Math.max(0, Math.min(9, P.dynMode | 0)) : 0;
+    const BeadsMode = !IsTransition && !IsArc && !IsBeam && !IsBoids && !IsCrack && !IsFerro && !IsMud && !IsGrid ? Math.max(0, Math.min(3, P.beadsMode | 0)) : 0;
+    const IsBeads = BeadsMode > 0;
+    const SeedHeadMode = !IsTransition && !IsArc && !IsBeam && !IsBoids && !IsCrack && !IsFerro && !IsMud && !IsGrid && !IsBeads ? Math.max(0, Math.min(2, P.seedHeadMode | 0)) : 0;
+    const IsSeedHead = SeedHeadMode > 0;
+    const JellyMode = !IsTransition && !IsArc && !IsBeam && !IsBoids && !IsCrack && !IsFerro && !IsMud && !IsGrid && !IsBeads && !IsSeedHead ? Math.max(0, Math.min(2, P.jellyMode | 0)) : 0;
+    const IsJelly = JellyMode > 0;
+    const DynMode = !IsTransition && !IsArc && !IsBeam && !IsBoids && !IsCrack && !IsFerro && !IsMud && !IsGrid && !IsBeads && !IsSeedHead && !IsJelly ? Math.max(0, Math.min(9, P.dynMode | 0)) : 0;
     const IsDyn = DynMode > 0;
-    const WebMode = !IsTransition && !IsArc && !IsBeam && !IsBoids && !IsCrack && !IsFerro && !IsMud && !IsGrid && !IsDyn ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
+    const WebMode = !IsTransition && !IsArc && !IsBeam && !IsBoids && !IsCrack && !IsFerro && !IsMud && !IsGrid && !IsBeads && !IsSeedHead && !IsJelly && !IsDyn ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
     const IsWeb = WebMode > 0;
     const IsObjectPour = CurlMode === 3 && (P.pulseMode || 0) > 0;
     const Shape = P.shape ?? 3;
     const IsDiscPlane = Shape === 10 || Shape === 15;
-    const IsSteadyOverlay = IsCurl || IsWeb || IsDyn || IsGrid || IsFerro || IsCrack || Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0);
+    const IsSteadyOverlay = IsCurl || IsWeb || IsDyn || IsGrid || IsFerro || IsCrack || IsBeads || IsSeedHead || IsJelly || Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0);
     const IsExpandingWave = Shape === 10 || Shape === 11 || (Shape === 15 && (P.leafMode || 0) >= 1);
-    const UsesEmitVolume = !IsArc && !IsBeam && !IsWeb && !IsDyn && !IsGrid && !IsFerro && !IsCrack && !IsMud && CurlMode !== 2 && !IsObjectPour && !IsAssembly;
+    const UsesEmitVolume = !IsArc && !IsBeam && !IsWeb && !IsDyn && !IsGrid && !IsFerro && !IsCrack && !IsMud && !IsBeads && !IsSeedHead && !IsJelly && CurlMode !== 2 && !IsObjectPour && !IsAssembly;
     const EmitSh = P.emitShape ?? 0;
-    const UsesRate = !IsTransition && !IsWeb && !IsDyn && !IsGrid && !IsFerro && !IsCrack;
-    const UsesRadius = IsArc || (IsBeam && P.showElectrodes !== false) || WebMode === 1 || IsFerro || IsMud || (IsGrid && (P.gridSurface ?? 0) >= 2 && (P.gridSurface ?? 0) <= 4) || (UsesEmitVolume && (EmitSh === 1 || EmitSh === 2));
-    const UsesBoxHalf = IsObjectPour || CurlMode === 1 || WebMode === 2 || IsDyn || IsCrack || P.arcMode === 3 || (IsGrid && ((P.gridSurface ?? 0) <= 1 || (P.gridSurface ?? 0) === 5)) || (IsTransition && AsmMode === 1) || (UsesEmitVolume && (EmitSh === 3 || EmitSh === 4));
-    const UsesDirVector = !IsTransition && !IsCurl && !IsArc && !IsBeam && !IsBoids && !IsDyn && !IsGrid && !IsFerro && !IsCrack && !IsMud && Shape !== 11 && (Shape !== 16 || (P.shieldForm ?? 0) >= 1);
+    const UsesRate = !IsTransition && !IsWeb && !IsDyn && !IsGrid && !IsFerro && !IsCrack && !IsBeads && !IsSeedHead && !IsJelly;
+    const UsesRadius = IsArc || (IsBeam && P.showElectrodes !== false) || WebMode === 1 || IsFerro || IsMud || BeadsMode === 2 || IsSeedHead || IsJelly || (IsGrid && (P.gridSurface ?? 0) >= 2 && (P.gridSurface ?? 0) <= 4) || (UsesEmitVolume && (EmitSh === 1 || EmitSh === 2));
+    const UsesBoxHalf = IsObjectPour || CurlMode === 1 || WebMode === 2 || IsDyn || IsCrack || BeadsMode === 1 || BeadsMode === 3 || IsSeedHead || P.arcMode === 3 || (IsGrid && ((P.gridSurface ?? 0) <= 1 || (P.gridSurface ?? 0) === 5)) || (IsTransition && AsmMode === 1) || (UsesEmitVolume && (EmitSh === 3 || EmitSh === 4));
+    const UsesDirVector = !IsTransition && !IsCurl && !IsArc && !IsBeam && !IsBoids && !IsDyn && !IsGrid && !IsFerro && !IsCrack && !IsMud && !IsBeads && !IsSeedHead && !IsJelly && Shape !== 11 && (Shape !== 16 || (P.shieldForm ?? 0) >= 1);
     const UsesSpread = UsesDirVector && !IsDiscPlane && !IsWeb && !IsDyn && Shape !== 16;
-    const UsesSpeed = !IsCurl && !IsWeb && !IsDyn && !IsGrid && !IsFerro && !IsCrack && !IsAssembly && !IsBoids && (!IsSteadyOverlay || IsMud);
-    const UsesLife = !IsAssembly && !IsWeb && !IsDyn && !IsGrid && !IsFerro && !IsCrack;
-    const UsesSizeEnd = !IsAssembly && !IsWeb && !IsDyn && !IsGrid && !IsFerro && !IsCrack;
+    const UsesSpeed = !IsCurl && !IsWeb && !IsDyn && !IsGrid && !IsFerro && !IsCrack && !IsBeads && !IsSeedHead && !IsJelly && !IsAssembly && !IsBoids && (!IsSteadyOverlay || IsMud);
+    const UsesLife = !IsAssembly && !IsWeb && !IsDyn && !IsGrid && !IsFerro && !IsCrack && !IsBeads && !IsSeedHead && !IsJelly;
+    const UsesSizeEnd = !IsAssembly && !IsWeb && !IsDyn && !IsGrid && !IsFerro && !IsCrack && !IsBeads && !IsSeedHead && !IsJelly;
     const UsesColB = !IsAssembly;
-    const UsesColC = IsCurl || IsWeb || IsDyn || IsGrid || IsFerro || IsCrack || IsMud || (P.trailMode || 0) > 0 || IsBoids || IsBeam || Shape === 0 || Shape >= 10;
-    const UsesTrailMode = !IsCurl && !IsWeb && !IsDyn && !IsGrid && !IsFerro && !IsCrack && !IsMud && !IsTransition && !IsBoids && !IsArc && !IsBeam && (Shape < 10 || Shape === 14);
+    const UsesColC = IsCurl || IsWeb || IsDyn || IsGrid || IsFerro || IsCrack || IsMud || IsBeads || IsSeedHead || IsJelly || (P.trailMode || 0) > 0 || IsBoids || IsBeam || Shape === 0 || Shape >= 10;
+    const UsesTrailMode = !IsCurl && !IsWeb && !IsDyn && !IsGrid && !IsFerro && !IsCrack && !IsMud && !IsBeads && !IsSeedHead && !IsJelly && !IsTransition && !IsBoids && !IsArc && !IsBeam && (Shape < 10 || Shape === 14);
     const UsesWind = !IsAssembly && !IsGrid && !IsFerro && !IsCrack && !(Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0));
     const UsesDynamics = !IsAssembly && !IsGrid && !IsFerro && !IsCrack && !(Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0));
-    const UsesLaunchCone = !IsTransition && !IsCurl && !IsWeb && !IsDyn && !IsGrid && !IsFerro && !IsCrack && !IsMud && !IsArc && !IsBeam && !IsBoids && Shape !== 10 && Shape !== 11 && Shape !== 15 && Shape !== 16 && Shape !== 17;
+    const UsesLaunchCone = !IsTransition && !IsCurl && !IsWeb && !IsDyn && !IsGrid && !IsFerro && !IsCrack && !IsMud && !IsBeads && !IsSeedHead && !IsJelly && !IsArc && !IsBeam && !IsBoids && Shape !== 10 && Shape !== 11 && Shape !== 15 && Shape !== 16 && Shape !== 17;
 
     let BounceBlockReason = null;
     if (IsAssembly) BounceBlockReason = 'Analytic assembly ignores floor collision';
@@ -3201,6 +3237,8 @@ function ClassifyEffect(P)
     else if (IsGrid) BounceBlockReason = 'Effector lattice is anchored to its surface geometry';
     else if (IsFerro) BounceBlockReason = 'Ferrofluid spikes align dynamically with magnetic flux';
     else if (IsCrack) BounceBlockReason = 'Fractured ground slabs hinge & tilt in response to impacts';
+    else if (IsBeads) BounceBlockReason = 'Hanging beads, chimes & doorway drapes swing from top rails';
+    else if (IsSeedHead) BounceBlockReason = 'Dandelion puffs & blossoms settle gently after gust detachment';
     else if (IsDyn) BounceBlockReason = 'Dynamic rigging & flora respond directly to wind & 3D ball collisions';
     else if (IsWeb) BounceBlockReason = 'Anchored spiderweb strands flex in wind instead of floor bouncing';
     else if (IsCurl) BounceBlockReason = 'Curl flow field does not bounce on floor';
@@ -3210,7 +3248,7 @@ function ClassifyEffect(P)
 
     return {
         IsArc, IsBeam, IsTransition, AsmMode, IsAssembly,
-        CurlMode, IsCurl, CrackMode, IsCrack, FerroMode, IsFerro, MudMode, IsMud, GridMode, IsGrid, DynMode, IsDyn, WebMode, IsWeb, IsObjectPour, IsBoids, Shape,
+        CurlMode, IsCurl, CrackMode, IsCrack, FerroMode, IsFerro, MudMode, IsMud, BeadsMode, IsBeads, SeedHeadMode, IsSeedHead, JellyMode, IsJelly, GridMode, IsGrid, DynMode, IsDyn, WebMode, IsWeb, IsObjectPour, IsBoids, Shape,
         IsDiscPlane, IsSteadyOverlay, IsExpandingWave,
         UsesRate, UsesEmitVolume, UsesRadius, UsesBoxHalf,
         UsesDirVector, UsesSpread, UsesSpeed, UsesLife,
@@ -3341,6 +3379,70 @@ function ConstructEffectInspector(Page, Effect)
         const Sw = C.Construct('div', 'property-switches');
         Sec.append(Sw);
         C.ToggleTile(Sw, BindEffect(Effect, P, 'showObject', { Label: 'Show abyssal glow underlayer', Glyph: 'Layers' }));
+    };
+
+    const BeadsModeLabels = ['Off', 'Crystal Bead Curtain', 'Bamboo & Brass Wind Chimes', 'Velvet Doorway Drapes'];
+    const AddBeadsSection = (HostPage, Badge = '02 / HANGING CURTAINS & CHIMES') =>
+    {
+        const Sec = C.SectionCard(HostPage, {
+            Title: 'Bead curtains, wind chimes & doorway drapes', Glyph: 'Cloth', Badge,
+            Hint: 'Elastic hanging strands & tuned tubes swing in indoor drafts and part cleanly with impact sparkles when struck by thrown balls.'
+        }).Inner;
+        const BMB = BindEffect(Effect, P, 'beadsMode', {
+            Label: 'Hanging structure style', Rebuild: true,
+            Options: [[BeadsModeLabels[1], 1], [BeadsModeLabels[2], 2], [BeadsModeLabels[3], 3]]
+        });
+        const OrigBM = BMB.Write;
+        BMB.Write = V => { OrigBM(Number(V)); ConstructInspectorPage(); };
+        C.SelectRow(Sec, BMB);
+        Range(Sec, BindEffect(Effect, P, 'dynRows', { Label: Cls.BeadsMode === 2 ? 'Tuned chime tubes' : 'Hanging strands / drape strips' }), 6, 42, 1, 0, '');
+        Range(Sec, BindEffect(Effect, P, 'dynHeight', { Label: 'Doorway / hanger drop span' }), 0.85, 5.2, 0.05, 2, 'm');
+        Range(Sec, BindEffect(Effect, P, 'dynStiff', { Label: 'Restoring stiffness' }), 0.25, 3.0, 0.05, 2, '×');
+        Range(Sec, BindEffect(Effect, P, 'dynWaveSpeed', { Label: 'Sway resonance speed' }), 0.35, 5.5, 0.05, 2, 'Hz');
+        const Sw = C.Construct('div', 'property-switches');
+        Sec.append(Sw);
+        C.ToggleTile(Sw, BindEffect(Effect, P, 'showObject', { Label: Cls.BeadsMode === 2 ? 'Show crown striker ring' : 'Show doorway lintel frame', Glyph: 'Layers' }));
+    };
+
+    const SeedHeadModeLabels = ['Off', 'Dandelion Puff Wish Seeds', 'Spring Blossom Boughs'];
+    const AddSeedHeadSection = (HostPage, Badge = '02 / SEED HEADS & BLOSSOMS') =>
+    {
+        const Sec = C.SectionCard(HostPage, {
+            Title: 'Dandelion seed puffs & blossom detachment', Glyph: 'Leaf', Badge,
+            Hint: 'Radial pappus seeds & cherry blossoms cling to swaying meadow stems / boughs until gust thresholds or passing 3D balls shake them loose.'
+        }).Inner;
+        const SMB = BindEffect(Effect, P, 'seedHeadMode', {
+            Label: 'Botanical seed assembly', Rebuild: true,
+            Options: [[SeedHeadModeLabels[1], 1], [SeedHeadModeLabels[2], 2]]
+        });
+        const OrigSM = SMB.Write;
+        SMB.Write = V => { OrigSM(Number(V)); ConstructInspectorPage(); };
+        C.SelectRow(Sec, SMB);
+        Range(Sec, BindEffect(Effect, P, 'dynRows', { Label: Cls.SeedHeadMode === 1 ? 'Meadow stalks' : 'Orchard boughs' }), 2, 18, 1, 0, '');
+        Range(Sec, BindEffect(Effect, P, 'dynHeight', { Label: 'Stalk / canopy height' }), 0.85, 4.2, 0.05, 2, 'm');
+        Range(Sec, BindEffect(Effect, P, 'radius', { Label: Cls.SeedHeadMode === 1 ? 'Seed puff head radius' : 'Bough cluster spread' }), 0.22, 1.4, 0.02, 2, 'm');
+        Range(Sec, BindEffect(Effect, P, 'dynTearThresh', { Label: 'Detachment wind threshold' }), 0.4, 12.0, 0.1, 1, 'm/s');
+        Range(Sec, BindEffect(Effect, P, 'dynWaveSpeed', { Label: 'Stalk sway frequency' }), 0.3, 4.5, 0.05, 2, 'Hz');
+    };
+
+    const JellyModeLabels = ['Off', 'Soft-Body Jelly Cube', 'Elastic Slime Cluster'];
+    const AddJellySection = (HostPage, Badge = '02 / SOFT-BODY JELLY') =>
+    {
+        const Sec = C.SectionCard(HostPage, {
+            Title: 'Volume-preserving jelly & sticky slime tendrils', Glyph: 'Drop', Badge,
+            Hint: 'Bouncy viscoelastic jelly preserves volume during floor squash-and-stretch while sticky tendrils reach onto passing 3D balls.'
+        }).Inner;
+        const JMB = BindEffect(Effect, P, 'jellyMode', {
+            Label: 'Soft-body morphology', Rebuild: true,
+            Options: [[JellyModeLabels[1], 1], [JellyModeLabels[2], 2]]
+        });
+        const OrigJM = JMB.Write;
+        JMB.Write = V => { OrigJM(Number(V)); ConstructInspectorPage(); };
+        C.SelectRow(Sec, JMB);
+        Range(Sec, BindEffect(Effect, P, 'radius', { Label: 'Body core radius' }), 0.4, 2.6, 0.05, 2, 'm');
+        Range(Sec, BindEffect(Effect, P, 'bounce', { Label: 'Bounce & squash height' }), 0.2, 0.95, 0.02, 2, '×');
+        Range(Sec, BindEffect(Effect, P, 'dynWaveSpeed', { Label: 'Gelatin wobble frequency' }), 1.0, 9.5, 0.1, 1, 'Hz');
+        Range(Sec, BindEffect(Effect, P, 'dynTearThresh', { Label: 'Sticky tendril pull reach' }), 1.0, 10.0, 0.1, 1, 'm');
     };
 
     const AddBallInteractionCard = (HostPage, Badge = '03 / INTERACTIVE BALL') =>
@@ -3487,12 +3589,15 @@ function ConstructEffectInspector(Page, Effect)
         {
             const Alive = Effect.Gpu?.stats_?.alive ?? 0;
             Metric.textContent = FormatInteger(Alive);
-            if (Cls.IsTransition || Cls.IsWeb || Cls.IsDyn || Cls.IsGrid || Cls.IsFerro || Cls.IsCrack)
+            if (Cls.IsTransition || Cls.IsWeb || Cls.IsDyn || Cls.IsGrid || Cls.IsFerro || Cls.IsCrack || Cls.IsBeads || Cls.IsSeedHead || Cls.IsJelly)
             {
                 Rate.textContent = Cls.IsGrid ? GridShapeLabels[Math.round(P.gridShape ?? 0)]
                     : Cls.IsFerro ? FerroModeLabels[Cls.FerroMode]
                         : Cls.IsCrack ? CrackModeLabels[Cls.CrackMode]
-                            : (Cls.IsDyn ? DynModeLabels[Cls.DynMode] : (Cls.IsWeb ? 'Silk strands' : 'Batch cycle'));
+                            : Cls.IsBeads ? BeadsModeLabels[Cls.BeadsMode]
+                                : Cls.IsSeedHead ? SeedHeadModeLabels[Cls.SeedHeadMode]
+                                    : Cls.IsJelly ? JellyModeLabels[Cls.JellyMode]
+                                        : (Cls.IsDyn ? DynModeLabels[Cls.DynMode] : (Cls.IsWeb ? 'Silk strands' : 'Batch cycle'));
             }
             else
             {
@@ -3515,18 +3620,24 @@ function ConstructEffectInspector(Page, Effect)
                     ? { Label: 'Ferrofluid', Resolve: () => [FerroModeLabels[Cls.FerroMode] || 'Spikes', `${Math.round(P.ferroSpikes ?? 24)} spikes · ${(P.ferroMagnetSpeed ?? 1.4).toFixed(1)} rad/s`] }
                     : Cls.IsCrack
                         ? { Label: 'Fracture', Resolve: () => [CrackModeLabels[Cls.CrackMode] || 'Crust', `heave ${(P.crackDepth ?? 0.42).toFixed(2)} m · speed ${(P.crackSpeed ?? 1.5).toFixed(1)}×`] }
-                        : Cls.IsMud
-                            ? { Label: 'Mud & Puddle', Resolve: () => [MudModeLabels[Cls.MudMode] || 'Splashes', P.mudSplashMode === 2 ? `car ${(P.carSpeed ?? 2.8).toFixed(1)} rad/s` : `pool ${(P.radius ?? 2.8).toFixed(1)} m`] }
-                            : Cls.IsDyn
-                                ? { Label: 'Rigging / Flora', Resolve: () => [DynModeLabels[Cls.DynMode] || 'Dynamic', `stiff ${(P.dynStiff ?? 1.0).toFixed(2)}× · tear ${(P.dynTearThresh || 0).toFixed(1)} m/s`] }
-                                : Cls.IsCurl
-                                    ? { Label: 'Manifold', Resolve: () => [['Planar wave', 'Sphere shell', 'Bokeh ribbon'][Cls.CurlMode - 1] || 'Curl field', `${(P.curlAmp ?? 2.2).toFixed(1)} m/s flow`] }
-                                    : Cls.IsBoids
-                                        ? { Label: 'Cruise speed', Resolve: () => [`${(P.boidsSpeed ?? 3.6).toFixed(1)} m/s`, `radius ${(P.swarmRadius ?? 1.5).toFixed(1)} m`] }
-                                        : { Label: 'Gravity', Resolve: () => [`${P.gravity.toFixed(2)} g`, `${P.drag.toFixed(2)} drag`] };
+                        : Cls.IsBeads
+                            ? { Label: 'Hanging Rig', Resolve: () => [BeadsModeLabels[Cls.BeadsMode] || 'Curtain', `${Math.round(P.dynRows ?? 24)} strands · ${(P.dynHeight ?? 3.0).toFixed(1)} m drop`] }
+                            : Cls.IsSeedHead
+                                ? { Label: 'Seed Dispersal', Resolve: () => [SeedHeadModeLabels[Cls.SeedHeadMode] || 'Dandelion', `detach > ${(P.dynTearThresh ?? 3.0).toFixed(1)} m/s`] }
+                                : Cls.IsJelly
+                                    ? { Label: 'Soft Body', Resolve: () => [JellyModeLabels[Cls.JellyMode] || 'Jelly', `wobble ${(P.dynWaveSpeed ?? 4.5).toFixed(1)} Hz · tendril ${(P.dynTearThresh ?? 5.0).toFixed(1)} m`] }
+                                    : Cls.IsMud
+                                        ? { Label: 'Mud & Puddle', Resolve: () => [MudModeLabels[Cls.MudMode] || 'Splashes', P.mudSplashMode === 2 ? `car ${(P.carSpeed ?? 2.8).toFixed(1)} rad/s` : `pool ${(P.radius ?? 2.8).toFixed(1)} m`] }
+                                        : Cls.IsDyn
+                                            ? { Label: 'Rigging / Flora', Resolve: () => [DynModeLabels[Cls.DynMode] || 'Dynamic', `stiff ${(P.dynStiff ?? 1.0).toFixed(2)}× · tear ${(P.dynTearThresh || 0).toFixed(1)} m/s`] }
+                                            : Cls.IsCurl
+                                                ? { Label: 'Manifold', Resolve: () => [['Planar wave', 'Sphere shell', 'Bokeh ribbon'][Cls.CurlMode - 1] || 'Curl field', `${(P.curlAmp ?? 2.2).toFixed(1)} m/s flow`] }
+                                                : Cls.IsBoids
+                                                    ? { Label: 'Cruise speed', Resolve: () => [`${(P.boidsSpeed ?? 3.6).toFixed(1)} m/s`, `radius ${(P.swarmRadius ?? 1.5).toFixed(1)} m`] }
+                                                    : { Label: 'Gravity', Resolve: () => [`${P.gravity.toFixed(2)} g`, `${P.drag.toFixed(2)} drag`] };
 
         C.MetricTrio(Page, [
-            { Label: 'Shape', Resolve: () => [Cls.IsGrid ? (GridShapeLabels[Math.round(P.gridShape ?? 0)] || 'Grid Lattice') : Cls.IsFerro ? 'Rosensweig Spikes' : Cls.IsCrack ? 'Voronoi Slabs' : (['Streak', 'Sphere', 'Leaf', 'Glow', 'Cube', 'Coin', 'Bubble', 'Snowflake', 'Hailstone', 'Bokeh Bead', 'Shockwave Ring', 'EMP Pulse Dome', 'Holo Glitch', 'Winged Boid', 'Viscous Drop', 'Radar / Sonar Sweep', 'Energy Shield Multi', 'Aurora Curtain'][P.shape] || 'Strand'), P.blend === 'alpha' ? 'alpha blend' : 'additive glow'] },
+            { Label: 'Shape', Resolve: () => [Cls.IsGrid ? (GridShapeLabels[Math.round(P.gridShape ?? 0)] || 'Grid Lattice') : Cls.IsFerro ? 'Rosensweig Spikes' : Cls.IsCrack ? 'Voronoi Slabs' : Cls.IsBeads ? BeadsModeLabels[Cls.BeadsMode] : Cls.IsSeedHead ? (Cls.SeedHeadMode === 1 ? 'Pappus Seeds' : 'Blossoms') : Cls.IsJelly ? 'Soft-Body Jelly' : (['Streak', 'Sphere', 'Leaf', 'Glow', 'Cube', 'Coin', 'Bubble', 'Snowflake', 'Hailstone', 'Bokeh Bead', 'Shockwave Ring', 'EMP Pulse Dome', 'Holo Glitch', 'Winged Boid', 'Viscous Drop', 'Radar / Sonar Sweep', 'Energy Shield Multi', 'Aurora Curtain'][P.shape] || 'Strand'), P.blend === 'alpha' ? 'alpha blend' : 'additive glow'] },
             SecondTrio,
             { Label: 'Wind coupling', Highlight: true, Resolve: () => Cls.UsesWind ? [`${P.windCoupling.toFixed(2)} /s`, 'lattice coupling'] : ['Locked', Cls.IsAssembly ? 'analytic assembly' : Cls.IsGrid ? 'effector-driven' : (Cls.IsFerro || Cls.IsCrack) ? 'magnetic / seismic' : 'static HUD overlay'] }
         ]);
@@ -3557,7 +3668,7 @@ function ConstructEffectInspector(Page, Effect)
             ? { Label: 'Trigger Spark', Glyph: 'Zap', Tone: 'accent', Act: () => { TriggerArcStrike(Effect, Scene.Time); AppendLog('PARTICLES', `${Effect.Name}: fired spark arc`, `t=${Scene.Time.toFixed(2)}s`, 'live'); } }
             : Cls.IsCrack
                 ? { Label: 'Fracture Ground', Glyph: 'Zap', Tone: 'accent', Act: () => { Effect.CrackHit = { x: P.origin[0], z: P.origin[2], t: Scene.Time }; C.Toast('Ground fractured!'); } }
-                : (Cls.IsDyn || Cls.IsWeb || Cls.IsGrid || Cls.IsFerro || Cls.Shape === 16)
+                : (Cls.IsDyn || Cls.IsWeb || Cls.IsGrid || Cls.IsFerro || Cls.IsBeads || Cls.IsSeedHead || Cls.IsJelly || Cls.IsBoids || Cls.Shape === 16)
                     ? { Label: 'Throw Ball', Glyph: 'Ball', Tone: 'accent', Act: () => { ThrowBallAtTarget(P.origin, Scene.Ball.ThrowSpeed); C.Toast('Ball thrown!'); } }
                     : Cls.IsTransition
                         ? { Label: 'Replay Cycle', Glyph: 'Sparkles', Tone: 'accent', Act: () => { RebuildGpu(Effect); AppendLog('PARTICLES', `${Effect.Name}: replayed transition cycle`, `${Effect.Gpu.cap} pieces`, 'live'); } }
@@ -3578,8 +3689,11 @@ function ConstructEffectInspector(Page, Effect)
         if (Cls.IsMud) AddMudSection(Page, '02 / PUDDLE & SPLASH');
         if (Cls.IsFerro) AddFerroSection(Page, '02 / FERROFLUID FLUX');
         if (Cls.IsCrack) AddCrackSection(Page, '02 / GROUND FRACTURE');
+        if (Cls.IsBeads) AddBeadsSection(Page, '02 / HANGING CURTAINS & CHIMES');
+        if (Cls.IsSeedHead) AddSeedHeadSection(Page, '02 / SEED HEADS & BLOSSOMS');
+        if (Cls.IsJelly) AddJellySection(Page, '02 / SOFT-BODY JELLY');
         if (Cls.Shape === 16) AddShieldSection(Page, '02 / SHIELD PATTERNS');
-        if (Cls.IsDyn || Cls.IsWeb || Cls.IsGrid || Cls.IsMud || Cls.IsFerro || Cls.IsCrack || P.arcMode >= 2 || Cls.Shape === 16) AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
+        if (Cls.IsDyn || Cls.IsWeb || Cls.IsGrid || Cls.IsMud || Cls.IsFerro || Cls.IsCrack || Cls.IsBeads || Cls.IsSeedHead || Cls.IsJelly || Cls.IsBoids || P.arcMode >= 2 || Cls.Shape === 16) AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
 
         if (Cls.UsesLaunchCone)
         {
@@ -3624,13 +3738,13 @@ function ConstructEffectInspector(Page, Effect)
             EmitShapeB.Write = V => { OrigEmitWrite(V); ConstructInspectorPage(); };
             C.SelectRow(Src, EmitShapeB);
         }
-        const OriginLabel = Cls.IsArc ? ((P.arcMode | 0) >= 2 ? 'Cage / Storm centre' : 'Sphere A position') : Cls.IsBeam ? 'Beam muzzle position' : Cls.IsObjectPour ? '3D object centre' : Cls.IsGrid ? 'Surface / grid centre' : Cls.IsFerro ? 'Vessel / dish centre' : Cls.IsCrack ? 'Fracture sheet centre' : Cls.IsMud ? 'Puddle / track centre' : Cls.IsWeb ? 'Web anchor centre' : Cls.IsDyn ? 'Structure / root origin' : 'Emitter origin';
+        const OriginLabel = Cls.IsArc ? ((P.arcMode | 0) >= 2 ? 'Cage / Storm centre' : 'Sphere A position') : Cls.IsBeam ? 'Beam muzzle position' : Cls.IsObjectPour ? '3D object centre' : Cls.IsGrid ? 'Surface / grid centre' : Cls.IsFerro ? 'Vessel / dish centre' : Cls.IsCrack ? 'Fracture sheet centre' : Cls.IsMud ? 'Puddle / track centre' : Cls.IsBeads ? 'Lintel / chime hanger origin' : Cls.IsSeedHead ? 'Meadow / orchard root origin' : Cls.IsJelly ? 'Soft-body resting centre' : Cls.IsWeb ? 'Web anchor centre' : Cls.IsDyn ? 'Structure / root origin' : 'Emitter origin';
         C.VectorRow(Src, BindEffect(Effect, P, 'origin', { Label: OriginLabel, Unit: 'm', Step: 0.05, Digits: 2, Minimum: -20, Maximum: 20 }));
         if (Cls.CurlMode === 2)
             Range(Src, BindEffect(Effect, P, 'shellRadius', { Label: 'Sphere shell radius' }), 0.4, 5.0, 0.05, 2, 'm');
         if (Cls.UsesRadius)
         {
-            const RadLabel = Cls.IsArc ? ((P.arcMode | 0) >= 2 ? 'Plasma cage radius' : 'Sphere A radius') : Cls.IsBeam ? 'Muzzle ring radius' : Cls.IsGrid ? 'Surface / hand scale radius' : Cls.IsFerro ? 'Dish / ferrofluid radius' : Cls.IsMud ? 'Puddle pool radius' : Cls.IsWeb ? 'Orb web frame radius' : 'Emitter radius';
+            const RadLabel = Cls.IsArc ? ((P.arcMode | 0) >= 2 ? 'Plasma cage radius' : 'Sphere A radius') : Cls.IsBeam ? 'Muzzle ring radius' : Cls.IsGrid ? 'Surface / hand scale radius' : Cls.IsFerro ? 'Dish / ferrofluid radius' : Cls.IsMud ? 'Puddle pool radius' : Cls.IsBeads ? 'Chime crown ring radius' : Cls.IsSeedHead ? 'Seed puff / blossom cluster radius' : Cls.IsJelly ? 'Jelly body radius' : Cls.IsWeb ? 'Orb web frame radius' : 'Emitter radius';
             Range(Src, BindEffect(Effect, P, 'radius', { Label: RadLabel }), 0.04, 5, 0.01, 2, 'm');
         }
         if (Cls.UsesBoxHalf)
@@ -3643,13 +3757,17 @@ function ConstructEffectInspector(Page, Effect)
                         ? 'Planar / cube grid half extents'
                         : Cls.IsCrack
                             ? 'Ground crust half extents'
-                            : Cls.IsWeb
-                                ? 'Corner cobweb volume'
-                                : Cls.IsDyn
-                                    ? (Cls.DynMode === 3 ? 'Cloth span extents' : 'Rigging / patch half extents')
-                                    : Cls.IsAssembly
-                                        ? 'Target cube half extents'
-                                        : 'Box half extents';
+                            : Cls.IsBeads
+                                ? 'Doorway span width / depth'
+                                : Cls.IsSeedHead
+                                    ? 'Meadow / orchard patch extents'
+                                    : Cls.IsWeb
+                                        ? 'Corner cobweb volume'
+                                        : Cls.IsDyn
+                                            ? (Cls.DynMode === 3 ? 'Cloth span extents' : 'Rigging / patch half extents')
+                                            : Cls.IsAssembly
+                                                ? 'Target cube half extents'
+                                                : 'Box half extents';
             C.VectorRow(Src, BindEffect(Effect, P, 'boxHalf', { Label: BoxLabel, Unit: 'm', Step: 0.05, Digits: 2, Minimum: 0, Maximum: 10 }));
         }
         if (Cls.IsGrid)
@@ -3670,6 +3788,21 @@ function ConstructEffectInspector(Page, Effect)
         if (Cls.IsCrack)
         {
             AddCrackSection(Page, '02 / GROUND FRACTURE');
+            AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
+        }
+        if (Cls.IsBeads)
+        {
+            AddBeadsSection(Page, '02 / HANGING CURTAINS & CHIMES');
+            AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
+        }
+        if (Cls.IsSeedHead)
+        {
+            AddSeedHeadSection(Page, '02 / SEED HEADS & BLOSSOMS');
+            AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
+        }
+        if (Cls.IsJelly)
+        {
+            AddJellySection(Page, '02 / SOFT-BODY JELLY');
             AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
         }
         if (Cls.IsDyn)
@@ -3863,8 +3996,8 @@ function ConstructEffectInspector(Page, Effect)
         }
         if (Cls.IsBoids)
         {
-            const BoidsSec = C.SectionCard(Page, { Title: 'Boids flocking & wing animation', Glyph: 'Wind', Badge: '02 / FLOCK' }).Inner;
-            C.SelectRow(BoidsSec, BindEffect(Effect, P, 'leafMode', { Label: 'Creature silhouette', Options: [['Birds / Bats (flexing V-wings)', 0], ['Butterflies / Wisps (dual wings)', 1], ['Fish school (undulating fin)', 2]] }));
+            const BoidsSec = C.SectionCard(Page, { Title: 'Boids flocking, murmuration & predator evade', Glyph: 'Wind', Badge: '02 / FLOCK' }).Inner;
+            C.SelectRow(BoidsSec, BindEffect(Effect, P, 'leafMode', { Label: 'Creature silhouette', Options: [['Birds / Starlings (flexing V-wings)', 0], ['Butterflies / Wisps (dual wings)', 1], ['Fish school (undulating fin)', 2]] }));
             Range(BoidsSec, BindEffect(Effect, P, 'swarmRadius', { Label: 'Neighbour perception radius' }), 0.3, 4.0, 0.05, 2, 'm');
             Range(BoidsSec, BindEffect(Effect, P, 'boidsSpeed', { Label: 'Cruise flight speed' }), 0.5, 9.0, 0.1, 2, 'm/s');
             Range(BoidsSec, BindEffect(Effect, P, 'boidsCohere', { Label: 'Cohesion weight' }), 0.0, 5.0, 0.05, 2, '');
@@ -3872,6 +4005,22 @@ function ConstructEffectInspector(Page, Effect)
             Range(BoidsSec, BindEffect(Effect, P, 'boidsSeparate', { Label: 'Separation weight' }), 0.0, 6.0, 0.05, 2, '');
             Range(BoidsSec, BindEffect(Effect, P, 'pulseHz', { Label: 'Bioluminescent pulse rate' }), 0.0, 6.0, 0.05, 2, 'Hz');
             Range(BoidsSec, BindEffect(Effect, P, 'pulseDepth', { Label: 'Pulse glow depth' }), 0.0, 1.0, 0.02, 2, '');
+            AddBallInteractionCard(Page, '03 / PREDATOR BALL');
+        }
+        if (Cls.IsBeads)
+        {
+            AddBeadsSection(Page, '02 / HANGING CURTAINS & CHIMES');
+            AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
+        }
+        if (Cls.IsSeedHead)
+        {
+            AddSeedHeadSection(Page, '02 / SEED HEADS & BLOSSOMS');
+            AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
+        }
+        if (Cls.IsJelly)
+        {
+            AddJellySection(Page, '02 / SOFT-BODY JELLY');
+            AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
         }
         if (Cls.IsWeb)
         {

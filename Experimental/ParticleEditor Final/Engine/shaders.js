@@ -972,6 +972,327 @@ fn evalFerroParticle(idx: u32, cap: u32, age: f32) -> Part {
   return Part(vec4f(anc.pos, age), vec4f(leanDir, 1.0e9), fc, vec4f(wBase, bStrength, hSpike, f32(idx)), vec4f(anc.norm, 1.0));
 }
 
+// #3 Hanging Beads, Bamboo & Brass Wind Chimes, and Velvet Theatre Drape Strips (curlMode == 19)
+struct BeadInitOut {
+  topPos: vec3f,
+  dropLen: f32,
+  wSize: f32,
+  phase: f32,
+  isSail: f32,
+};
+
+fn evalBeadRest(idx: u32, cap: u32) -> BeadInitOut {
+  let bMode = clamp(u32(S.mol2.x + 0.5), 1u, 3u);
+  let dropH = max(0.85, S.mol2.z);
+  let wBase = max(0.025, S.mol2.w);
+  let ext = max(S.phys4.xyz, vec3f(0.45));
+  let org = S.origin.xyz;
+  let nStrands = max(6u, min(cap, u32(S.mol2.y + 0.5)));
+  let iStrand = idx % nStrands;
+  let u = (f32(iStrand) + 0.5) / f32(nStrands);
+  let sd = f32(idx) * 37.0 + 13.0;
+  var topPos = org + vec3f((u - 0.5) * ext.x * 2.0, dropH, (hashF(sd, 1u) - 0.5) * ext.z * 0.65);
+  var dropLen = dropH * (0.72 + 0.24 * cos((u * 2.0 - 1.0) * 1.45));
+  var wSize = wBase;
+  var isSail = 0.0;
+  if (bMode == 2u) {
+    let crownR = max(0.32, S.origin.w);
+    if (iStrand == 0u) {
+      topPos = org + vec3f(0.0, dropH, 0.0);
+      dropLen = dropH * 0.86;
+      wSize = wBase * 1.55;
+      isSail = 1.0;
+    } else {
+      let tubeU = f32(iStrand - 1u) / max(1.0, f32(nStrands - 1u));
+      let ang = tubeU * 6.2831853;
+      topPos = org + vec3f(cos(ang) * crownR, dropH, sin(ang) * crownR);
+      dropLen = dropH * mix(0.30, 0.72, tubeU);
+      wSize = wBase * 1.05;
+    }
+  } else if (bMode == 3u) {
+    let pleatZ = sin(f32(iStrand) * 2.1) * ext.z * 0.72;
+    topPos = org + vec3f((u - 0.5) * ext.x * 2.05, dropH, pleatZ);
+    dropLen = max(0.65, dropH - 0.08);
+    wSize = max(wBase, (ext.x * 2.25) / f32(nStrands) * 0.58);
+  }
+  return BeadInitOut(topPos, dropLen, wSize, hashF(sd, 2u) * 6.2831853, isSail);
+}
+
+fn evalBeadParticle(idx: u32, cap: u32, age: f32, dt: f32) -> Part {
+  let q = parts[idx];
+  let bMode = clamp(u32(S.mol2.x + 0.5), 1u, 3u);
+  let rest = evalBeadRest(idx, cap);
+  let stiff = max(0.25, S.mol.w);
+  let waveSpd = max(0.35, S.mol3.y);
+  let t = S.phys.y;
+  let base = idx * 20u;
+  var curN: array<vec3f, 20>;
+  for (var k = 0u; k < 20u; k++) {
+    curN[k] = trailBuf[base + k].xyz;
+  }
+  curN[0] = rest.topPos;
+  let windAtTop = sampleWind(rest.topPos);
+  var fAtTop = vec3f(0.0);
+  if (fields[0].x > 0.0) { fAtTop = evalFields(rest.topPos, vec3f(0.0)).xyz; }
+  let stepLen = rest.dropLen / 19.0;
+  var impactFlash = q.e.x * exp(-2.6 * dt);
+  let relaxRate = min(1.0, (1.6 + 2.8 * stiff) * dt);
+  for (var k = 1u; k < 20u; k++) {
+    let u = f32(k) / 19.0;
+    let swayX = (windAtTop.x * 0.22 + fAtTop.x * 0.08 + 0.14 * sin(t * waveSpd + rest.phase + u * 2.2)) * u * S.phys2.x;
+    let swayZ = (windAtTop.z * 0.22 + fAtTop.z * 0.08 + 0.12 * cos(t * (waveSpd * 0.85) + rest.phase * 1.3 + u * 1.9)) * u * S.phys2.x;
+    let idealP = rest.topPos + vec3f(swayX, -rest.dropLen * u, swayZ);
+    var p = mix(curN[k], idealP, relaxRate * select(0.72, 1.0, u < 0.25));
+    // Rigidity smoothing for metallic/bamboo chime tube segments
+    if (bMode == 2u && rest.isSail < 0.5 && k >= 4u) {
+      let tubeDir = normalize(mix(vec3f(0.0, -1.0, 0.0), p - rest.topPos, clamp(0.65 / stiff, 0.2, 0.95)));
+      p = mix(p, rest.topPos + tubeDir * (rest.dropLen * u), 0.72);
+    }
+    if (G.ballPos.w > 0.04) {
+      let dVec = p - G.ballPos.xyz;
+      let dist = length(dVec);
+      let bReach = G.ballPos.w + rest.wSize * 1.4 + 0.14;
+      if (dist < bReach && dist > 1e-4) {
+        let pushN = normalize(vec3f(dVec.x, max(-0.25, dVec.y * 0.35), dVec.z) + vec3f(1e-4, 0.0, 1e-4));
+        p = G.ballPos.xyz + pushN * bReach + G.ballVel.xyz * (dt * 0.45);
+        impactFlash = max(impactFlash, clamp(0.65 + length(G.ballVel.xyz) * 0.18, 0.5, 1.8));
+      }
+    }
+    if (p.y < 0.04) { p.y = 0.04; }
+    let prev = curN[k - 1u];
+    let segV = p - prev;
+    let sLen = length(segV);
+    if (sLen > 1e-4) { p = prev + (segV / sLen) * stepLen; }
+    curN[k] = p;
+  }
+  let tipU = clamp(impactFlash, 0.0, 1.5);
+  for (var k = 0u; k < 20u; k++) {
+    trailBuf[base + k] = vec4f(curN[k], tipU);
+  }
+  let glintPos = mix(curN[5], curN[16], fract(t * 0.42 + rest.phase * 0.159));
+  let colMix = mix(S.colC, S.colB, clamp(impactFlash * 0.65, 0.0, 1.0));
+  return Part(vec4f(glintPos, age), vec4f(0.0, 0.0, 0.0, 1.0e9), colMix,
+              vec4f(rest.wSize, impactFlash, rest.isSail, q.m.w), vec4f(impactFlash, 0.0, f32(bMode), 1.0));
+}
+
+// #4 Dandelion Puff / Seed Heads & Blossom Detachment (curlMode == 20)
+fn evalSeedHeadParticle(idx: u32, cap: u32, age: f32, dt: f32) -> Part {
+  let q = parts[idx];
+  let sMode = clamp(u32(S.mol2.x + 0.5), 1u, 2u);
+  let nStems = clamp(u32(S.mol2.y + 0.5), 2u, min(18u, cap / 4u));
+  let stemH = max(0.85, S.mol2.z);
+  let headR = max(0.22, S.mol2.w);
+  let tearThresh = max(0.4, S.mol3.x);
+  let waveSpd = max(0.3, S.mol3.y);
+  let wCoup = max(0.2, S.mol3.z);
+  let ext = max(S.phys4.xyz, vec3f(0.6));
+  let org = S.origin.xyz;
+  let t = S.phys.y;
+  let base = idx * 20u;
+  if (idx < nStems) {
+    // Swaying stalk / flowering orchard bough
+    let uStem = (f32(idx) + 0.5) / f32(nStems);
+    let sdS = f32(idx) * 89.0 + 5.0;
+    let rPos = select(
+      org + vec3f((hashF(sdS, 1u) - 0.5) * ext.x * 1.65, 0.04, (hashF(sdS, 2u) - 0.5) * ext.z * 1.55),
+      org + vec3f((uStem - 0.5) * ext.x * 0.45, 0.04, (hashF(sdS, 2u) - 0.5) * 0.35),
+      sMode == 2u
+    );
+    let bYaw = (uStem - 0.5) * 2.4 + (hashF(sdS, 3u) - 0.5) * 0.5;
+    let windS = sampleWind(rPos + vec3f(0.0, stemH * 0.8, 0.0));
+    var fS = vec3f(0.0);
+    if (fields[0].x > 0.0) { fS = evalFields(rPos + vec3f(0.0, stemH * 0.8, 0.0), vec3f(0.0)).xyz; }
+    let sway = (windS + fS * 0.35) * 0.18 * wCoup + vec3f(sin(t * waveSpd + sdS) * 0.14, 0.0, cos(t * waveSpd * 0.8 + sdS) * 0.11);
+    var tip = rPos + vec3f(sway.x, stemH * (0.78 + 0.32 * hashF(sdS, 4u)), sway.z);
+    if (sMode == 2u) {
+      let reach = ext.x * (0.75 + 0.35 * hashF(sdS, 5u));
+      tip = rPos + vec3f(sin(bYaw) * reach + sway.x * 0.8, stemH * (0.55 + 0.45 * uStem) + sway.y * 0.3, cos(bYaw) * ext.z * 0.65 + sway.z);
+    }
+    if (G.ballPos.w > 0.04) {
+      let dB = tip - G.ballPos.xyz;
+      let distB = length(dB);
+      let reachB = G.ballPos.w + headR + 0.25;
+      if (distB < reachB && distB > 1e-4) {
+        tip += normalize(dB) * (reachB - distB) * 1.15;
+      }
+    }
+    let mid = mix(rPos, tip, 0.5) + vec3f(sway.x * 0.35, stemH * select(0.08, 0.24, sMode == 2u), sway.z * 0.35);
+    for (var k = 0u; k < 20u; k++) {
+      let uu = f32(k) / 19.0;
+      let iuu = 1.0 - uu;
+      let pt = rPos * (iuu * iuu) + mid * (2.0 * iuu * uu) + tip * (uu * uu);
+      trailBuf[base + k] = vec4f(pt, 1.0);
+    }
+    let stemCol = mix(S.colA, S.colC, select(0.15, 0.08, sMode == 2u));
+    let wStem = select(0.026, 0.055, sMode == 2u) * S.misc.x;
+    return Part(vec4f(tip, age), vec4f(0.0, 0.0, 0.0, 1.0e9), stemCol, vec4f(wStem, 0.0, 0.0, q.m.w), vec4f(1.0, 0.0, f32(sMode), 1.0));
+  }
+  // Seed pappus florets & orchard blossoms attached to parent stem nodes, detaching in gusts or ball brushes
+  let sd = q.m.w;
+  let parentIdx = (idx - nStems) % nStems;
+  let subIdx = (idx - nStems) / nStems;
+  let totalPer = max(1u, (cap - nStems + nStems - 1u) / nStems);
+  let kNode = select(19u, clamp(u32(7.0 + 12.0 * fract(f32(subIdx) / f32(totalPer))), 6u, 19u), sMode == 2u);
+  let anchorBase = trailBuf[parentIdx * 20u + kNode].xyz;
+  let fi = f32(subIdx) + 0.5;
+  let gold = fi * 2.3999632;
+  let cosPhi = 1.0 - 2.0 * fract(fi / f32(totalPer));
+  let sinPhi = sqrt(max(0.0, 1.0 - cosPhi * cosPhi));
+  let fibDir = vec3f(cos(gold) * sinPhi, cosPhi, sin(gold) * sinPhi);
+  let radScale = select(headR * (0.86 + 0.22 * hashF(sd, 6u)), headR * (0.35 + 0.65 * hashF(sd, 6u)), sMode == 2u);
+  let anchorPos = anchorBase + fibDir * radScale;
+  var detAge = q.e.y;
+  var pos = q.p.xyz;
+  var vel = q.v.xyz;
+  if (detAge < 0.05) {
+    pos = anchorPos;
+    vel = vec3f(0.0);
+    let windA = sampleWind(anchorPos);
+    var fA = vec3f(0.0);
+    if (fields[0].x > 0.0) { fA = evalFields(anchorPos, vec3f(0.0)).xyz; }
+    let totForce = length(windA * wCoup + fA);
+    var ballKick = false;
+    if (G.ballPos.w > 0.04 && length(anchorPos - G.ballPos.xyz) < G.ballPos.w + headR + 0.35) {
+      ballKick = true;
+    }
+    let gustPulse = fract(t * 0.22 + hashF(sd, 7u) * 5.0) > 0.96 && totForce > tearThresh * 0.45;
+    if (ballKick || totForce > tearThresh || gustPulse) {
+      detAge = 0.06;
+      vel = windA * wCoup * 0.55 + fA * 0.32 + fibDir * (0.45 + 0.65 * hashF(sd, 8u)) + vec3f(0.0, 0.65, 0.0);
+      if (ballKick) {
+        vel += normalize(anchorPos - G.ballPos.xyz + vec3f(0.0, 0.4, 0.0)) * 3.8 + G.ballVel.xyz * 0.55;
+      }
+    }
+  } else {
+    detAge += dt;
+    let windF = sampleWind(pos) * wCoup;
+    vel += (windF - vel) * min(S.phys2.x * dt, 1.0);
+    if (fields[0].x > 0.0) {
+      let fRes = evalFields(pos, vel);
+      vel += fRes.xyz * dt;
+    }
+    vel += simCurl(pos * 0.9 + vec3f(t * 0.35)) * (0.75 * dt);
+    vel.y += (-S.speed.w * 9.81 + S.phys2.z * 9.81) * dt;
+    if (G.ballPos.w > 0.04) {
+      let bd = pos - G.ballPos.xyz;
+      let dLen = length(bd);
+      if (dLen < G.ballPos.w + 0.22 && dLen > 1e-4) {
+        vel += normalize(bd) * 3.2 + G.ballVel.xyz * 0.5;
+      }
+    }
+    vel *= exp(-S.speed.z * dt);
+    pos += vel * dt;
+    if (pos.y < 0.04) { pos.y = 0.04; vel.y = abs(vel.y) * 0.25; vel.x *= 0.65; vel.z *= 0.65; }
+    if (detAge > 12.5 || length(pos - org) > 18.0) {
+      detAge = 0.0;
+      pos = anchorPos;
+      vel = vec3f(0.0);
+    }
+  }
+  trailBuf[base] = vec4f(pos, -1.0);
+  trailBuf[base + 1u] = vec4f(pos, -1.0);
+  let spin = q.m.y + dt * select(1.4, 3.2, detAge > 0.05) * (0.5 + hashF(sd, 9u));
+  let life01 = clamp(detAge / 12.5, 0.0, 1.0);
+  var col = select(mix(S.colC, S.colB, hashF(sd, 10u)), mix(S.colB, S.colC, life01), detAge > 0.05);
+  col.a = clamp(1.0 - smoothstep(0.75, 1.0, life01), 0.0, 1.0);
+  let sz = S.life.z * S.misc.x * (0.85 + 0.32 * hashF(sd, 11u));
+  return Part(vec4f(pos, age), vec4f(vel, 1.0e9), col, vec4f(sz, spin, detAge, sd), vec4f(0.0, detAge, f32(sMode), 1.0));
+}
+
+// #8 Soft-Body Jelly / Slime Blobs & Stretchy Tendrils (curlMode == 21)
+fn evalJellyParticle(idx: u32, cap: u32, age: f32) -> Part {
+  let jMode = clamp(u32(S.mol2.x + 0.5), 1u, 2u);
+  let jRad = max(0.38, S.mol2.y);
+  let jFreq = max(1.0, S.mol2.w);
+  let tearLim = max(1.0, S.mol3.x);
+  let jBounce = clamp(S.mol3.y, 0.2, 0.95);
+  let org = S.origin.xyz;
+  let t = S.phys.y;
+  let cyc = fract(t * 0.55);
+  let hBounce = abs(sin(cyc * 3.14159265)) * (jRad * 0.72 * jBounce);
+  let impactSq = exp(-pow(min(cyc, 1.0 - cyc) * 14.0, 2.0));
+  let squashY = clamp(1.0 - 0.34 * impactSq + 0.09 * sin(t * jFreq), 0.62, 1.32);
+  let expXZ = 1.0 / sqrt(max(0.4, squashY));
+  let windJ = sampleWind(org);
+  var fJ = vec3f(0.0);
+  if (fields[0].x > 0.0) { fJ = evalFields(org, vec3f(0.0)).xyz; }
+  let bodyCom = vec3f(org.x + clamp((windJ.x + fJ.x * 0.25) * 0.08, -0.8, 0.8),
+                      max(jRad * 0.66 * squashY, org.y * 0.55 + hBounce),
+                      org.z + clamp((windJ.z + fJ.z * 0.25) * 0.08, -0.8, 0.8));
+  let nBody = (cap * 72u) / 100u;
+  let base = idx * 20u;
+  let sd = f32(idx) * 43.0 + 17.0;
+  if (idx < nBody) {
+    let fi = f32(idx) + 0.5;
+    let gold = fi * 2.3999632;
+    let cy = 1.0 - 2.0 * (fi / f32(max(1u, nBody)));
+    let sy = sqrt(max(0.0, 1.0 - cy * cy));
+    let sphDir = vec3f(cos(gold) * sy, cy, sin(gold) * sy);
+    let rShell = mix(0.65, 1.02, pow(hashF(sd, 1u), 0.45));
+    var localP = sphDir * (jRad * rShell);
+    if (jMode == 1u) {
+      let axMax = max(abs(sphDir.x), max(abs(sphDir.y), abs(sphDir.z)));
+      let cubeDir = sphDir / max(0.25, axMax);
+      localP = mix(cubeDir, sphDir * 1.06, 0.28) * (jRad * 0.78 * rShell);
+    } else {
+      let lobe = 1.0 + 0.22 * sin(sphDir.x * 3.8 + t * 1.2) * cos(sphDir.z * 3.6 - t * 0.9);
+      localP *= lobe;
+    }
+    let wobble = sin(t * jFreq + localP.x * 2.4 + localP.z * 1.9) * 0.09 * jRad;
+    localP.x = (localP.x + wobble) * expXZ;
+    localP.y = localP.y * squashY;
+    localP.z = (localP.z - wobble * 0.7) * expXZ;
+    var wp = bodyCom + localP;
+    if (G.ballPos.w > 0.04) {
+      let dv = wp - G.ballPos.xyz;
+      let dl = length(dv);
+      let indentR = G.ballPos.w + 0.22;
+      if (dl < indentR && dl > 1e-4) {
+        wp = G.ballPos.xyz + normalize(dv) * indentR;
+      } else if (dl < indentR * 2.1) {
+        wp += normalize(wp - bodyCom + vec3f(1e-4)) * (0.18 * jRad * exp(-pow(dl - indentR, 2.0) * 3.0));
+      }
+    }
+    wp.y = max(0.05, wp.y);
+    trailBuf[base] = vec4f(wp, -1.0);
+    trailBuf[base + 1u] = vec4f(wp, -1.0);
+    let colJ = mix(S.colA, S.colC, clamp(0.35 + 0.55 * rShell + 0.25 * impactSq, 0.0, 1.0));
+    let szJ = S.life.z * S.misc.x * (0.9 + 0.5 * rShell);
+    return Part(vec4f(wp, age), vec4f(0.0, 0.0, 0.0, 1.0e9), colJ, vec4f(szJ, 0.0, 0.0, sd), vec4f(1.0, 0.0, f32(jMode), 1.0));
+  }
+  // Elastic sticky tendrils reaching toward ball, floor bounce puddle, or active fields
+  let tIdx = idx - nBody;
+  let goldT = (f32(tIdx) + 0.5) * 2.3999632;
+  let cyT = 1.0 - 2.0 * ((f32(tIdx) + 0.5) / max(1.0, f32(cap - nBody)));
+  let syT = sqrt(max(0.0, 1.0 - cyT * cyT));
+  let sDir = vec3f(cos(goldT) * syT, cyT, sin(goldT) * syT);
+  let anchor = bodyCom + vec3f(sDir.x * jRad * 0.72 * expXZ, sDir.y * jRad * 0.72 * squashY, sDir.z * jRad * 0.72 * expXZ);
+  var target = vec3f(anchor.x + windJ.x * 0.16, 0.04, anchor.z + windJ.z * 0.16);
+  let pullReach = jRad * (1.35 + tearLim * 0.18);
+  var stretch = 0.0;
+  if (G.ballPos.w > 0.04 && length(G.ballPos.xyz - anchor) < pullReach + G.ballPos.w) {
+    target = G.ballPos.xyz + normalize(anchor - G.ballPos.xyz + vec3f(1e-4)) * (G.ballPos.w * 0.92);
+    stretch = 1.0;
+  } else if (anchor.y - 0.04 < pullReach * 0.72 && sDir.y < 0.1) {
+    target = vec3f(anchor.x + sDir.x * 0.25, 0.03, anchor.z + sDir.z * 0.25);
+    stretch = clamp(1.0 - (anchor.y - 0.04) / (pullReach * 0.72), 0.15, 0.95);
+  } else {
+    let reachPhase = clamp(sin(t * 2.1 + f32(tIdx) * 1.3), 0.0, 1.0);
+    target = anchor + normalize(sDir + fJ * 0.2 + windJ * 0.2 + vec3f(1e-4)) * (jRad * 0.75 * reachPhase);
+    stretch = reachPhase * 0.75;
+  }
+  let midT = mix(anchor, target, 0.5) - vec3f(0.0, 0.18 * stretch, 0.0);
+  for (var k = 0u; k < 20u; k++) {
+    let uu = f32(k) / 19.0;
+    let iuu = 1.0 - uu;
+    let pt = anchor * (iuu * iuu) + midT * (2.0 * iuu * uu) + target * (uu * uu);
+    trailBuf[base + k] = vec4f(pt, stretch);
+  }
+  let colT = mix(S.colC, S.colB, stretch * 0.65);
+  let wT = max(0.015, S.life.z * S.misc.x * 0.42);
+  return Part(vec4f(target, age), vec4f(0.0, 0.0, 0.0, 1.0e9), colT, vec4f(wT, stretch, 1.0, sd), vec4f(0.0, 1.0, f32(jMode), 1.0));
+}
+
 struct HandPtOut {
   pos: vec3f,
   norm: vec3f,
@@ -1354,7 +1675,21 @@ fn emitParticles(@builtin(global_invocation_id) gid: vec3u) {
     pos = S.origin.xyz;
     vel = vec3f(0.0);
     eZ = f32(idx);
-    if ((curlMode >= 6u && curlMode <= 12u) || (curlMode >= 14u && curlMode <= 15u)) {
+    if (curlMode == 19u) {
+      let restB = evalBeadRest(idx, cap);
+      pos = restB.topPos - vec3f(0.0, restB.dropLen * 0.5, 0.0);
+      eW = 1.0;
+      for (var k = 0u; k < 20u; k++) {
+        let uu = f32(k) / 19.0;
+        let ptB = restB.topPos - vec3f(0.0, restB.dropLen * uu, 0.0);
+        trailBuf[idx * 20u + k] = vec4f(ptB, 0.0);
+      }
+    } else if (curlMode == 20u || curlMode == 21u) {
+      for (var k = 0u; k < 20u; k++) {
+        trailBuf[idx * 20u + k] = vec4f(pos, -1.0);
+      }
+      eW = 1.0;
+    } else if ((curlMode >= 6u && curlMode <= 12u) || (curlMode >= 14u && curlMode <= 15u)) {
       let dmInit = select(curlMode - 5u, curlMode - 6u, curlMode >= 14u);
       let stD = evalDynStrand(idx, cap, dmInit, S.phys.y);
       pos = stD.pA;
@@ -1577,6 +1912,18 @@ fn updateParticles(@builtin(global_invocation_id) gid: vec3u) {
   }
   if (curlModeUpd == 18u) {
     parts[i] = evalCrackParticle(i, cap, age);
+    return;
+  }
+  if (curlModeUpd == 19u) {
+    parts[i] = evalBeadParticle(i, cap, age, dt);
+    return;
+  }
+  if (curlModeUpd == 20u) {
+    parts[i] = evalSeedHeadParticle(i, cap, age, dt);
+    return;
+  }
+  if (curlModeUpd == 21u) {
+    parts[i] = evalJellyParticle(i, cap, age);
     return;
   }
   if (curlModeUpd == 16u) {
@@ -2353,10 +2700,25 @@ fn swarmStep(@builtin(global_invocation_id) gid: vec3u) {
   let goal = S.origin.xyz + vec3f(cos(S.phys.y * 0.45) * 2.4, sin(S.phys.y * 0.7) * 0.55, sin(S.phys.y * 0.9) * 1.8);
   let toGoal = goal - me.p.xyz;
   a += toGoal * 0.32;
+  // Predator Sphere / Thrown-Ball Flash-Expansion Scattering (#11)
+  var boostSpd = vmax;
+  if (G.ballPos.w > 0.04) {
+    let bVec = me.p.xyz - G.ballPos.xyz;
+    let bDist = length(bVec);
+    let predReach = G.ballPos.w + max(2.25, R * 1.75);
+    if (bDist < predReach && bDist > 1e-4) {
+      let evadeDir = bVec / bDist;
+      let urgency = pow(clamp(1.0 - bDist / predReach, 0.0, 1.0), 1.45);
+      let splitTan = normalize(cross(evadeDir, vec3f(0.0, 1.0, 0.0)) + vec3f(1e-4, 0.0, 0.0));
+      let sideSign = select(-1.0, 1.0, fract(seed * 0.371) > 0.5);
+      a += (evadeDir * 24.0 + splitTan * (9.5 * sideSign) + vec3f(0.0, 3.8, 0.0)) * urgency;
+      boostSpd = vmax * (1.0 + 0.72 * urgency);
+    }
+  }
   var v = me.v.xyz + a * dt;
   let sp = length(v);
   let vmin = vmax * 0.42;
-  if (sp > vmax) { v *= vmax / sp; }
+  if (sp > boostSpd) { v *= boostSpd / sp; }
   else if (sp < vmin && sp > 1e-4) { v *= vmin / sp; }
   let wind = sampleWind(me.p.xyz);
   v += (wind - v) * min(S.phys2.x * dt, 1.0);
@@ -2762,10 +3124,16 @@ fn vsPart(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> V
   let isMud = S.mol.x >= 15.5 && S.mol.x < 16.5;
   let isFerro = S.mol.x >= 16.5 && S.mol.x < 17.5;
   let isCrack = S.mol.x >= 17.5 && S.mol.x < 18.5;
+  let isBead = S.mol.x >= 18.5 && S.mol.x < 19.5;
+  let isSeed = S.mol.x >= 19.5 && S.mol.x < 20.5;
+  let isJelly = S.mol.x >= 20.5 && S.mol.x < 21.5;
   let dynMode = select(u32(max(0.0, S.mol.x - 5.0) + 0.5), u32(max(0.0, S.mol.x - 6.0) + 0.5), S.mol.x >= 13.5);
   if ((isWebOnly || isDyn) && q.e.x < 0.05) { return o; }
   if (isGrid && u32(q.m.y + 0.5) == 6u && q.e.w > 0.001) { return o; }
   if (isCrack && q.e.y > 0.5) { return o; }
+  if (isSeed && q.e.x > 0.5) { return o; }
+  if (isJelly && q.e.x < 0.5) { return o; }
+  if (isBead && (u32(q.e.z + 0.5) == 3u || (q.m.y < 0.16 && u32(q.e.z + 0.5) == 2u))) { return o; }
   let cs = array<vec2f, 6>(vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(-1.0, 1.0),
                            vec2f(1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, 1.0));
   let c = cs[vi];
@@ -2780,7 +3148,22 @@ fn vsPart(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> V
   let shape = u32(S.emit.z);
   var wp: vec3f;
   var exW = 0.0;
-  if (isGrid) {
+  if (isBead) {
+    let gSz = sz * (1.5 + q.m.y * 1.6);
+    wp = q.p.xyz + G.camRight.xyz * (c.x * gSz) + G.camUp.xyz * (c.y * gSz);
+    exW = 36.0;
+  } else if (isSeed) {
+    let ca = cos(q.m.y);
+    let sa = sin(q.m.y);
+    let rc = vec2f(c.x * ca - c.y * sa, c.x * sa + c.y * ca);
+    let fSz = sz * 1.35;
+    wp = q.p.xyz + G.camRight.xyz * (rc.x * fSz) + G.camUp.xyz * (rc.y * fSz);
+    exW = 38.0;
+  } else if (isJelly) {
+    let jSz = sz * 1.48;
+    wp = q.p.xyz + G.camRight.xyz * (c.x * jSz) + G.camUp.xyz * (c.y * jSz);
+    exW = 40.0;
+  } else if (isGrid) {
     if (S.misc.y > 0.5) {
       wp = q.p.xyz + G.camRight.xyz * (c.x * sz * 0.5) + G.camUp.xyz * (c.y * sz * 0.5);
     } else {
@@ -2982,6 +3365,53 @@ fn fsPart(i: VO) -> @location(0) vec4f {
     let outRgb = rgb * shade + mix(vec3f(0.0), vec3f(0.18, 0.06, 0.08), wGlow);
     let outA = clamp(edgeMask * i.col.a, 0.0, 1.0);
     return vec4f(outRgb * outA, outA);
+  }
+  if (S.mol.x >= 18.5 && S.mol.x < 19.5 && i.ex.w > 35.5) {
+    // Crystal Bead Facet Glint & Wind-Chime Strike Sparkle
+    let r = length(i.uv);
+    if (r > 1.0) { discard; }
+    let star = exp(-abs(i.uv.x) * 9.0 - r * 3.0) + exp(-abs(i.uv.y) * 9.0 - r * 3.0);
+    let core = exp(-r * r * 12.0);
+    let ga = clamp((core * 0.85 + star * 0.55) * i.col.a, 0.0, 1.0);
+    let gCol = mix(rgb, S.colB.rgb * 1.25, clamp(core * 0.75 + star * 0.45, 0.0, 1.0));
+    return vec4f(gCol * ga, ga);
+  }
+  if (S.mol.x >= 19.5 && S.mol.x < 20.5 && i.ex.w > 37.5) {
+    // Radial Dandelion Pappus Parachute Seed (sMode 1) or 5-Petal Cherry Blossom (sMode 2)
+    let r = length(i.uv);
+    if (r > 1.0) { discard; }
+    let ang = atan2(i.uv.y, i.uv.x);
+    let sMode = u32(S.mol2.x + 0.5);
+    if (sMode == 1u) {
+      let crown = smoothstep(0.08, 0.48, r) * (1.0 - smoothstep(0.75, 0.96, r));
+      let spokes = pow(abs(cos(ang * 7.0)), 6.0) * crown;
+      let core = exp(-r * r * 28.0);
+      let sa = clamp((spokes * 0.92 + core * 0.95) * i.col.a, 0.0, 1.0);
+      if (sa < 0.01) { discard; }
+      let sCol = mix(rgb, vec3f(1.0), clamp(core * 0.65 + spokes * 0.45, 0.0, 1.0));
+      return vec4f(sCol * sa, sa);
+    }
+    let lobe = 0.62 + 0.34 * cos(ang * 5.0);
+    if (r > lobe) { discard; }
+    let edge = smoothstep(lobe, lobe * 0.72, r);
+    let stamen = exp(-r * r * 18.0);
+    let ba = clamp(edge * i.col.a, 0.0, 1.0);
+    let bCol = mix(rgb, mix(S.colB.rgb, vec3f(1.0, 0.85, 0.42), stamen), clamp(stamen * 0.82, 0.0, 1.0));
+    return vec4f(bCol * ba, ba);
+  }
+  if (S.mol.x >= 20.5 && S.mol.x < 21.5 && i.ex.w > 39.5) {
+    // Volume-Preserving Subsurface Soft-Body Jelly / Slime Node
+    let r2 = dot(i.uv, i.uv);
+    if (r2 > 1.0) { discard; }
+    let r = sqrt(r2);
+    let nz = sqrt(max(0.0, 1.0 - r2));
+    let nrm = vec3f(i.uv, nz);
+    let fres = pow(1.0 - nz, 2.1);
+    let spec = pow(max(dot(nrm, normalize(vec3f(-0.42, 0.62, 0.66))), 0.0), 32.0);
+    let innerCaustic = exp(-r2 * 2.8) * 0.42;
+    let jCol = mix(rgb * (0.62 + 0.45 * innerCaustic), S.colB.rgb, clamp(fres * 0.65 + spec * 0.95, 0.0, 1.0));
+    let ja = clamp(smoothstep(1.0, 0.68, r) * (0.62 + 0.35 * fres + 0.35 * spec) * i.col.a, 0.0, 1.0);
+    return vec4f(jCol * ja, ja);
   }
   if (S.mol.x >= 15.5 && S.mol.x < 16.5 && i.ex.w > 29.5) {
     // Multi-wave Concentric Puddle Ripple Ring
@@ -3457,8 +3887,11 @@ fn vsRibbon(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
   let isDyn = (S.mol.x >= 5.5 && S.mol.x < 12.5) || (S.mol.x >= 13.5 && S.mol.x < 15.5);
   let isMud = S.mol.x >= 15.5 && S.mol.x < 16.5;
   let isFerro = S.mol.x >= 16.5 && S.mol.x < 17.5;
+  let isBead = S.mol.x >= 18.5 && S.mol.x < 19.5;
+  let isSeed = S.mol.x >= 19.5 && S.mol.x < 20.5;
+  let isJelly = S.mol.x >= 20.5 && S.mol.x < 21.5;
   let dynMode = select(u32(max(0.0, S.mol.x - 5.0) + 0.5), u32(max(0.0, S.mol.x - 6.0) + 0.5), S.mol.x >= 13.5);
-  let maxSeg = select(2.5, 6.5, isWebOnly || isDyn || isFerro);
+  let maxSeg = select(2.5, 6.5, isWebOnly || isDyn || isFerro || isBead || isSeed || isJelly);
   if (segLen < 1e-4 || segLen > maxSeg) { return o; }
   if (isMud && q.e.z > 0.5) { return o; }
   let pPrev = segs[base + select(seg - 1u, 0u, seg == 0u)].xyz;
@@ -3480,7 +3913,30 @@ fn vsRibbon(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
   let baseW = select(max(0.004, q.m.x * 0.42 * thin), max(0.0028, q.m.x * 0.56 * thin), isWebOnly);
   var w0 = select(baseW * mix(1.0, 0.08, pow(max(u0, 1e-4), 0.72)), baseW * (0.88 + 0.16 * (1.0 - 4.0 * u0 * (1.0 - u0))), isWebOnly);
   var w1 = select(baseW * mix(1.0, 0.08, pow(max(u1, 1e-4), 0.72)), baseW * (0.88 + 0.16 * (1.0 - 4.0 * u1 * (1.0 - u1))), isWebOnly);
-  if (isFerro) {
+  if (isBead) {
+    let bw = max(0.018, q.m.x * S.misc.x);
+    let bMode = u32(S.mol2.x + 0.5);
+    if (bMode == 2u && q.m.z < 0.5) {
+      w0 = select(bw * 0.18, bw, u0 > 0.24);
+      w1 = select(bw * 0.18, bw, u1 > 0.24);
+    } else if (bMode == 3u) {
+      w0 = bw * (0.94 + 0.08 * sin(u0 * 12.0));
+      w1 = bw * (0.94 + 0.08 * sin(u1 * 12.0));
+    } else {
+      w0 = bw;
+      w1 = bw;
+    }
+  } else if (isSeed) {
+    let sw = max(0.012, q.m.x);
+    w0 = sw * mix(1.0, 0.35, u0);
+    w1 = sw * mix(1.0, 0.35, u1);
+  } else if (isJelly) {
+    let jw = max(0.014, q.m.x * S.misc.x * 1.45);
+    let neck0 = 1.0 - 0.58 * sin(u0 * 3.14159265);
+    let neck1 = 1.0 - 0.58 * sin(u1 * 3.14159265);
+    w0 = jw * neck0;
+    w1 = jw * neck1;
+  } else if (isFerro) {
     let fw = max(0.012, q.m.x * S.misc.x * thin);
     w0 = fw * pow(max(0.015, 1.0 - u0), 1.38);
     w1 = fw * pow(max(0.015, 1.0 - u1), 1.38);
@@ -3521,7 +3977,24 @@ fn vsRibbon(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
   );
   var styleTag = 0.0;
   var exParam = S.mol2.w;
-  if (isFerro) {
+  if (isBead) {
+    let bMode = u32(S.mol2.x + 0.5);
+    rc = mix(S.colA.rgb, S.colC.rgb, smoothstep(0.1, 0.85, uLen));
+    if (bMode == 1u) {
+      rc = mix(rc, S.colB.rgb, smoothstep(0.55, 1.0, uLen) * 0.65);
+    }
+    rc = mix(rc, S.colB.rgb, clamp(q.m.y * 0.48, 0.0, 0.8));
+    styleTag = 10.0;
+    exParam = f32(bMode) + clamp(q.m.y, 0.0, 0.9) * 0.1;
+  } else if (isSeed) {
+    rc = mix(S.colA.rgb, S.colC.rgb, smoothstep(0.2, 0.95, uLen) * 0.35);
+    styleTag = 6.0;
+    exParam = 0.95;
+  } else if (isJelly) {
+    rc = mix(S.colA.rgb, S.colC.rgb, smoothstep(0.15, 0.85, uLen));
+    styleTag = 11.0;
+    exParam = q.m.y;
+  } else if (isFerro) {
     rc = mix(S.colA.rgb, S.colC.rgb, smoothstep(0.35, 1.0, uLen));
     styleTag = 9.0;
     exParam = q.m.y;
@@ -3570,14 +4043,62 @@ fn vsRibbon(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     }
   }
   let headEnv = q.c.a;
-  o.col = vec4f(rc, select(headEnv * (0.48 + 0.52 * spd), headEnv * (0.78 + 0.22 * spd), isWebOnly || isDyn || isFerro));
-  if (isDyn || isFerro) { o.col.a = headEnv; }
+  o.col = vec4f(rc, select(headEnv * (0.48 + 0.52 * spd), headEnv * (0.78 + 0.22 * spd), isWebOnly || isDyn || isFerro || isBead || isSeed || isJelly));
+  if (isDyn || isFerro || isBead || isSeed || isJelly) { o.col.a = headEnv; }
   o.ex = vec4f(uLen, q.m.w, styleTag, exParam);
   return o;
 }
 
 @fragment
 fn fsRibbon(i: VO) -> @location(0) vec4f {
+  if (i.ex.z > 10.5) {
+    // Soft-Body Sticky Elastic Jelly / Slime Tendrils: glossy subsurface specular filament
+    let nx = clamp(i.uv.x, -1.0, 1.0);
+    let nz = sqrt(max(0.0, 1.0 - nx * nx));
+    let spec = pow(max(nz * 0.85 + nx * 0.28, 0.0), 22.0);
+    let fres = pow(1.0 - nz, 1.9);
+    let rgb = i.col.rgb * (0.55 + 0.45 * nz) + S.colB.rgb * (spec * 0.95 + fres * 0.45);
+    let a = clamp(smoothstep(1.0, 0.72, abs(nx)) * (0.74 + 0.26 * fres) * i.col.a, 0.0, 1.0);
+    if (a < 0.002) { discard; }
+    return vec4f(rgb * a, a);
+  }
+  if (i.ex.z > 9.5) {
+    // Hanging Beads, Bamboo/Brass Wind Chimes & Doorway Velvet Drape Strips
+    let bMode = u32(floor(i.ex.w + 0.05));
+    let nx = clamp(i.uv.x, -1.0, 1.0);
+    let nz = sqrt(max(0.0, 1.0 - nx * nx));
+    if (bMode == 1u) {
+      let beadPhase = fract(i.uv.y * 12.0) * 2.0 - 1.0;
+      let dBead = length(vec2f(nx, beadPhase));
+      let cordMask = smoothstep(0.24, 0.14, abs(nx));
+      if (dBead > 1.0 && cordMask < 0.02) { discard; }
+      let isFacet = dBead <= 1.0;
+      let bz = sqrt(max(0.0, 1.0 - min(1.0, dBead * dBead)));
+      let spec = pow(max(bz * 0.84 + nx * 0.35 - beadPhase * 0.22, 0.0), 24.0);
+      let beadCol = mix(i.col.rgb * (0.52 + 0.58 * bz), S.colB.rgb, spec * 0.95);
+      let cordCol = i.col.rgb * 0.42;
+      let rgb = select(cordCol, beadCol, isFacet);
+      let a = clamp(select(cordMask * 0.72, smoothstep(1.0, 0.76, dBead), isFacet) * i.col.a, 0.0, 1.0);
+      if (a < 0.003) { discard; }
+      return vec4f(rgb * a, a);
+    } else if (bMode == 2u) {
+      let isCord = i.uv.y < 0.24;
+      let spec = pow(max(nz * 0.86 + nx * 0.32, 0.0), select(18.0, 32.0, !isCord));
+      let nodeBands = 0.92 + 0.08 * sin(i.uv.y * 38.0);
+      let flash = fract(i.ex.w) * 1.1;
+      let rgb = i.col.rgb * (0.48 + 0.56 * nz) * nodeBands + S.colB.rgb * (spec * 0.85 + flash * 0.55);
+      let a = clamp(smoothstep(1.0, 0.75, abs(nx)) * select(0.96, 0.72, isCord) * i.col.a, 0.0, 1.0);
+      if (a < 0.003) { discard; }
+      return vec4f(rgb * a, a);
+    }
+    // bMode == 3u: Plush Velvet Doorway Drapes
+    let fold = 0.86 + 0.14 * cos(nx * 3.14159);
+    let sheen = pow(1.0 - abs(nx), 1.8) * 0.28;
+    let rgb = i.col.rgb * fold + S.colB.rgb * sheen;
+    let a = clamp(smoothstep(1.0, 0.82, abs(nx)) * 0.95 * i.col.a, 0.0, 1.0);
+    if (a < 0.003) { discard; }
+    return vec4f(rgb * a, a);
+  }
   if (i.ex.z > 8.5) {
     // Magnetic Ferrofluid Spikes: black liquid-chrome specular cylinder cone + metallic sheen
     let nx = clamp(i.uv.x, -1.0, 1.0);

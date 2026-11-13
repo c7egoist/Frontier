@@ -64,6 +64,9 @@ import { PE } from "./pe.js";
       crackMode: 0,         // 0 off, 1 movie cracked glacial ice, 2 earthquake stone ground fracture
       crackSpeed: 2.6,      // fracture front propagation speed (m/s)
       crackDepth: 0.44,     // fissure heave / abyss tilt amplitude (m)
+      beadsMode: 0,         // 0 off, 1 hanging crystal bead curtain, 2 bamboo/brass wind chimes, 3 velvet theater drape strips
+      seedHeadMode: 0,      // 0 off, 1 dandelion puff pappus seed heads, 2 spring blossom detachment boughs
+      jellyMode: 0,         // 0 off, 1 soft-body neon jelly cube/blob + sticky tendrils, 2 elastic slime cluster + tendrils
       temperature: 0.6,     // molecular: kT in reduced units (m = 1)
       epsilon: 0.15,        // molecular: Lennard-Jones well depth
       sigma: 0.08,          // molecular: particle diameter
@@ -1214,11 +1217,119 @@ import { PE } from "./pe.js";
         colA: hex("#541c6b"), colC: hex("#ff3e8a"), colB: hex("#32ffe6"),
       }),
     },
+    // Priority 4 (§6): #3 Hanging Beads, Curtains & Bamboo Chimes
+    {
+      id: "beaded-door-curtain", name: "Crystal Bead Door Curtain", group: "Cloth & Rigging",
+      blurb: "Lintel-pinned vertical strands of shimmering faceted crystal & magenta beads that part elastically around thrown balls and clatter cleanly.",
+      p: P({
+        kind: 5, shape: 1, blend: "alpha", capacity: 280, rate: 0,
+        emitShape: 3, boxHalf: [2.15, 1.55, 0.26], origin: [-2.15, 0.0, 0.2], dir: [0, 1, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0, gravity: 0.9, buoyancy: 0,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.072, sizeEnd: 0.072, sizeScale: 1.0,
+        beadsMode: 1, dynRows: 24, dynHeight: 3.15, dynSag: 0.04, dynStiff: 1.25, dynWaveSpeed: 1.75, dynTearThresh: 14.0,
+        curlFreq: 0.95, curlAmp: 1.15, windCoupling: 1.1, showObject: true,
+        colA: hex("#382061"), colC: hex("#5ce1ff"), colB: hex("#ff88d6"),
+      }),
+    },
+    {
+      id: "bamboo-wind-chimes", name: "Bamboo & Brass Wind Chimes", group: "Cloth & Rigging",
+      blurb: "Hollow tuned bamboo & brushed-brass chimes suspended from an arched striker crown around a dangling sail clapper that ring & glow when struck.",
+      p: P({
+        kind: 5, shape: 1, blend: "alpha", capacity: 120, rate: 0,
+        emitShape: 2, radius: 0.56, boxHalf: [0.62, 1.45, 0.62], origin: [0.15, 0.0, 0.0], dir: [0, 1, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0, gravity: 1.0, buoyancy: 0,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.088, sizeEnd: 0.088, sizeScale: 1.0,
+        beadsMode: 2, dynRows: 12, dynHeight: 2.95, dynSag: 0.02, dynStiff: 1.48, dynWaveSpeed: 2.15, dynTearThresh: 0.0,
+        curlFreq: 0.85, curlAmp: 1.0, windCoupling: 1.25, showObject: true,
+        colA: hex("#80521f"), colC: hex("#dfa949"), colB: hex("#fff5bd"),
+      }),
+    },
+    {
+      id: "velvet-theater-drapes", name: "Velvet Theatre Drape Strips", group: "Cloth & Rigging",
+      blurb: "Tall top-rail doorway curtain pleats billowing gently in indoor air drafts and parting softly around passing 3D projectiles.",
+      p: P({
+        kind: 5, shape: 1, blend: "alpha", capacity: 180, rate: 0,
+        emitShape: 3, boxHalf: [2.05, 1.5, 0.22], origin: [2.3, 0.0, -0.2], dir: [0, 1, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0, gravity: 1.0, buoyancy: 0,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.115, sizeEnd: 0.115, sizeScale: 1.0,
+        beadsMode: 3, dynRows: 26, dynHeight: 3.08, dynSag: 0.06, dynStiff: 0.95, dynWaveSpeed: 1.5, dynTearThresh: 15.0,
+        curlFreq: 0.8, curlAmp: 1.35, windCoupling: 1.35, showObject: true,
+        colA: hex("#4d081c"), colC: hex("#aa1840"), colB: hex("#ffd57a"),
+      }),
+    },
+    // #4 Dandelion Puff / Seed Heads & Blossom Detachment
+    {
+      id: "dandelion-puff", name: "Dandelion Puff & Wish Seeds", group: "Foliage & Flora",
+      blurb: "Delicate spherical pappus parachute seeds poised on swaying meadow stalks — blow away in swirling gusts or shatter into floating plumes on ball pass.",
+      p: P({
+        kind: 5, shape: 2, blend: "alpha", capacity: 460, rate: 0,
+        emitShape: 1, radius: 0.54, boxHalf: [1.75, 1.0, 1.75], origin: [-1.85, 0.0, 0.15], dir: [0, 1, 0], spread: 0.4,
+        speedMin: 0.6, speedMax: 2.2, drag: 1.35, gravity: 0.18, buoyancy: 0.32, flutter: 1.45,
+        lifeMin: 12, lifeMax: 18, sizeStart: 0.088, sizeEnd: 0.085, sizeScale: 1.0,
+        seedHeadMode: 1, dynRows: 7, dynHeight: 1.9, dynStiff: 1.15, dynWaveSpeed: 1.6, dynTearThresh: 3.2,
+        curlFreq: 0.95, curlAmp: 1.45, windCoupling: 2.25, showObject: true,
+        colA: hex("#316b24"), colC: hex("#eef7e3"), colB: hex("#ffffff"),
+      }),
+    },
+    {
+      id: "blossom-branch-detach", name: "Spring Blossom Detachment", group: "Foliage & Flora",
+      blurb: "Flowering orchard boughs trembling under wind eddies and shaking loose clouds of spinning sakura & apple blossoms when brushed or gusted.",
+      p: P({
+        kind: 5, shape: 2, blend: "alpha", capacity: 480, rate: 0,
+        emitShape: 3, radius: 0.48, boxHalf: [1.95, 1.3, 1.75], origin: [2.1, 0.0, -0.15], dir: [0, 1, 0], spread: 0.5,
+        speedMin: 0.5, speedMax: 1.9, drag: 1.15, gravity: 0.24, buoyancy: 0.15, flutter: 1.85,
+        lifeMin: 10, lifeMax: 16, sizeStart: 0.098, sizeEnd: 0.09, sizeScale: 1.0,
+        seedHeadMode: 2, dynRows: 10, dynHeight: 2.65, dynStiff: 1.18, dynWaveSpeed: 1.85, dynTearThresh: 2.8,
+        curlFreq: 1.05, curlAmp: 1.35, windCoupling: 2.45, showObject: true,
+        colA: hex("#543326"), colC: hex("#ffb5ca"), colB: hex("#fff2f6"),
+      }),
+    },
+    // #8 Soft-Body Jelly / Slime Blobs & Stretchy Tendrils
+    {
+      id: "jelly-slime-blob", name: "Soft-Body Jelly Cube & Tendrils", group: "Pyro & Water",
+      blurb: "Volume-preserving neon-lime gelatin body that wobbles harmonically, squashes cleanly against floor/balls, and pulls glossy sticky tendrils.",
+      p: P({
+        kind: 5, shape: 1, blend: "alpha", capacity: 440, rate: 0,
+        emitShape: 3, radius: 1.15, boxHalf: [1.15, 1.15, 1.15], origin: [-1.8, 1.25, 0.2], dir: [0, 1, 0], spread: 0.2,
+        speedMin: 0, speedMax: 0, drag: 0.4, gravity: 1.0, buoyancy: 0.0, bounce: 0.72,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.115, sizeEnd: 0.115, sizeScale: 1.0,
+        jellyMode: 1, dynSag: 0.28, dynStiff: 1.65, dynWaveSpeed: 4.8, dynTearThresh: 5.5,
+        curlFreq: 1.25, curlAmp: 0.85, windCoupling: 0.85, showObject: true,
+        colA: hex("#09a864"), colC: hex("#32ffaa"), colB: hex("#dcfff0"),
+      }),
+    },
+    {
+      id: "slime-tendril-cluster", name: "Elastic Slime Tendril Cluster", group: "Pyro & Water",
+      blurb: "Glossy magenta-amber viscoelastic slime colony reaching rubbery adhesion strands toward passing spheres & wind fields before snapping back.",
+      p: P({
+        kind: 5, shape: 1, blend: "alpha", capacity: 440, rate: 0,
+        emitShape: 1, radius: 1.08, boxHalf: [1.1, 1.0, 1.1], origin: [2.05, 1.12, -0.15], dir: [0, 1, 0], spread: 0.2,
+        speedMin: 0, speedMax: 0, drag: 0.5, gravity: 1.0, buoyancy: 0.0, bounce: 0.58,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.11, sizeEnd: 0.11, sizeScale: 1.0,
+        jellyMode: 2, dynSag: 0.38, dynStiff: 1.32, dynWaveSpeed: 4.1, dynTearThresh: 4.8,
+        curlFreq: 1.35, curlAmp: 1.0, windCoupling: 1.0, showObject: true,
+        colA: hex("#85126e"), colC: hex("#ff3ec8"), colB: hex("#ffd1f5"),
+      }),
+    },
+    // #11 Dense Starling Murmuration + Predator Scattering
+    {
+      id: "starling-murmuration", name: "Starling Murmuration & Predator Scatter", group: "Wind-Blown",
+      blurb: "Hundreds of dusk-lit starlings sweeping in fluid murmuration waves and parting around fast thrown predator balls with flash-split evasion.",
+      p: P({
+        kind: 6, shape: 13, leafMode: 0, blend: "alpha", capacity: 520, rate: 95,
+        emitShape: 1, radius: 2.35, origin: [0, 3.25, 0], dir: [1, 0.14, 0], spread: 3.14,
+        speedMin: 3.4, speedMax: 5.4, drag: 0.04, gravity: 0,
+        lifeMin: 16, lifeMax: 24, sizeStart: 0.21, sizeEnd: 0.20, sizeScale: 1.0,
+        colA: hex("#1a2236"), colC: hex("#576e96"), colB: hex("#ffaa6e"),
+        windCoupling: 0.9, flutter: 1.85, swarmRadius: 1.85,
+        boidsCohere: 1.55, boidsAlign: 2.35, boidsSeparate: 3.25, boidsSpeed: 5.2,
+      }),
+    },
   ];
 
   PE.VFX_CATEGORIES = [
-    { id: "Cloth & Rigging", label: "Cloth & Rigging", badge: "CLOTH", blurb: "Ball-interactive wind flags, ship sails, swinging bridge cables, industrial chains, and leafy hanging vines" },
-    { id: "Foliage & Flora", label: "Foliage & Flora", badge: "FLORA", blurb: "Interactive grass & golden wheat, reeds, ferns, trees, underwater giant kelp & bioluminescent sea anemones" },
+    { id: "Cloth & Rigging", label: "Cloth & Rigging", badge: "CLOTH", blurb: "Ball-interactive wind flags, ship sails, hanging bead curtains, wind chimes, doorway drapes, cables & vines" },
+    { id: "Foliage & Flora", label: "Foliage & Flora", badge: "FLORA", blurb: "Interactive grass & wheat, reeds, ferns, trees, kelp, anemones, dandelion seed heads & orchard blossoms" },
     { id: "Ferrofluid & Fields", label: "Ferrofluid & Fields", badge: "FERRO", blurb: "Black liquid-chrome Rosensweig ferrofluid spike pools and 3D levitated crowns tracking magnets & Force Fields" },
     { id: "Fracture & Cracks", label: "Fracture & Cracks", badge: "CRACK", blurb: "Movie-style glacial ice cracking & earthquake Voronoi basalt ground fracture propagation with fissure debris" },
     { id: "Motion & Grids", label: "Motion & Grids", badge: "MOGRAPH", blurb: "Effector-driven halftone dot/box/triangle grids, height-extruded cube matrices, and obsidian surface lattices" },
@@ -1228,8 +1339,8 @@ import { PE } from "./pe.js";
     { id: "Shields & Tech", label: "Shields & Tech", badge: "TECH", blurb: "Multi-shape energy shield barriers with hex/circle/triangle/diamond/Voronoi cracks, radar sweeps, sonar & EMP domes" },
     { id: "Atmosphere & Sky", label: "Atmosphere & Sky", badge: "SKY", blurb: "Volumetric aurora borealis curtains, fireworks bursts, flares & floating atmospheric dust motes" },
     { id: "Ballistics & Sparks", label: "Ballistics & Sparks", badge: "BALLISTIC", blurb: "Shockwaves, beams, tracers, strike sparks, welding spray & high-velocity impact ballistics" },
-    { id: "Pyro & Water", label: "Pyro & Water", badge: "VFX", blurb: "Fire, smoke, embers, car mud & puddle splashes, concentric ripple rings, bubbles & viscous liquid splatters" },
-    { id: "Wind-Blown", label: "Wind-Blown", badge: "WIND", blurb: "Leaves, petals, seeds, feathers & boid/butterfly flocks driven by Force Fields" },
+    { id: "Pyro & Water", label: "Pyro & Water", badge: "VFX", blurb: "Fire, smoke, embers, soft-body jelly/slime tendrils, car mud & puddle splashes, ripples & bubbles" },
+    { id: "Wind-Blown", label: "Wind-Blown", badge: "WIND", blurb: "Leaves, petals, seeds, starling murmurations & butterfly boids driven by Force Fields & predator balls" },
     { id: "Storms & Weather", label: "Storms & Weather", badge: "WEATHER", blurb: "Rain, snow, hail, sandstorms, tornado debris, ash & sand" },
   ];
 
@@ -1242,9 +1353,9 @@ import { PE } from "./pe.js";
     if ((p.ferroMode || 0) > 0 || g === "Ferrofluid & Fields") return "Ferrofluid & Fields";
     if ((p.crackMode || 0) > 0 || g === "Fracture & Cracks") return "Fracture & Cracks";
     if ((p.gridMode || 0) > 0 || g === "Motion & Grids") return "Motion & Grids";
-    if ((p.dynMode || 0) >= 1 && (p.dynMode || 0) <= 3 || g === "Cloth & Rigging") return "Cloth & Rigging";
-    if ((p.dynMode || 0) >= 4 || g === "Foliage & Flora") return "Foliage & Flora";
-    if ((p.mudSplashMode || 0) > 0) return "Pyro & Water";
+    if ((p.beadsMode || 0) > 0 || ((p.dynMode || 0) >= 1 && (p.dynMode || 0) <= 3) || g === "Cloth & Rigging") return "Cloth & Rigging";
+    if ((p.seedHeadMode || 0) > 0 || (p.dynMode || 0) >= 4 || g === "Foliage & Flora") return "Foliage & Flora";
+    if ((p.jellyMode || 0) > 0 || (p.mudSplashMode || 0) > 0) return "Pyro & Water";
     if (p.transition || g === "Transitions") return "Transitions";
     if (p.blackHole || p.heatShimmer || g === "Space") return "Space & Distortion";
     if (p.shape === 11 || p.shape === 12 || p.shape === 15 || p.shape === 16) return "Shields & Tech";
@@ -1263,6 +1374,13 @@ import { PE } from "./pe.js";
     if (p.arcMode === 1) return "Static Shock";
     if (p.arcMode === 2) return "Plasma Cage";
     if (p.arcMode === 3) return "Lightning Web";
+    if ((p.beadsMode || 0) === 1) return "Bead Curtain";
+    if ((p.beadsMode || 0) === 2) return "Bamboo Chimes";
+    if ((p.beadsMode || 0) === 3) return "Doorway Drapes";
+    if ((p.seedHeadMode || 0) === 1) return "Dandelion Seeds";
+    if ((p.seedHeadMode || 0) === 2) return "Blossom Boughs";
+    if ((p.jellyMode || 0) === 1) return "Soft-Body Jelly";
+    if ((p.jellyMode || 0) === 2) return "Slime Tendrils";
     if ((p.ferroMode || 0) === 1) return "Ferrofluid Pool";
     if ((p.ferroMode || 0) === 2) return "Levitated Ferrofluid";
     if ((p.crackMode || 0) === 1) return "Cracked Ice";
@@ -1299,7 +1417,11 @@ import { PE } from "./pe.js";
     if (p.curlMode === 1) return "Curl Wave";
     if (p.curlMode === 2) return "Curl Sphere";
     if (p.curlMode === 3) return (p.pulseMode || 0) > 0 ? "Surface Pour" : "Ribbon Stream";
-    if (p.kind === 6) return p.leafMode === 1 ? "Butterfly Flock" : (p.leafMode === 2 ? "Fish School" : "Boids Flock");
+    if (p.kind === 6) {
+      const pid = paramsOrPreset?.id || "";
+      if (pid === "starling-murmuration") return "Murmuration Flock";
+      return p.leafMode === 1 ? "Butterfly Flock" : (p.leafMode === 2 ? "Fish School" : "Boids Flock");
+    }
     if ((p.trailMode || 0) > 0) return p.shape === 14 ? "Viscous Drip" : "Projectile Trail";
     if (p.magneticField) return "Dipole Guided";
     if (p.kind === 1) return "Wind-driven";

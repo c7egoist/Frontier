@@ -40,7 +40,7 @@ import { PE } from "./pe.js";
       const U = GPUBufferUsage;
       this.engine = engine;
       this.cap = Math.max(64, Math.floor(params.capacity));
-      this.isRibbon = !params.transition && ((params.curlMode || 0) === 3 || (params.trailMode || 0) > 0 || (params.webMode || 0) > 0 || (params.dynMode || 0) > 0 || (params.mudSplashMode || 0) > 0 || (params.ferroMode || 0) > 0);
+      this.isRibbon = !params.transition && ((params.curlMode || 0) === 3 || (params.trailMode || 0) > 0 || (params.webMode || 0) > 0 || (params.dynMode || 0) > 0 || (params.mudSplashMode || 0) > 0 || (params.ferroMode || 0) > 0 || (params.beadsMode || 0) > 0 || (params.seedHeadMode || 0) > 0 || (params.jellyMode || 0) > 0);
       this.parts = d.createBuffer({ size: this.cap * PART_BYTES, usage: U.STORAGE | U.COPY_SRC | U.COPY_DST });
       this.snap = d.createBuffer({ size: this.cap * PART_BYTES, usage: U.STORAGE | U.COPY_DST });
       this.trail = this.isRibbon ? d.createBuffer({ size: this.cap * TRAIL_SEGS * 16, usage: U.STORAGE | U.COPY_DST }) : null;
@@ -677,14 +677,17 @@ import { PE } from "./pe.js";
     const crackMode = !isTrans && !hasArc && !hasBeam && !isBoid ? Math.max(0, Math.min(2, p.crackMode | 0)) : 0;
     const ferroMode = !isTrans && !hasArc && !hasBeam && !isBoid && !crackMode ? Math.max(0, Math.min(2, p.ferroMode | 0)) : 0;
     const mudMode = !isTrans && !hasArc && !hasBeam && !isBoid && !crackMode && !ferroMode ? Math.max(0, Math.min(3, p.mudSplashMode | 0)) : 0;
-    const webMode = !isTrans && !hasArc && !hasBeam && !isBoid && !crackMode && !ferroMode && !mudMode ? Math.max(0, Math.min(2, p.webMode | 0)) : 0;
-    const dynMode = !isTrans && !hasArc && !hasBeam && !isBoid && !crackMode && !ferroMode && !mudMode && !webMode ? Math.max(0, Math.min(9, p.dynMode | 0)) : 0;
-    const gridMode = !isTrans && !hasArc && !hasBeam && !isBoid && !crackMode && !ferroMode && !mudMode && !webMode && !dynMode ? Math.max(0, Math.min(2, p.gridMode | 0)) : 0;
-    const isRibbon = !crackMode && !ferroMode && !mudMode && !webMode && !dynMode && !gridMode && (p.curlMode || 0) === 3;
+    const beadsMode = !isTrans && !hasArc && !hasBeam && !isBoid && !crackMode && !ferroMode && !mudMode ? Math.max(0, Math.min(3, p.beadsMode | 0)) : 0;
+    const seedHeadMode = !isTrans && !hasArc && !hasBeam && !isBoid && !crackMode && !ferroMode && !mudMode && !beadsMode ? Math.max(0, Math.min(2, p.seedHeadMode | 0)) : 0;
+    const jellyMode = !isTrans && !hasArc && !hasBeam && !isBoid && !crackMode && !ferroMode && !mudMode && !beadsMode && !seedHeadMode ? Math.max(0, Math.min(2, p.jellyMode | 0)) : 0;
+    const webMode = !isTrans && !hasArc && !hasBeam && !isBoid && !crackMode && !ferroMode && !mudMode && !beadsMode && !seedHeadMode && !jellyMode ? Math.max(0, Math.min(2, p.webMode | 0)) : 0;
+    const dynMode = !isTrans && !hasArc && !hasBeam && !isBoid && !crackMode && !ferroMode && !mudMode && !beadsMode && !seedHeadMode && !jellyMode && !webMode ? Math.max(0, Math.min(9, p.dynMode | 0)) : 0;
+    const gridMode = !isTrans && !hasArc && !hasBeam && !isBoid && !crackMode && !ferroMode && !mudMode && !beadsMode && !seedHeadMode && !jellyMode && !webMode && !dynMode ? Math.max(0, Math.min(2, p.gridMode | 0)) : 0;
+    const isRibbon = !crackMode && !ferroMode && !mudMode && !beadsMode && !seedHeadMode && !jellyMode && !webMode && !dynMode && !gridMode && (p.curlMode || 0) === 3;
     const tp = p.targetPos || [o.origin[0] + 4, o.origin[1], o.origin[2]];
     const packedDyn = dynMode > 0 ? (dynMode <= 7 ? 5 + dynMode : 6 + dynMode) : 0;
-    const packedCurlMode = crackMode > 0 ? 18 : (ferroMode > 0 ? 17 : (mudMode > 0 ? 16 : (webMode > 0 ? (3 + webMode) : (dynMode > 0 ? packedDyn : (gridMode > 0 ? 13 : (p.curlMode || 0))))));
-    const packedRate = crackMode > 0 ? (p.curlFreq ?? 1.15) : (ferroMode > 0 ? (p.ferroMagnetSpeed ?? 1.35) : (mudMode > 0 ? (p.carSpeed ?? 4.2) : (webMode > 0 ? (p.webSpinRate ?? 1.0) : (dynMode > 0 ? (p.dynStiff ?? 1.0) : (gridMode > 0 ? (p.gridContrast ?? 1.85) : (p.curlRate ?? 0.24))))));
+    const packedCurlMode = jellyMode > 0 ? 21 : (seedHeadMode > 0 ? 20 : (beadsMode > 0 ? 19 : (crackMode > 0 ? 18 : (ferroMode > 0 ? 17 : (mudMode > 0 ? 16 : (webMode > 0 ? (3 + webMode) : (dynMode > 0 ? packedDyn : (gridMode > 0 ? 13 : (p.curlMode || 0)))))))));
+    const packedRate = (jellyMode > 0 || seedHeadMode > 0 || beadsMode > 0) ? (p.dynStiff ?? 1.25) : (crackMode > 0 ? (p.curlFreq ?? 1.15) : (ferroMode > 0 ? (p.ferroMagnetSpeed ?? 1.35) : (mudMode > 0 ? (p.carSpeed ?? 4.2) : (webMode > 0 ? (p.webSpinRate ?? 1.0) : (dynMode > 0 ? (p.dynStiff ?? 1.0) : (gridMode > 0 ? (p.gridContrast ?? 1.85) : (p.curlRate ?? 0.24)))))));
     const packedFreq = crackMode > 0 ? (p.crackSpeed ?? 2.6) : (p.curlFreq ?? 0.85);
     const packedAmp = crackMode > 0 ? (p.crackDepth ?? 0.44) : (p.curlAmp ?? 2.2);
     set("mol", packedCurlMode, packedFreq, packedAmp, packedRate);
@@ -693,6 +696,15 @@ import { PE } from "./pe.js";
       const waveId = tr.wave === "melt" ? 1 : tr.wave === "glitch" ? 2 : 0;
       set("mol2", waveId, tr.after === "butterfly" ? 1 : 0, tr.assemble | 0, tr.fragment ? 1 : 0);
       set("mol3", tr.holdBase ?? 0.5, tr.holdSpread ?? 1.5, tr.burstShare ?? 0.5, tr.childLife ?? 1.2);
+    } else if (jellyMode > 0) {
+      set("mol2", jellyMode, p.radius ?? 1.1, p.dynSag ?? 0.3, p.dynWaveSpeed ?? 4.5);
+      set("mol3", p.dynTearThresh ?? 5.2, p.bounce ?? 0.65, p.windCoupling ?? 0.9, o.preseedCurtain ? 1 : 0);
+    } else if (seedHeadMode > 0) {
+      set("mol2", seedHeadMode, p.dynRows ?? 8, p.dynHeight ?? 2.0, p.radius ?? 0.5);
+      set("mol3", p.dynTearThresh ?? 3.0, p.dynWaveSpeed ?? 1.7, p.windCoupling ?? 2.2, o.preseedCurtain ? 1 : 0);
+    } else if (beadsMode > 0) {
+      set("mol2", beadsMode, p.dynRows ?? 24, p.dynHeight ?? 3.0, p.sizeStart ?? 0.08);
+      set("mol3", p.dynSag ?? 0.04, p.dynWaveSpeed ?? 1.8, p.dynTearThresh ?? 14.0, o.preseedCurtain ? 1 : 0);
     } else if (crackMode > 0) {
       const gridSide = Math.max(8, Math.round(Math.sqrt(Math.max(64, o.cap * 0.72))));
       set("mol2", crackMode, gridSide, o.crackHit ? o.crackHit.x : o.origin[0], o.crackHit ? o.crackHit.z : o.origin[2]);
