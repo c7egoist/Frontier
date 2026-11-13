@@ -259,19 +259,26 @@ bool FieldLatticeVulkanExecutor::Initialize(
         return false;
     }
 
+#if defined(__linux__)
+    const std::filesystem::path IcdJson  = SwiftShaderIcdDir / "vk_swiftshader_icd.json";
+    const std::filesystem::path LoaderSo = SwiftShaderIcdDir / "libvulkan.so.1";
+    if (std::filesystem::exists(IcdJson) && std::getenv("VK_ICD_FILENAMES") == nullptr)
+    {
+        const std::string AbsoluteIcd = std::filesystem::weakly_canonical(IcdJson).string();
+        setenv("VK_ICD_FILENAMES", AbsoluteIcd.c_str(), 0);
+        setenv("VK_DRIVER_FILES", AbsoluteIcd.c_str(), 0);
+    }
+#else
+    (void)SwiftShaderIcdDir;
+#endif
+
     if (volkInitialize() != VK_SUCCESS)
     {
 #if defined(__linux__)
-        const std::filesystem::path IcdJson   = SwiftShaderIcdDir / "vk_swiftshader_icd.json";
-        const std::filesystem::path LoaderSo  = SwiftShaderIcdDir / "libvulkan.so.1";
-        if (std::filesystem::exists(IcdJson))
-        {
-            setenv("VK_ICD_FILENAMES", IcdJson.string().c_str(), 1);
-            setenv("VK_DRIVER_FILES", IcdJson.string().c_str(), 1);
-        }
         if (std::filesystem::exists(LoaderSo))
         {
-            DeviceHandle->LoaderModule = dlopen(LoaderSo.string().c_str(), RTLD_NOW | RTLD_LOCAL);
+            const std::string LoaderPath = std::filesystem::weakly_canonical(LoaderSo).string();
+            DeviceHandle->LoaderModule   = dlopen(LoaderPath.c_str(), RTLD_NOW | RTLD_LOCAL);
             if (DeviceHandle->LoaderModule != nullptr)
             {
                 auto GetInstProc = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
@@ -282,8 +289,6 @@ bool FieldLatticeVulkanExecutor::Initialize(
                 }
             }
         }
-#else
-        (void)SwiftShaderIcdDir;
 #endif
     }
 

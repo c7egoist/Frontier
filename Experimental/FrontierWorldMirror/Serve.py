@@ -18,6 +18,18 @@ class FrontierWorldMirrorHandler(SimpleHTTPRequestHandler):
         self.send_response(204)
         self.end_headers()
 
+    def do_HEAD(self):
+        path_only = self.path.split("?", 1)[0]
+        if path_only in ("/", "/index.html"):
+            index_file = EDITOR_DIR / "index.html"
+            size = index_file.stat().st_size
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(size))
+            self.end_headers()
+            return
+        super().do_HEAD()
+
     def do_GET(self):
         path_only = self.path.split("?", 1)[0]
         if path_only == "/__diag":

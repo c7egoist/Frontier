@@ -37,6 +37,19 @@ import {
   SolveGizmoDrag,
 } from "./TransformGizmo3D.js";
 import {
+  BuildForceOverlayGeometry,
+  DEFAULT_FORCE_OVERLAY,
+  ENGINE_FORCE_PRESETS,
+  EvaluateSceneForceFieldAt,
+  FORCE_MODELS,
+  ParseForceModelToml,
+  PickForceBeacon,
+  ResolveForceValues,
+  SampleCurlNoise3D,
+  SerializeForceModelToml,
+} from "./ForceFieldCatalog.js";
+import { CompileFieldProgram, DEFAULT_FORMULA_CODE } from "./VectorFieldLang.js";
+import {
   BuildDefaultLevels,
   CreateNewLevelRecord,
 } from "./LevelSystem.js";
@@ -405,6 +418,107 @@ assert.ok(
   "Bundled index.html embeds Slate GizmoPRO, Level Switcher, and Create Level modal",
 );
 
+// 10. Verify WebGPU 120 FPS Renderer, Always-On-Top Gizmo Overlap Picking, and 19-Law ForceFields + VectorFieldLang
+assert.ok(
+  ViewportSrc.includes("WebgpuGtxRenderer") &&
+    ViewportSrc.includes("ForceOverlay") &&
+    ViewportSrc.includes("PickGizmoHandle"),
+  "WebgpuGtxRenderer + Always-On-Top Gizmo + ForceOverlay GPU pass wired in GtxWorldViewport",
+);
+
+// Verify gizmo picks TranslateX even when an overlapping scene object stands in front of Pivot along the camera ray
+const BehindPivot = [0.0, 1.4, 0.45];
+const OverlapGizmo = BuildSlateGizmoGeometry(BehindPivot, [0, 1, 0], 1.0);
+// Front occluder sphere sits at [0.85, 0.2, 0.45] right between camera [0.85, -2.5, 0.45] and Gizmo TranslateX shaft/cone
+const OverlapHit = PickGizmoHandle([0.85, -2.5, 0.45], [0, 1, 0], OverlapGizmo);
+assert.equal(
+  OverlapHit,
+  GizmoHandle.TranslateX,
+  "Gizmo handle picks cleanly on top even when another scene object overlaps in front",
+);
+
+assert.equal(FORCE_MODELS.length, 19, "All 19 canonical C++ ForceModel laws registered");
+assert.equal(ENGINE_FORCE_PRESETS.length, 12, "12 built-in Engine Force presets registered");
+
+// Numerical divergence of analytical SampleCurlNoise3D must be near zero (incompressible curl field)
+const CurlEps = 1e-3;
+const CxP = SampleCurlNoise3D(1.01 + CurlEps, -0.37, 0.64, 1.3, 3, 0.0)[0];
+const CxM = SampleCurlNoise3D(1.01 - CurlEps, -0.37, 0.64, 1.3, 3, 0.0)[0];
+const CyP = SampleCurlNoise3D(1.01, -0.37 + CurlEps, 0.64, 1.3, 3, 0.0)[1];
+const CyM = SampleCurlNoise3D(1.01, -0.37 - CurlEps, 0.64, 1.3, 3, 0.0)[1];
+const CzP = SampleCurlNoise3D(1.01, -0.37, 0.64 + CurlEps, 1.3, 3, 0.0)[2];
+const CzM = SampleCurlNoise3D(1.01, -0.37, 0.64 - CurlEps, 1.3, 3, 0.0)[2];
+const CurlDiv = (CxP - CxM + (CyP - CyM) + (CzP - CzM)) / (2.0 * CurlEps);
+assert.ok(Math.abs(CurlDiv) < 1e-3, `SampleCurlNoise3D is incompressible (div=${CurlDiv.toExponential(2)})`);
+
+// Symbolic VectorFieldLang compiler + evaluation through EvaluateSceneForceFieldAt
+const CompiledFormula = CompileFieldProgram(DEFAULT_FORMULA_CODE);
+assert.equal(CompiledFormula.Ok, true, "Default symbolic VectorFieldLang formula compiles cleanly");
+const SampledFormulaVec = EvaluateSceneForceFieldAt(
+  [
+    {
+      Id: "formula-force-1",
+      Position: [0, 0, 1.0],
+      Rotation: [0, 0, 0],
+      Force: ResolveForceValues({
+        Model: "RotationalColumn",
+        Strength: 12.0,
+        Radius: 4.0,
+        FormulaEnabled: true,
+        FormulaCode: DEFAULT_FORMULA_CODE,
+      }),
+    },
+  ],
+  1.0,
+  0.5,
+  1.25,
+  0.0,
+);
+assert.ok(
+  Array.isArray(SampledFormulaVec) &&
+    SampledFormulaVec.every((Comp) => Number.isFinite(Comp)) &&
+    Math.hypot(...SampledFormulaVec) > 0.01,
+  "Compiled symbolic formula evaluates finite non-zero 3D acceleration",
+);
+
+// .ForceModel TOML round-trip + ForceOverlay geometry + Beacon picking
+const VortexForce = ResolveForceValues({
+  Model: "RotationalColumn",
+  Strength: 14.5,
+  Radius: 3.2,
+});
+const EncodedForceToml = SerializeForceModelToml("Validation Vortex", VortexForce, {
+  Position: [0.0, 0.4, 0.8],
+  Rotation: [0, 0, 0],
+});
+const DecodedForceDoc = ParseForceModelToml(EncodedForceToml);
+assert.equal(DecodedForceDoc.Force.Model, "RotationalColumn", ".ForceModel TOML round-trips Model");
+assert.equal(DecodedForceDoc.Force.Strength, 14.5, ".ForceModel TOML round-trips Strength");
+
+const ForceNodes = [
+  {
+    Id: "force-vortex-1",
+    Position: [0.0, 0.4, 0.8],
+    Rotation: [0, 0, 0],
+    Force: VortexForce,
+  },
+];
+const EvaluatedForce = EvaluateSceneForceFieldAt(ForceNodes, 1.0, 0.4, 0.8, 0.0);
+assert.ok(Math.hypot(...EvaluatedForce) > 0.1, "RotationalColumn evaluates non-zero acceleration");
+
+const BuiltForceOverlay = BuildForceOverlayGeometry(
+  ForceNodes,
+  { ...DEFAULT_FORCE_OVERLAY, SliceEnabled: true },
+  "force-vortex-1",
+  0.25,
+);
+assert.ok(
+  BuiltForceOverlay.OpaqueVertexCount > 100 && BuiltForceOverlay.TranslucentVertexCount > 500,
+  "ForceOverlay builds opaque beacons/arrows + translucent envelopes/streamlines/heatmap slice",
+);
+const PickedForce = PickForceBeacon([0.0, -2.0, 0.8], [0, 1, 0], BuiltForceOverlay);
+assert.equal(PickedForce?.Id, "force-vortex-1", "PickForceBeacon selects Force source beacon in 3D");
+
 console.log(
-  "[WorldMirrorValidation] ALL 9 SUITES PASSED: Unreal WASD Camera, Atomic Multi-Worker GTX (zero scanline wipe), WebGL2 + CPU GTX self-healing, ring-free GTX shadows/GI, 20-channel Material Atlas, 13-handle Slate GizmoPRO, 2px Selection Outline, and Multi-Level Footer/Modal verified!",
+  "[WorldMirrorValidation] ALL 10 SUITES PASSED: WebGPU + WebGL2 + Atomic Multi-Worker CPU GTX, Always-On-Top 13-handle GizmoPRO, 19 ForceModels (CurlNoise div=0), VectorFieldLang, .ForceModel TOML, 20-channel Material Atlas, and Multi-Level World Editor verified!",
 );

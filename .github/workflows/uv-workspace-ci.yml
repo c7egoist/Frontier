@@ -63,7 +63,9 @@ jobs:
           log_path = Path(sys.argv[1])
           profile = sys.argv[2]
           text = log_path.read_text(errors='replace') if log_path.exists() else 'CTest log was not produced.'
-          tail = text[-7000:].replace('%', '%25').replace('\\r', '%0D').replace('\\n', '%0A')
+          fail_lines = [ln for ln in text.splitlines() if 'FAILED' in ln or 'Test Failed' in ln or 'error' in ln.lower()]
+          summary = '\n'.join(fail_lines[-30:]) if fail_lines else text[-3000:]
+          tail = summary[-3500:].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
           print(f'::error title=CTest-{profile}::{tail}')
           PY
               exit 1

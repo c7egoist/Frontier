@@ -386,7 +386,7 @@ export function PickGizmoHandle(RayOrigin, RayDir, BuiltGizmo) {
     }
   };
 
-  // 1. CenterRing billboarded annulus with generous Slate pick tolerance
+  // 1. CenterRing billboarded annulus with front-tube priority & generous Slate pick tolerance
   const RingHit = EvaluatePlaneRayIntersection(
     Pivot,
     BuiltGizmo.ViewNormal,
@@ -397,7 +397,7 @@ export function PickGizmoHandle(RayOrigin, RayDir, BuiltGizmo) {
     const Radial = Len3(Sub3(RingHit, Pivot));
     const BandTol = L * 0.046;
     if (Math.abs(Radial - BuiltGizmo.CenterMajorR) <= BandTol) {
-      Consider(Len3(Sub3(RingHit, RayOrigin)), GizmoHandle.CenterRing);
+      Consider(Len3(Sub3(RingHit, RayOrigin)) - 0.028 * L, GizmoHandle.CenterRing);
     }
   }
 
@@ -444,7 +444,7 @@ export function PickGizmoHandle(RayOrigin, RayDir, BuiltGizmo) {
   const CylDist = 0.67 * L;
   const CylHalfH = 0.095 * L;
   const CylPickR = 0.082 * L;
-  const StemStart = BuiltGizmo.CenterMajorR * 0.96;
+  const StemStart = BuiltGizmo.CenterMajorR + 0.038 * L;
   const ConeEnd = TipDist + 0.195 * L;
   const StemPickR = 0.048 * L;
   const ConePickR = 0.082 * L;
