@@ -14,8 +14,8 @@ import {
   TILES_PER_PRIM,
 } from "./MaterialAtlasCompiler.js";
 
-const SCENE_DATA_FLOATS = 8 * 36 * 4; // 1152 floats = 4608 bytes (32 primitives + 4 area lights)
-const LIGHT_ROW_BASE = 32;
+const SCENE_DATA_FLOATS = 8 * 104 * 4; // 3328 floats = 13312 bytes (96 primitives + 6 area lights)
+const LIGHT_ROW_BASE = 96;
 const GIZMO_STRIDE_BYTES = 12 * 4; // 48 bytes per vertex
 
 export const GTX_WGSL_SCENE_SHADER = /* wgsl */ `
@@ -33,7 +33,7 @@ struct SceneUniforms {
 };
 
 @group(0) @binding(0) var<uniform> U : SceneUniforms;
-@group(0) @binding(1) var<storage, read> uSceneData : array<vec4f, 288>;
+@group(0) @binding(1) var<storage, read> uSceneData : array<vec4f, 832>;
 @group(0) @binding(2) var uMaterialAtlas : texture_2d<f32>;
 @group(0) @binding(3) var uAtlasSampler  : sampler;
 
@@ -59,9 +59,10 @@ fn sdFetch(col : i32, row : i32) -> vec4f {
   return uSceneData[row * 8 + col];
 }
 
-fn PrimFlagShadow(flags : i32) -> bool { return (flags & 1) != 0; }
-fn PrimFlagGi(flags : i32) -> bool     { return (flags & 2) != 0; }
-fn PrimFlagGlass(flags : i32) -> bool  { return (flags & 4) != 0; }
+fn PrimFlagShadow(flags : i32) -> bool    { return (flags & 1) != 0; }
+fn PrimFlagGi(flags : i32) -> bool        { return (flags & 2) != 0; }
+fn PrimFlagGlass(flags : i32) -> bool     { return (flags & 4) != 0; }
+fn PrimFlagFaceAtlas(flags : i32) -> bool { return (flags & 8) != 0; }
 
 struct RotBasis {
   c0 : vec3f,
@@ -417,9 +418,38 @@ fn finalizeHit(ro : vec3f, rd : vec3f, idx : i32, t : f32, backface : bool) -> H
     ut = computeBoxUvAndTangent(lp, h, ln);
   }
 
+  let flags = i32(sdFetch(1, idx).w + 0.5);
+  var finalUv = ut.uv;
+  if (PrimFlagFaceAtlas(flags)) {
+    var faceIdx : i32 = 2;
+    var faceUv = clamp(finalUv, vec2f(0.0), vec2f(1.0));
+    if (shape >= 2) {
+      if (ln.z > 0.85) {
+        faceIdx = 5;
+        faceUv = clamp((lp.xy / max(h.xy, vec2f(1e-4))) * 0.5 + 0.5, vec2f(0.0), vec2f(1.0));
+      } else if (ln.z < -0.85) {
+        faceIdx = 4;
+        faceUv = clamp((lp.xy / max(h.xy, vec2f(1e-4))) * 0.5 + 0.5, vec2f(0.0), vec2f(1.0));
+      } else {
+        faceIdx = 2;
+      }
+    } else {
+      let an = abs(ln);
+      if (an.x >= an.y && an.x >= an.z)      { faceIdx = select(0, 1, ln.x > 0.0); }
+      else if (an.y >= an.x && an.y >= an.z) { faceIdx = select(2, 3, ln.y > 0.0); }
+      else                                   { faceIdx = select(4, 5, ln.z > 0.0); }
+    }
+    let cellCol = f32(faceIdx % 3);
+    let cellRow = f32(faceIdx / 3);
+    finalUv = vec2f(
+      (cellCol + 0.08 + faceUv.x * 0.84) / 3.0,
+      (cellRow + 0.08 + faceUv.y * 0.84) / 2.0
+    );
+  }
+
   info.normal  = fwdRotateCols(select(ln, -ln, backface), rot);
   info.tangent = fwdRotateCols(ut.lt, rot);
-  info.uv      = ut.uv;
+  info.uv      = finalUv;
   return info;
 }
 
@@ -517,16 +547,19 @@ fn traceLightQuad(ro : vec3f, rd : vec3f, tMax : f32) -> LightHit {
   for (var li : i32 = 0; li < lightCount; li = li + 1) {
     let l0 = sdFetch(0, ${LIGHT_ROW_BASE} + li);
     let l1 = sdFetch(1, ${LIGHT_ROW_BASE} + li);
-    let lc = l0.xyz;
-    let hw = l0.w;
-    let hh = l1.x;
-    let t = (lc.z - ro.z) / rd.z;
-    if (t > 0.01 && t < res.t) {
-      let hp = ro + rd * t;
-      if (abs(hp.x - lc.x) <= hw && abs(hp.y - lc.y) <= hh) {
-        res.t = t;
-        res.emit = select(l1.yzw * 0.14, l1.yzw, rd.z > 0.0);
-        res.idx = li;
+    let l2 = sdFetch(2, ${LIGHT_ROW_BASE} + li);
+    if (l2.x > 0.5) {
+      let lc = l0.xyz;
+      let hw = l0.w;
+      let hh = l1.x;
+      let t = (lc.z - ro.z) / rd.z;
+      if (t > 0.01 && t < res.t) {
+        let hp = ro + rd * t;
+        if (abs(hp.x - lc.x) <= hw && abs(hp.y - lc.y) <= hh) {
+          res.t = t;
+          res.emit = select(l1.yzw * 0.14, l1.yzw, rd.z > 0.0);
+          res.idx = li;
+        }
       }
     }
   }
@@ -1235,16 +1268,33 @@ fn fsMain(@builtin(position) fragPos : vec4f) -> @location(0) vec4f {
   if (viewMode >= 10) {
     let dbg = viewMode - 10;
     if (fullHit.hit) {
-      entityCode = 1 + fullHit.primIdx;
+      let pPick = i32(sdFetch(3, fullHit.primIdx).w + 0.5);
+      entityCode = select(1 + fullHit.primIdx, pPick, pPick > 0);
       hitDist = fullHit.t;
       let dm = fetchMaterial(fullHit.primIdx, fullHit.uv);
       let sf = buildShadingFrame(fullHit, dm);
-      if (dbg == 1)      { linearColor = vec3f(1.0 - clamp(fullHit.t / 12.0, 0.0, 1.0)); }
-      else if (dbg == 2) { linearColor = fract(vec3f(f32(entityCode) * 0.37, f32(entityCode) * 0.61, f32(entityCode) * 0.83)); }
-      else if (dbg == 3) { linearColor = pow(clamp(dm.baseColor, vec3f(0.0), vec3f(1.0)), vec3f(1.0 / 2.2)); }
-      else if (dbg == 4) { linearColor = sf.N * 0.5 + 0.5; }
-      else if (dbg == 5) { linearColor = vec3f(dm.roughness); }
-      else               { linearColor = vec3f(dm.metallic); }
+      if (dbg == 1)       { linearColor = vec3f(1.0 - clamp(fullHit.t / 12.0, 0.0, 1.0)); }
+      else if (dbg == 2)  { linearColor = fract(vec3f(f32(entityCode) * 0.37, f32(entityCode) * 0.61, f32(entityCode) * 0.83)); }
+      else if (dbg == 3)  { linearColor = vec3f(0.5 + 0.5 * rd.x, 0.5 + 0.5 * rd.y, 0.5); }
+      else if (dbg == 4)  { linearColor = fract(vec3f(f32(fullHit.primIdx + 1) * 0.29, f32(fullHit.primIdx + 1) * 0.53, f32(fullHit.primIdx + 1) * 0.79)); }
+      else if (dbg == 5)  { linearColor = vec3f(floor((1.0 - clamp(fullHit.t / 14.0, 0.0, 1.0)) * 8.0) / 8.0); }
+      else if (dbg == 6)  { linearColor = pow(clamp(dm.baseColor, vec3f(0.0), vec3f(1.0)), vec3f(1.0 / 2.2)); }
+      else if (dbg == 7)  { linearColor = fullHit.normal * 0.5 + 0.5; }
+      else if (dbg == 8)  { linearColor = vec3f(dm.roughness); }
+      else if (dbg == 9)  { linearColor = vec3f(dm.metallic); }
+      else if (dbg == 10) { linearColor = sf.N * 0.5 + 0.5; }
+      else if (dbg == 11) { linearColor = vec3f(0.15, 0.78, 0.52) * clamp(1.0 - dm.roughness * 0.6, 0.2, 1.0); }
+      else if (dbg == 12) { linearColor = vec3f(clamp(length(U.uSunIrradiance.xyz) * 0.12 * max(0.08, dot(sf.N, U.uSunDir.xyz)), 0.0, 1.0)); }
+      else if (dbg == 13) { linearColor = vec3f(0.28, 0.56, 0.96) * clamp(dm.ao, 0.1, 1.0); }
+      else if (dbg == 14) {
+        let tile = floor(fragPos.xy / 16.0);
+        let parity = fract((tile.x + tile.y) * 0.5) * 2.0;
+        linearColor = mix(dm.baseColor * 0.55, vec3f(0.95, 0.68, 0.22), parity * 0.35);
+      } else if (dbg == 15) {
+        let gridP = abs(fract(fullHit.pos * 4.0) - 0.5);
+        let wire = smoothstep(0.05, 0.01, min(min(gridP.x, gridP.y), gridP.z));
+        linearColor = mix(sf.N * 0.3 + 0.3, vec3f(0.38, 0.84, 1.0), wire);
+      }
     } else {
       linearColor = vec3f(0.06, 0.07, 0.09);
     }
@@ -1253,10 +1303,11 @@ fn fsMain(@builtin(position) fragPos : vec4f) -> @location(0) vec4f {
 
   if (lHit.t < fullHit.t) {
     linearColor = lHit.emit;
-    entityCode = 32 + lHit.idx;
+    entityCode = 112 + lHit.idx;
     hitDist = lHit.t;
   } else if (fullHit.hit) {
-    entityCode = 1 + fullHit.primIdx;
+    let pPick = i32(sdFetch(3, fullHit.primIdx).w + 0.5);
+    entityCode = select(1 + fullHit.primIdx, pPick, pPick > 0);
     hitDist = fullHit.t;
     let hitFlags = i32(sdFetch(1, fullHit.primIdx).w + 0.5);
     if (PrimFlagGlass(hitFlags) && viewMode == 0) {

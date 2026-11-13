@@ -889,17 +889,15 @@ export default function AssetPanel({
                             display: "inline-flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            width: 46,
-                            height: 46,
-                            borderRadius: 10,
-                            overflow: "hidden",
-                            background: "#13151a",
-                            border: "1px solid rgba(255, 255, 255, 0.12)",
+                            width: 48,
+                            height: 48,
+                            background: "transparent",
                           }}
                         >
                           <AnalyticalShapeThumbnail
+                            PropId={Asset.PropId || null}
                             Shape={Asset.PrimitiveShape || "sphere"}
-                            Size={44}
+                            Size={48}
                           />
                         </span>
                       ) : Asset.Kind === "Forces" ? (
@@ -1154,7 +1152,8 @@ export default function AssetPanel({
                       />
                     ) : Current.Id === "engine-shaderball" ? (
                       <ShaderballPanel Material={ResolveMaterial({})} Compact />
-                    ) : Current.Kind === "Models" && Current.PrimitiveShape ? (
+                    ) : Current.Kind === "Models" &&
+                      (Current.PropId || Current.PrimitiveShape) ? (
                       <div
                         className="asset-file-preview"
                         draggable
@@ -1167,13 +1166,14 @@ export default function AssetPanel({
                           alignItems: "center",
                           justifyContent: "center",
                           padding: "10px",
+                          background: "transparent",
                           cursor: "grab",
                         }}
                       >
                         <AnalyticalShapeThumbnail
-                          Shape={Current.PrimitiveShape}
-                          Size={180}
-                          Style={{ border: "1px solid rgba(255,255,255,0.1)" }}
+                          PropId={Current.PropId || null}
+                          Shape={Current.PrimitiveShape || "sphere"}
+                          Size={172}
                         />
                       </div>
                     ) : (

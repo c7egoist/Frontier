@@ -72,11 +72,11 @@ function PreferInitialBackend() {
   return SessionWebGlBlocked ? "cpu-gtx" : "webgl2";
 }
 
-const MAX_PRIMS = 32;
-const MAX_LIGHTS = 2;
+const MAX_PRIMS = 96;
+const MAX_LIGHTS = 6;
 const SCENE_DATA_W = 8;
-const SCENE_DATA_H = 36;
-const LIGHT_ROW_BASE = 32;
+const SCENE_DATA_H = 104;
+const LIGHT_ROW_BASE = 96;
 
 const FULLSCREEN_VERTEX_SHADER = `#version 300 es
 precision highp float;
@@ -142,9 +142,10 @@ vec4 sdFetch(int col, int row) {
   return texelFetch(uSceneData, ivec2(col, row), 0);
 }
 
-bool PrimFlagShadow(int flags) { return (flags & 1) != 0; }
-bool PrimFlagGi(int flags)     { return (flags & 2) != 0; }
-bool PrimFlagGlass(int flags)  { return (flags & 4) != 0; }
+bool PrimFlagShadow(int flags)    { return (flags & 1) != 0; }
+bool PrimFlagGi(int flags)        { return (flags & 2) != 0; }
+bool PrimFlagGlass(int flags)     { return (flags & 4) != 0; }
+bool PrimFlagFaceAtlas(int flags) { return (flags & 8) != 0; }
 
 void loadPrimRot(int i, out vec3 c0, out vec3 c1, out vec3 c2) {
   c0 = sdFetch(2, i).xyz;
@@ -481,6 +482,34 @@ HitInfo finalizeHit(vec3 ro, vec3 rd, int idx, float t, bool backface) {
     computeBoxUvAndTangent(lp, h, ln, uv, lt);
   }
 
+  int flags = int(sdFetch(1, idx).w + 0.5);
+  if (PrimFlagFaceAtlas(flags)) {
+    int faceIdx = 2;
+    vec2 faceUv = clamp(uv, vec2(0.0), vec2(1.0));
+    if (shape >= 2) {
+      if (ln.z > 0.85) {
+        faceIdx = 5;
+        faceUv = clamp((lp.xy / max(h.xy, vec2(1e-4))) * 0.5 + 0.5, vec2(0.0), vec2(1.0));
+      } else if (ln.z < -0.85) {
+        faceIdx = 4;
+        faceUv = clamp((lp.xy / max(h.xy, vec2(1e-4))) * 0.5 + 0.5, vec2(0.0), vec2(1.0));
+      } else {
+        faceIdx = 2;
+      }
+    } else {
+      vec3 an = abs(ln);
+      if (an.x >= an.y && an.x >= an.z)      faceIdx = ln.x > 0.0 ? 1 : 0;
+      else if (an.y >= an.x && an.y >= an.z) faceIdx = ln.y > 0.0 ? 3 : 2;
+      else                                   faceIdx = ln.z > 0.0 ? 5 : 4;
+    }
+    float cellCol = float(faceIdx % 3);
+    float cellRow = float(faceIdx / 3);
+    uv = vec2(
+      (cellCol + 0.08 + faceUv.x * 0.84) / 3.0,
+      (cellRow + 0.08 + faceUv.y * 0.84) / 2.0
+    );
+  }
+
   info.normal  = fwdRotateCols(backface ? -ln : ln, c0, c1, c2);
   info.tangent = fwdRotateCols(lt, c0, c1, c2);
   info.uv      = uv;
@@ -570,16 +599,19 @@ float traceLightQuad(vec3 ro, vec3 rd, float tMax, out vec3 emitOut, out int hit
   for (int li = 0; li < uLightCount; ++li) {
     vec4 l0 = sdFetch(0, ${LIGHT_ROW_BASE} + li);
     vec4 l1 = sdFetch(1, ${LIGHT_ROW_BASE} + li);
-    vec3 lc = l0.xyz;
-    float hw = l0.w;
-    float hh = l1.x;
-    float t = (lc.z - ro.z) / rd.z;
-    if (t > 0.01 && t < best) {
-      vec3 hp = ro + rd * t;
-      if (abs(hp.x - lc.x) <= hw && abs(hp.y - lc.y) <= hh) {
-        best = t;
-        emitOut = (rd.z > 0.0) ? l1.yzw : l1.yzw * 0.14;
-        hitLightIdx = li;
+    vec4 l2 = sdFetch(2, ${LIGHT_ROW_BASE} + li);
+    if (l2.x > 0.5) {
+      vec3 lc = l0.xyz;
+      float hw = l0.w;
+      float hh = l1.x;
+      float t = (lc.z - ro.z) / rd.z;
+      if (t > 0.01 && t < best) {
+        vec3 hp = ro + rd * t;
+        if (abs(hp.x - lc.x) <= hw && abs(hp.y - lc.y) <= hh) {
+          best = t;
+          emitOut = (rd.z > 0.0) ? l1.yzw : l1.yzw * 0.14;
+          hitLightIdx = li;
+        }
       }
     }
   }
@@ -1255,17 +1287,34 @@ void main() {
   if (uViewMode >= 10) {
     int dbg = uViewMode - 10;
     if (fullHit.hit) {
-      entityCode = 1 + fullHit.primIdx;
+      int pPick = int(sdFetch(3, fullHit.primIdx).w + 0.5);
+      entityCode = pPick > 0 ? pPick : (1 + fullHit.primIdx);
       hitDist = fullHit.t;
       SampledMaterial dm = fetchMaterial(fullHit.primIdx, fullHit.uv);
       vec3 N, Nc, T, B;
       buildShadingFrame(fullHit, dm, N, Nc, T, B);
-      if (dbg == 1)      linearColor = vec3(1.0 - clamp(fullHit.t / 12.0, 0.0, 1.0));
-      else if (dbg == 2) linearColor = fract(vec3(float(entityCode) * 0.37, float(entityCode) * 0.61, float(entityCode) * 0.83));
-      else if (dbg == 3) linearColor = pow(clamp(dm.baseColor, 0.0, 1.0), vec3(1.0 / 2.2));
-      else if (dbg == 4) linearColor = N * 0.5 + 0.5;
-      else if (dbg == 5) linearColor = vec3(dm.roughness);
-      else               linearColor = vec3(dm.metallic);
+      if (dbg == 1)       linearColor = vec3(1.0 - clamp(fullHit.t / 12.0, 0.0, 1.0));
+      else if (dbg == 2)  linearColor = fract(vec3(float(entityCode) * 0.37, float(entityCode) * 0.61, float(entityCode) * 0.83));
+      else if (dbg == 3)  linearColor = vec3(0.5 + 0.5 * rd.x, 0.5 + 0.5 * rd.y, 0.5);
+      else if (dbg == 4)  linearColor = fract(vec3(float(fullHit.primIdx + 1) * 0.29, float(fullHit.primIdx + 1) * 0.53, float(fullHit.primIdx + 1) * 0.79));
+      else if (dbg == 5)  linearColor = vec3(floor((1.0 - clamp(fullHit.t / 14.0, 0.0, 1.0)) * 8.0) / 8.0);
+      else if (dbg == 6)  linearColor = pow(clamp(dm.baseColor, 0.0, 1.0), vec3(1.0 / 2.2));
+      else if (dbg == 7)  linearColor = fullHit.normal * 0.5 + 0.5;
+      else if (dbg == 8)  linearColor = vec3(dm.roughness);
+      else if (dbg == 9)  linearColor = vec3(dm.metallic);
+      else if (dbg == 10) linearColor = N * 0.5 + 0.5;
+      else if (dbg == 11) linearColor = vec3(0.15, 0.78, 0.52) * clamp(1.0 - dm.roughness * 0.6, 0.2, 1.0);
+      else if (dbg == 12) linearColor = vec3(clamp(length(uSunIrradiance) * 0.12 * max(0.08, dot(N, uSunDir)), 0.0, 1.0));
+      else if (dbg == 13) linearColor = vec3(0.28, 0.56, 0.96) * clamp(dm.ao, 0.1, 1.0);
+      else if (dbg == 14) {
+        vec2 tile = floor(gl_FragCoord.xy / 16.0);
+        float parity = fract((tile.x + tile.y) * 0.5) * 2.0;
+        linearColor = mix(dm.baseColor * 0.55, vec3(0.95, 0.68, 0.22), parity * 0.35);
+      } else if (dbg == 15) {
+        vec3 gridP = abs(fract(fullHit.pos * 4.0) - 0.5);
+        float wire = smoothstep(0.05, 0.01, min(min(gridP.x, gridP.y), gridP.z));
+        linearColor = mix(N * 0.3 + 0.3, vec3(0.38, 0.84, 1.0), wire);
+      }
     } else {
       linearColor = vec3(0.06, 0.07, 0.09);
     }
@@ -1275,10 +1324,11 @@ void main() {
 
   if (tQuad < fullHit.t) {
     linearColor = quadEmit;
-    entityCode = 32 + hitLightIdx;
+    entityCode = 112 + hitLightIdx;
     hitDist = tQuad;
   } else if (fullHit.hit) {
-    entityCode = 1 + fullHit.primIdx;
+    int pPick = int(sdFetch(3, fullHit.primIdx).w + 0.5);
+    entityCode = pPick > 0 ? pPick : (1 + fullHit.primIdx);
     hitDist = fullHit.t;
     int hitFlags = int(sdFetch(1, fullHit.primIdx).w + 0.5);
     if (PrimFlagGlass(hitFlags) && uViewMode == 0) {
@@ -1427,7 +1477,8 @@ function PackSceneDataBuffer(ActiveScene, PCount, LCount, Out) {
     const Flags =
       (P.CastShadows ? 1 : 0) |
       (P.GiContributor ? 2 : 0) |
-      (P.GlassShell ? 4 : 0);
+      (P.GlassShell ? 4 : 0) |
+      (P.FaceAtlas ? 8 : 0);
     Out[Base + 0] = P.Center[0];
     Out[Base + 1] = P.Center[1];
     Out[Base + 2] = P.Center[2];
@@ -1451,7 +1502,7 @@ function PackSceneDataBuffer(ActiveScene, PCount, LCount, Out) {
     Out[Base + 12] = Cz * Sy * Sx - Sz * Cx;
     Out[Base + 13] = Sz * Sy * Sx + Cz * Cx;
     Out[Base + 14] = Cy * Sx;
-    Out[Base + 15] = 0.0;
+    Out[Base + 15] = P.PickCode || 1 + I;
 
     Out[Base + 16] = Cz * Sy * Cx + Sz * Sx;
     Out[Base + 17] = Sz * Sy * Cx - Cz * Sx;
@@ -1482,6 +1533,8 @@ function PackSceneDataBuffer(ActiveScene, PCount, LCount, Out) {
     Out[Base + 5] = L.Radiance[0];
     Out[Base + 6] = L.Radiance[1];
     Out[Base + 7] = L.Radiance[2];
+
+    Out[Base + 8] = L.QuadVisible === false ? 0.0 : 1.0;
   }
 }
 
@@ -1490,11 +1543,11 @@ function ComputeNonCameraSceneSignature(Scene) {
   Parts += `${Scene.SunDir.map((V) => V.toFixed(3)).join(",")}|${Scene.SunIrradiance.map((V) => V.toFixed(2)).join(",")}|${Scene.SkyRadiance.map((V) => V.toFixed(3)).join(",")}|`;
   for (let I = 0; I < Scene.Primitives.length; ++I) {
     const P = Scene.Primitives[I];
-    Parts += `${P.Id}:${P.Shape}:${P.Center.join(",")}:${P.HalfExtents.join(",")}:${P.RotationRad.join(",")}:${P.BaseColor.join(",")}:${P.Metallic}:${P.Roughness}:${P.Ior}:${P.Coat}:${P.Transmission}:${P.Opacity}:${P.Emission}:${P.CastShadows ? 1 : 0}:${P.GiContributor ? 1 : 0}:${P.GlassShell ? 1 : 0}:${P.TextureUrls?.BaseColor || ""}:${P.TextureUrls?.Roughness || ""}:${P.TextureUrls?.Normal || ""}|`;
+    Parts += `${P.Id}:${P.PickCode || 0}:${P.Shape}:${P.Center.join(",")}:${P.HalfExtents.join(",")}:${P.RotationRad.join(",")}:${P.BaseColor.join(",")}:${P.Metallic}:${P.Roughness}:${P.Ior}:${P.Coat}:${P.Transmission}:${P.Opacity}:${P.Emission}:${P.CastShadows ? 1 : 0}:${P.GiContributor ? 1 : 0}:${P.GlassShell ? 1 : 0}:${P.FaceAtlas ? JSON.stringify(P.FaceColors) : ""}:${P.TextureUrls?.BaseColor || ""}:${P.TextureUrls?.Roughness || ""}:${P.TextureUrls?.Normal || ""}|`;
   }
   for (let Li = 0; Li < Scene.AreaLights.length; ++Li) {
     const L = Scene.AreaLights[Li];
-    Parts += `L${L.Id}:${L.Center.join(",")}:${L.HalfWidth}:${L.HalfHeight}:${L.Radiance.join(",")}|`;
+    Parts += `L${L.Id}:${L.QuadVisible === false ? 0 : 1}:${L.Center.join(",")}:${L.HalfWidth}:${L.HalfHeight}:${L.Radiance.join(",")}|`;
   }
   return Parts;
 }
@@ -1518,24 +1571,28 @@ function ResolveEntityTransformForGizmo(SelectedId, Rows, Values, CompiledScene)
     Row.Panel === "group" ||
     Row.Panel === "folder" ||
     Row.Panel === "post" ||
-    Row.Panel === "camera"
+    (Row.Panel === "camera" && Row.Id === "camera")
   ) {
     return null;
   }
 
   const Rec = Values?.[SelectedId] || {};
-  if (Row.Panel === "geometry") {
-    const Prim = CompiledScene.Primitives.find((Item) => Item.Id === SelectedId);
+  if (Row.Panel === "geometry" || Row.Panel === "camera") {
+    const Prim = CompiledScene.Primitives.find(
+      (Item) => (Item.OwnerId || Item.Id) === SelectedId,
+    );
     if (!Prim) return null;
     return {
       Id: SelectedId,
-      Kind: "geometry",
+      Kind: Row.Panel,
       Locked: !!Rec.LOCKED,
       Position: Array.isArray(Rec.Position) ? [...Rec.Position] : [...Prim.Center],
       Rotation: Array.isArray(Rec.Rotation) ? [...Rec.Rotation] : [0, 0, 0],
       Scale: Array.isArray(Rec.Scale)
         ? [...Rec.Scale]
-        : Prim.HalfExtents.map((H) => +(H * 2).toFixed(3)),
+        : Row.PropId || Rec.PropId || Row.Panel === "camera"
+          ? [1, 1, 1]
+          : Prim.HalfExtents.map((H) => +(H * 2).toFixed(3)),
     };
   }
 
@@ -2020,22 +2077,23 @@ export default function GtxWorldViewport({
 
       let SelectedCode = 0;
       for (let I = 0; I < PCount; ++I) {
-        if (ActiveScene.Primitives[I].Id === Props.Selected) {
-          SelectedCode = 1 + I;
+        const P = ActiveScene.Primitives[I];
+        if ((P.OwnerId || P.Id) === Props.Selected) {
+          SelectedCode = P.PickCode || 1 + I;
           break;
         }
       }
       if (SelectedCode === 0) {
         for (let Li = 0; Li < LCount; ++Li) {
           if (ActiveScene.AreaLights[Li].Id === Props.Selected) {
-            SelectedCode = 32 + Li;
+            SelectedCode = ActiveScene.AreaLights[Li].PickCode || 112 + Li;
             break;
           }
         }
       }
 
       const EffectiveViewMode =
-        Props.Debug > 0 && Props.Debug <= 6
+        Props.Debug > 0 && Props.Debug <= 15
           ? 10 + Props.Debug
           : VIEW_MODE_CODES[Props.ViewMode] ?? 0;
 
@@ -2556,15 +2614,16 @@ export default function GtxWorldViewport({
 
         let SelectedCode = 0;
         for (let I = 0; I < PCount; ++I) {
-          if (ActiveScene.Primitives[I].Id === Props.Selected) {
-            SelectedCode = 1 + I;
+          const P = ActiveScene.Primitives[I];
+          if ((P.OwnerId || P.Id) === Props.Selected) {
+            SelectedCode = P.PickCode || 1 + I;
             break;
           }
         }
         if (SelectedCode === 0) {
           for (let Li = 0; Li < LCount; ++Li) {
             if (ActiveScene.AreaLights[Li].Id === Props.Selected) {
-              SelectedCode = 32 + Li;
+              SelectedCode = ActiveScene.AreaLights[Li].PickCode || 112 + Li;
               break;
             }
           }
@@ -2597,7 +2656,7 @@ export default function GtxWorldViewport({
           Gl.uniform1f(U.uExposureGain, ActiveScene.ExposureGain);
 
           const EffectiveViewMode =
-            Props.Debug > 0 && Props.Debug <= 6
+            Props.Debug > 0 && Props.Debug <= 15
               ? 10 + Props.Debug
               : VIEW_MODE_CODES[Props.ViewMode] ?? 0;
           Gl.uniform1i(U.uViewMode, EffectiveViewMode);
@@ -2800,18 +2859,20 @@ export default function GtxWorldViewport({
       let SelectedCode = 0;
       const PrimIdx = ActiveScene.Primitives
         .slice(0, PCount)
-        .findIndex((P) => P.Id === Props.Selected);
+        .findIndex((P) => (P.OwnerId || P.Id) === Props.Selected);
       if (PrimIdx >= 0) {
-        SelectedCode = 1 + PrimIdx;
+        SelectedCode = ActiveScene.Primitives[PrimIdx].PickCode || 1 + PrimIdx;
       } else {
         const LightIdx = ActiveScene.AreaLights
           .slice(0, MAX_LIGHTS)
           .findIndex((L) => L.Id === Props.Selected);
-        if (LightIdx >= 0) SelectedCode = 32 + LightIdx;
+        if (LightIdx >= 0) {
+          SelectedCode = ActiveScene.AreaLights[LightIdx].PickCode || 112 + LightIdx;
+        }
       }
 
       const EffectiveViewMode =
-        Props.Debug > 0 && Props.Debug <= 6
+        Props.Debug > 0 && Props.Debug <= 15
           ? 10 + Props.Debug
           : VIEW_MODE_CODES[Props.ViewMode] ?? 0;
 

@@ -34,6 +34,7 @@ import { LunarSphere } from "../FrontierEditor/moon-controls.jsx";
 import Native from "./NativePanels.json";
 import { Solar } from "./Solar.mjs";
 import { SensorField } from "./OpticalGraphic.jsx";
+import { FACE_KEYS, FACE_LABELS, HasActiveFaceColors } from "./WorldPropLibrary.js";
 
 export const Panels = { ...Native.Panels, force: [] };
 export function Glyph({ Name, Size = 18 }) {
@@ -682,19 +683,107 @@ export function Inspector({
         </button>
       )}
       {(Subject.Panel === "geometry" ||
-        (Subject.Panel === "light" && !Subject.ReferenceType)) && (
+        (Subject.Panel === "light" && (!Subject.ReferenceType || Subject.PropId || Values.PropId))) && (
         <TransformPanel Values={Values} Change={Change} />
       )}
       {Capabilities()}
       {Subject.Panel === "light" && ReferenceDetailCards}
       {Subject.Panel === "geometry" && (
-        <MaterialPanel
-          Subject={Subject}
-          Values={Values}
-          Change={Change}
-          Expand={OpenShader}
-          Compact
-        />
+        <>
+          <MaterialPanel
+            Subject={Subject}
+            Values={Values}
+            Change={Change}
+            Expand={OpenShader}
+            Compact
+          />
+          <details className="generic-card" open={HasActiveFaceColors(Values.FaceColors)}>
+            <summary>Per-Face Colours</summary>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={HasActiveFaceColors(Values.FaceColors)}
+                    onChange={(Ev) => {
+                      if (Ev.target.checked) {
+                        const BaseHex = Values.Material?.Channels?.colour?.Fill || "#d4d0c8";
+                        Change("FaceColors", {
+                          Enabled: true,
+                          "-Y": BaseHex,
+                          "+Y": BaseHex,
+                          "-X": "#dc2626",
+                          "+X": "#16a34a",
+                          "+Z": "#f8fafc",
+                          "-Z": "#1f2937",
+                        });
+                      } else {
+                        Change("FaceColors", { ...(Values.FaceColors || {}), Enabled: false });
+                      }
+                    }}
+                  />
+                  <span>Individual face colours</span>
+                </label>
+                {HasActiveFaceColors(Values.FaceColors) && (
+                  <button
+                    type="button"
+                    style={{ fontSize: 11, padding: "3px 8px" }}
+                    onClick={() => Change("FaceColors", null)}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              {HasActiveFaceColors(Values.FaceColors) && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                  {FACE_KEYS.map((Key) => {
+                    const Entry = Values.FaceColors?.[Key];
+                    const HexVal =
+                      typeof Entry === "string"
+                        ? Entry
+                        : Entry?.Fill || Values.Material?.Channels?.colour?.Fill || "#d4d0c8";
+                    return (
+                      <label
+                        key={Key}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 6,
+                          padding: "4px 7px",
+                          borderRadius: 6,
+                          background: "rgba(255,255,255,0.04)",
+                          fontSize: 11.5,
+                        }}
+                      >
+                        <span>{FACE_LABELS[Key]}</span>
+                        <input
+                          type="color"
+                          aria-label={`Face colour ${Key}`}
+                          value={/^#[0-9a-f]{6}$/i.test(HexVal) ? HexVal : "#d4d0c8"}
+                          onChange={(Ev) => {
+                            const NextColor = Ev.target.value;
+                            const Prev = Values.FaceColors || {};
+                            const Existing = Prev[Key];
+                            Change("FaceColors", {
+                              ...Prev,
+                              Enabled: true,
+                              [Key]:
+                                Existing && typeof Existing === "object"
+                                  ? { ...Existing, Fill: NextColor }
+                                  : NextColor,
+                            });
+                          }}
+                          style={{ width: 26, height: 22, padding: 0, border: "none", background: "transparent", cursor: "pointer" }}
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </details>
+        </>
       )}
       {[...new Set(Sheet.map((Field) => Field.Group))]
         .filter(
@@ -984,15 +1073,19 @@ export function Inspector({
             Orbit (Drag), Pan (Shift+Drag), Dolly (Wheel), or Fly (Right+WASD).
           </div>
         )}
-        <TransformPanel
-          Values={Values}
-          Change={Change}
-          Space="WORLD Z-UP"
-          Rows={[
-            ["Position", "m", CanonicalEditorCamera.Position, -200, 200, 0.02],
-            ["Target", "m", CanonicalEditorCamera.Target, -200, 200, 0.02],
-          ]}
-        />
+        {IsEditorCamera(Subject) ? (
+          <TransformPanel
+            Values={Values}
+            Change={Change}
+            Space="WORLD Z-UP"
+            Rows={[
+              ["Position", "m", CanonicalEditorCamera.Position, -200, 200, 0.02],
+              ["Target", "m", CanonicalEditorCamera.Target, -200, 200, 0.02],
+            ]}
+          />
+        ) : (
+          <TransformPanel Values={Values} Change={Change} />
+        )}
         {IsEditorCamera(Subject) && (
           <button
             type="button"

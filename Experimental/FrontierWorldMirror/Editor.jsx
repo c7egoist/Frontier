@@ -66,14 +66,11 @@ import {
   ResolveForceValues,
 } from "./ForceFieldCatalog.js";
 import {
-  BeginWorldActorDrag,
   BuildActorPayloadFromAsset,
-  BuildActorPayloadFromModelSpec,
-  EndWorldActorDrag,
   SubscribeWorldDrag,
-  WORLD_PLACEABLE_MODELS,
 } from "./WorldDragDrop.js";
 import { AnalyticalShapeThumbnail } from "./AnalyticalShapeThumbnail.jsx";
+import { WORLD_PROP_CATALOG } from "./WorldPropLibrary.js";
 import "./Editor.css";
 
 const ConstructExtraCones = [
@@ -96,6 +93,59 @@ const ConstructExtraCones = [
     Description: "Automotive cylinder-like lane delineator post · dual reflective bands",
   },
 ];
+
+const ConstructExtraProps = WORLD_PROP_CATALOG.map((Prop) => ({
+  Id: `construct-prop-${Prop.PropId}`,
+  PropId: Prop.PropId,
+  Name: Prop.Name,
+  Panel: Prop.Panel,
+  Icon: Prop.Icon || "editor-cube",
+  Parent:
+    Prop.Panel === "camera"
+      ? "cameras"
+      : Prop.Panel === "light"
+        ? "lighting"
+        : "showcase",
+  Description: `${Prop.Category} · ${Prop.Description}`,
+}));
+
+function RenderOutlinerRowIcon(Row, Rec) {
+  const PropId = Row.PropId || Rec?.PropId || null;
+  if (Row.Panel === "geometry") {
+    const Shape =
+      Row.PrimitiveShape ||
+      (Row.Icon === "editor-sphere"
+        ? "sphere"
+        : Row.Icon === "editor-cylinder"
+          ? "cylinder"
+          : Row.Icon === "editor-cone"
+            ? "cone"
+            : Row.Icon === "editor-torus"
+              ? "torus"
+              : "box");
+    return (
+      <AnalyticalShapeThumbnail
+        PropId={PropId}
+        Shape={Shape}
+        Material={Rec?.Material}
+        FaceColors={Rec?.FaceColors}
+        Size={24}
+      />
+    );
+  }
+  if (Row.Panel === "camera") {
+    return (
+      <AnalyticalShapeThumbnail
+        PropId={PropId || (Row.Id === "camera" ? "editor_camera" : "engine_camera")}
+        Size={24}
+      />
+    );
+  }
+  if (Row.Panel === "light" && PropId) {
+    return <AnalyticalShapeThumbnail PropId={PropId} Size={24} />;
+  }
+  return <Icon Name={Row.Icon} Size={24} />;
+}
 const InitialRows = [
   ["showcase", "Showcase", "group", "folder-scene", null, "Scene collection"],
   ["cube", "Cube", "geometry", "editor-cube", "showcase", "Geometry"],
@@ -461,6 +511,7 @@ function RealtimeFpsReadout({ FallbackFps = 60 }) {
 }
 function App() {
   const [Debug, SetDebug] = useState(0),
+    [DiagnosticsOpen, SetDiagnosticsOpen] = useState(false),
     [HiZ, ToggleHiZ] = useState(true),
     [Alias, ToggleAlias] = useState(true),
     [PatchError, SetPatchError] = useState(1);
@@ -510,7 +561,12 @@ function App() {
       () =>
         new URLSearchParams(location.search).get("workspace") === "inspector",
     ),
-    [Name, RenameProject] = useState(Saved.Name || "Cornell-Studio Gallery"),
+    [Name, RenameProject] = useState(
+      () =>
+        new URLSearchParams(location.search).get("project") ||
+        Saved.Name ||
+        "Cornell-Studio Gallery",
+    ),
     [Rename, RenameRow] = useState(null),
     [Construct, OpenConstruct] = useState(false),
     [Projection, SetProjection] = useState("PERSP"),
@@ -968,7 +1024,7 @@ function App() {
   useEffect(() => {
     document
       .querySelector(".outliner-row.selected")
-      ?.scrollIntoView({ block: "nearest" });
+      ?.scrollIntoView?.({ block: "nearest" });
   }, [Selected]);
   const ToggleHidden = (Id) => {
     if (Id === "camera") return;
@@ -1164,6 +1220,7 @@ function App() {
         SetPatchError((Previous) => (Previous >= 4 ? 0.5 : Previous * 2));
       }
       if (Event.key === "Escape") {
+        SetDiagnosticsOpen(false);
         SetDebug(0);
         ShowViewportSettings(false);
         ShowMenu(null);
@@ -1409,6 +1466,36 @@ function App() {
           ];
         }
         TargetParent = "forces";
+      } else if (Template.Panel === "camera" && !TargetParent) {
+        if (!Previous.some((Subject) => Subject.Id === "cameras")) {
+          BaseRows = [
+            ...Previous,
+            {
+              Id: "cameras",
+              Name: "Cameras",
+              Panel: "group",
+              Icon: "folder-camera",
+              Parent: null,
+              Description: "Camera rigs",
+            },
+          ];
+        }
+        TargetParent = "cameras";
+      } else if (Template.Panel === "light" && !TargetParent) {
+        if (!Previous.some((Subject) => Subject.Id === "lighting")) {
+          BaseRows = [
+            ...Previous,
+            {
+              Id: "lighting",
+              Name: "Lighting",
+              Panel: "group",
+              Icon: "folder-lights",
+              Parent: null,
+              Description: "Direct and sky lights",
+            },
+          ];
+        }
+        TargetParent = "lighting";
       }
       return [
         ...BaseRows,
@@ -1823,7 +1910,7 @@ function App() {
             >
               <Glyph Name="chevron" Size={12} />
             </button>
-            <Icon Name={Row.Icon} Size={24} />
+            {RenderOutlinerRowIcon(Row, Values[Row.Id])}
             {Rename === Row.Id && !IsEditorCamera(Row) ? (
               <input
                 autoFocus
@@ -2035,41 +2122,22 @@ function App() {
             </select>
           </label>
           <span className="viewport-tool-divider" />
-          <div
-            className="viewport-place-strip"
-            role="group"
-            aria-label="Drag actors into 3D scene"
+          <label
+            className="viewport-projection viewport-debug-select"
+            title="Debug render views · F3 / Shift+F3"
           >
-            {WORLD_PLACEABLE_MODELS.slice(0, 4).map((Spec) => {
-              const Payload = BuildActorPayloadFromModelSpec(Spec);
-              return (
-                <button
-                  key={Spec.Id}
-                  type="button"
-                  className="viewport-place-chip"
-                  draggable
-                  aria-label={`Place or drag ${Spec.Name} into scene`}
-                  title={`Drag ${Spec.Name} into the 3D scene (Unreal-style surface snap) or click to spawn`}
-                  onDragStart={(Ev) => BeginWorldActorDrag(Ev, Payload)}
-                  onDragEnd={EndWorldActorDrag}
-                  onClick={() =>
-                    HandleDropWorldActor(Payload, [
-                      +(Math.random() * 0.6 - 0.3).toFixed(2),
-                      +(-0.8 + Math.random() * 0.5).toFixed(2),
-                      +(-0.64 + Payload.HalfHeightZ).toFixed(3),
-                    ])
-                  }
-                >
-                  <AnalyticalShapeThumbnail
-                    Shape={Spec.PrimitiveShape}
-                    Size={19}
-                    Style={{ borderRadius: 999, border: "1px solid rgba(255,255,255,0.14)" }}
-                  />
-                  <span>{Spec.ShortLabel}</span>
-                </button>
-              );
-            })}
-          </div>
+            <select
+              aria-label="Debug views"
+              value={Debug}
+              onChange={(Event) => SetDebug(+Event.target.value)}
+            >
+              {DebugViews.map((View, Index) => (
+                <option key={View} value={Index}>
+                  {Index === 0 ? "Debug: Off" : `Debug: ${View}`}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className="viewport-secondary-tools">
             <button
               className="viewport-icon-button gizmo-pill"
@@ -2114,9 +2182,9 @@ function App() {
             <button
               className="viewport-icon-button"
               aria-label="Viewport diagnostics"
-              aria-pressed={Debug > 0}
-              title="Diagnostics · F3"
-              onClick={() => SetDebug((Previous) => (Previous ? 0 : 1))}
+              aria-pressed={DiagnosticsOpen}
+              title="Diagnostics & performance telemetry"
+              onClick={() => SetDiagnosticsOpen((Previous) => !Previous)}
             >
               <ActionIcon Name="diagnostics" Size={16} />
             </button>
@@ -2208,7 +2276,6 @@ function App() {
       )}
       <div
         className={"scene-image " + (SplitView ? "split-view" : "")}
-        title="Calibrated Tier 1 GTX WebGL2 World Viewport — 1:1 mirror of C++ TieredWorldRenderSequence."
       >
         <GtxWorldViewport
           Rows={Rows}
@@ -2248,7 +2315,7 @@ function App() {
             View={2}
           />
         )}
-        {Debug > 0 && (
+        {DiagnosticsOpen && (
           <DiagnosticsCard
             Rows={Rows}
             VisibleCount={SceneInventory.Visible}
@@ -2257,7 +2324,7 @@ function App() {
             Alias={Alias}
             PatchError={PatchError}
             Close={() => {
-              SetDebug(0);
+              SetDiagnosticsOpen(false);
               document
                 .querySelector('[aria-label="Viewport diagnostics"]')
                 ?.focus();
@@ -2718,6 +2785,14 @@ function App() {
                 <button
                   onClick={() => {
                     ShowMenu(null);
+                    window.location.href = "../ProjectBrowser/index.html";
+                  }}
+                >
+                  Project Browser
+                </button>
+                <button
+                  onClick={() => {
+                    ShowMenu(null);
                     ToggleAssets(true);
                   }}
                 >
@@ -2975,6 +3050,7 @@ function App() {
         <ConstructPanel
           Catalogue={[
             ...ConstructExtraCones,
+            ...ConstructExtraProps,
             ...ConstructForceTemplates,
             ...PrepareLightRows(InitialRows, 1).filter((R) => R.Id !== "cone"),
             ...ReferenceLights,

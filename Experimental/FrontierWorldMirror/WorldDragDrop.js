@@ -5,6 +5,7 @@
 // for live 3D raycast viewport placement from Asset Browser, Construct, and Quick-Place Shelf.
 
 import { ChooseMaterialType, ResolveMaterial } from "./MaterialSpecification.js";
+import { GetWorldPropById, WORLD_PROP_CATALOG } from "./WorldPropLibrary.js";
 
 function DefaultMaterial(Type = "Standard") {
   return ChooseMaterialType(ResolveMaterial({}), Type);
@@ -269,9 +270,87 @@ export const WORLD_PLACEABLE_MODELS = Object.freeze([
     Detail: "Analytical GTX ray-marched torus primitive (0.76 × 0.76 × 0.24 m). Drag into the 3D scene to place.",
     BuildMaterial: () => BuildNeutralPrimitiveMaterial("#c88954", 0.24, 0.75),
   },
+  ...WORLD_PROP_CATALOG.map((Prop) => ({
+    Id: `model-prop-${Prop.PropId}`,
+    TemplateId: `prop-${Prop.PropId}`,
+    PropId: Prop.PropId,
+    Name: Prop.Name,
+    ShortLabel: Prop.Name,
+    Category: Prop.Category,
+    Panel: Prop.Panel,
+    Kind: "Models",
+    Origin: "Engine",
+    Format: Prop.Panel === "camera" ? ".Camera" : Prop.Panel === "light" ? ".Light" : ".Prop",
+    PrimitiveShape: "box",
+    Icon: Prop.Icon || "editor-cube",
+    HalfHeightZ: Prop.HalfHeightZ,
+    Scale: Prop.NominalScale || [1, 1, 1],
+    DefaultFocalMm: Prop.DefaultFocalMm,
+    LightEmitter: Prop.LightEmitter || null,
+    Description: Prop.Description,
+    Detail: `${Prop.Category} · ${Prop.Description} Drag into the 3D viewport or double-click to place.`,
+    BuildMaterial: () => BuildNeutralPrimitiveMaterial("#d4d0c8", 0.34, 0.0),
+  })),
 ]);
 
 export function BuildActorPayloadFromModelSpec(Spec) {
+  if (Spec.PropId) {
+    const PropDef = GetWorldPropById(Spec.PropId) || Spec;
+    const Panel = PropDef.Panel || Spec.Panel || "geometry";
+    const Parent =
+      Panel === "camera" ? "cameras" : Panel === "light" ? "lighting" : "showcase";
+    const Properties = {
+      PropId: Spec.PropId,
+      Rotation: [0, 0, 0],
+      Scale: [...(PropDef.NominalScale || [1, 1, 1])],
+      "Cast shadows": true,
+      GI: true,
+    };
+    if (Panel === "camera") {
+      Properties["Focal Length"] = PropDef.DefaultFocalMm || 35;
+      Properties["Sensor Width"] = 36;
+      Properties.Aperture = 2.8;
+      Properties["Subject Distance"] = 3.5;
+    } else if (Panel === "light" && PropDef.LightEmitter) {
+      const Em = PropDef.LightEmitter;
+      Properties.Intensity = 8.5;
+      Properties.EmittedRadiance = [...Em.Radiance];
+      Properties.ReferenceInspector = {
+        Type: "LuminousSurface",
+        Properties: {
+          lumens: Em.Lumens || 3000,
+          dimmer: 1,
+          color: Em.ColorHex || "#fff4d6",
+          temperature: 5500,
+          useTemp: false,
+          width: Em.Width,
+          height: Em.Height,
+          twoSided: false,
+          spread: 160,
+          castShadows: true,
+          shadowSoftness: 1,
+          affectSpecular: true,
+        },
+      };
+    }
+    return {
+      ActorKind: Panel,
+      Label: Spec.Name || PropDef.Name,
+      HalfHeightZ: Math.max(0.04, Number(PropDef.HalfHeightZ ?? Spec.HalfHeightZ ?? 0.4)),
+      Template: {
+        Id: Spec.TemplateId || Spec.Id,
+        Name: Spec.Name || PropDef.Name,
+        Panel,
+        PropId: Spec.PropId,
+        Icon: Spec.Icon || PropDef.Icon || "editor-cube",
+        Parent,
+        Preview: true,
+        Description: Spec.Description || PropDef.Description || "Prop",
+      },
+      Properties,
+    };
+  }
+
   const Scale = Spec.Scale ? [...Spec.Scale] : [0.7, 0.7, 0.7];
   const Material = typeof Spec.BuildMaterial === "function" ? Spec.BuildMaterial() : DefaultMaterial("Standard");
   return {
@@ -300,11 +379,23 @@ export function BuildActorPayloadFromModelSpec(Spec) {
 
 export function BuildActorPayloadFromConstructItem(Item) {
   if (!Item) return null;
+  if (Item.PropId) {
+    const PropSpec = WORLD_PLACEABLE_MODELS.find((M) => M.PropId === Item.PropId);
+    if (PropSpec) {
+      return BuildActorPayloadFromModelSpec({ ...PropSpec, Name: Item.Name || PropSpec.Name });
+    }
+  }
   if (Item.PrimitiveShape === "cone" || Item.Id === "traffic-cone") {
     return BuildActorPayloadFromModelSpec(WORLD_PLACEABLE_MODELS[0]);
   }
   if (Item.PrimitiveShape === "cylinder-cone" || Item.Id === "cylinder-cone") {
     return BuildActorPayloadFromModelSpec(WORLD_PLACEABLE_MODELS[1]);
+  }
+  if (Item.Panel === "camera") {
+    const FallbackCam = WORLD_PLACEABLE_MODELS.find((M) => M.PropId === "engine_camera");
+    if (FallbackCam) {
+      return BuildActorPayloadFromModelSpec({ ...FallbackCam, Name: Item.Name || "Engine Camera" });
+    }
   }
   if (Item.Panel === "geometry") {
     const Shape =
@@ -318,7 +409,7 @@ export function BuildActorPayloadFromConstructItem(Item) {
             : Item.Icon === "editor-torus"
               ? "torus"
               : "box");
-    const Match = WORLD_PLACEABLE_MODELS.find((M) => M.PrimitiveShape === Shape);
+    const Match = WORLD_PLACEABLE_MODELS.find((M) => M.PrimitiveShape === Shape && !M.PropId);
     if (Match && (Item.Id === Match.TemplateId || Item.Id === "cone")) {
       return BuildActorPayloadFromModelSpec({ ...Match, Name: Item.Name });
     }
@@ -384,7 +475,10 @@ export function BuildActorPayloadFromAsset(Asset) {
   if (!Asset) return null;
   if (Asset.Kind === "Models") {
     const SpecMatch = WORLD_PLACEABLE_MODELS.find(
-      (M) => M.Id === Asset.Id || M.PrimitiveShape === Asset.PrimitiveShape,
+      (M) =>
+        M.Id === Asset.Id ||
+        (Asset.PropId && M.PropId === Asset.PropId) ||
+        (!Asset.PropId && !M.PropId && M.PrimitiveShape === Asset.PrimitiveShape),
     );
     if (SpecMatch) {
       return BuildActorPayloadFromModelSpec({

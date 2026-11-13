@@ -21,12 +21,14 @@ import {
   ResolveMaterial,
   Rgb,
 } from "./MaterialSpecification.js";
+import { HasActiveFaceColors, NormalizeFaceSpec } from "./WorldPropLibrary.js";
 
 export const ATLAS_TILE_SIZE = 64;
 export const ATLAS_COLS = 16; // 2 primitives per row (8 tiles each)
-export const ATLAS_ROWS = 16; // 16 rows * 2 = 32 primitives
+export const MAX_ATLAS_PRIMS = 96;
+export const ATLAS_ROWS = 48; // 48 rows * 2 = 96 primitives
 export const ATLAS_WIDTH = ATLAS_COLS * ATLAS_TILE_SIZE;  // 1024
-export const ATLAS_HEIGHT = ATLAS_ROWS * ATLAS_TILE_SIZE; // 1024
+export const ATLAS_HEIGHT = ATLAS_ROWS * ATLAS_TILE_SIZE; // 3072
 export const TILES_PER_PRIM = 8;
 
 const FIELD_MAP = Object.fromEntries(
@@ -117,10 +119,98 @@ function SampleChannel(Material, Id, U, V) {
   return IsColour ? Rgb(Channel.Fill) : +Channel.Fill;
 }
 
+function EvaluateFacePatternColor(Spec, Fu, Fv) {
+  const BaseRgb = Rgb(Spec.Fill || "#c8c6c2");
+  const AccRgb = Rgb(Spec.Accent || "#f8fafc");
+  let Out = BaseRgb;
+  let Rough = Spec.Roughness ?? 0.42;
+  let Metal = Spec.Metallic ?? 0.0;
+  let Emit = Spec.Emission ?? 0.0;
+
+  const Pat = Spec.Pattern;
+  if (Pat === "chevrons") {
+    const Diag = ((Fu * 5.0 + Fv * 2.5) % 1.0 + 1.0) % 1.0;
+    if (Diag > 0.5) Out = AccRgb;
+  } else if (Pat === "stripes") {
+    const Band = ((Fu * 6.0) % 1.0 + 1.0) % 1.0;
+    if (Band > 0.5) Out = AccRgb;
+  } else if (Pat === "led_grid") {
+    const Border = Fu < 0.06 || Fu > 0.94 || Fv < 0.08 || Fv > 0.92;
+    if (Border) {
+      Out = [0.08, 0.09, 0.11];
+      Emit = 0.0;
+      Rough = 0.4;
+      Metal = 0.7;
+    } else {
+      const CellX = Math.abs(((Fu * 10) % 1) - 0.5);
+      const CellY = Math.abs(((Fv * 8) % 1) - 0.5);
+      const IsDiode = CellX < 0.34 && CellY < 0.34;
+      Out = IsDiode ? (((Math.floor(Fu * 10) + Math.floor(Fv * 8)) & 1) ? AccRgb : BaseRgb) : BaseRgb.map((C) => C * 0.78);
+    }
+  } else if (Pat === "oled_telemetry") {
+    const InScreen = Fu > 0.14 && Fu < 0.86 && Fv > 0.22 && Fv < 0.82;
+    if (!InScreen) {
+      Out = [0.11, 0.13, 0.17];
+      Emit = 0.0;
+      Rough = 0.38;
+      Metal = 0.65;
+    } else {
+      const Bar = Fv > 0.62 && Fv < 0.72 || (Fv > 0.36 && Fv < 0.44 && Fu < 0.62);
+      Out = Bar ? AccRgb : BaseRgb;
+      Emit = Bar ? Math.max(2.2, Emit * 1.35) : Math.max(0.6, Emit * 0.55);
+    }
+  } else if (Pat === "drawer_front") {
+    const Row = (Fv * 6.0) % 1.0;
+    if (Row < 0.09) {
+      Out = [0.09, 0.10, 0.12];
+      Rough = 0.6;
+    } else if (Row > 0.70 && Row < 0.84 && Fu > 0.12 && Fu < 0.88) {
+      Out = AccRgb;
+      Metal = 0.92;
+      Rough = 0.16;
+    }
+  } else if (Pat === "brake_100m") {
+    const Border = Fu < 0.07 || Fu > 0.93 || Fv < 0.08 || Fv > 0.92;
+    const TopBanner = Fv > 0.72;
+    const Digit1 = Fu > 0.16 && Fu < 0.25 && Fv > 0.22 && Fv < 0.64;
+    const Digit0A =
+      Fu > 0.33 && Fu < 0.55 && Fv > 0.22 && Fv < 0.64 &&
+      !(Fu > 0.40 && Fu < 0.48 && Fv > 0.30 && Fv < 0.56);
+    const Digit0B =
+      Fu > 0.61 && Fu < 0.83 && Fv > 0.22 && Fv < 0.64 &&
+      !(Fu > 0.68 && Fu < 0.76 && Fv > 0.30 && Fv < 0.56);
+    if (Border || TopBanner) {
+      Out = AccRgb;
+    } else if (Digit1 || Digit0A || Digit0B) {
+      Out = [0.08, 0.09, 0.12];
+    }
+  } else if (Pat === "tire_sidewall") {
+    const Dx = Fu - 0.5, Dy = Fv - 0.5;
+    const R = Math.hypot(Dx, Dy) * 2.0;
+    if (R < 0.18) {
+      Out = AccRgb;
+      Metal = 0.75;
+      Rough = 0.24;
+    } else if (R < 0.56) {
+      Out = [0.24, 0.27, 0.32];
+      Metal = 0.85;
+      Rough = 0.26;
+    } else if (R > 0.68 && R < 0.78 && Math.abs(Dx) > 0.18) {
+      Out = AccRgb;
+      Rough = 0.45;
+    }
+  }
+
+  return { Out, Rough, Metal, Emit };
+}
+
 function MaterialSignature(Prim) {
   const Mat = Prim.ResolvedMaterial;
   if (!Mat) return "";
   let Sig = Mat.Type + "|" + (Prim.DiffuseRoughness ?? 0.5);
+  if (HasActiveFaceColors(Prim.FaceColors)) {
+    Sig += "|FC:" + JSON.stringify(Prim.FaceColors);
+  }
   for (const Field of MaterialChannels) {
     const Ch = Mat.Channels[Field.Id];
     Sig +=
@@ -173,7 +263,7 @@ const Byte = (V) => Math.max(0, Math.min(255, Math.round(V * 255)));
 export class MaterialAtlasSynchronizer {
   constructor() {
     this.Pixels = new Uint8Array(ATLAS_WIDTH * ATLAS_HEIGHT * 4);
-    this.CachedSignatures = new Array(24).fill("");
+    this.CachedSignatures = new Array(MAX_ATLAS_PRIMS).fill("");
     this.Dirty = true;
   }
 
@@ -184,7 +274,7 @@ export class MaterialAtlasSynchronizer {
 
   UpdatePrimitives(Primitives) {
     let Changed = false;
-    const Count = Math.min(24, Primitives.length);
+    const Count = Math.min(MAX_ATLAS_PRIMS, Primitives.length);
     for (let PrimIdx = 0; PrimIdx < Count; ++PrimIdx) {
       const Prim = Primitives[PrimIdx];
       const Sig = MaterialSignature(Prim);
@@ -202,6 +292,7 @@ export class MaterialAtlasSynchronizer {
     const BaseTileIndex = PrimIdx * TILES_PER_PRIM;
     const UnlitBit = Mat.Type === "Unlit" ? 255 : 0;
     const DiffRoughByte = Byte(Clamp(Prim.DiffuseRoughness ?? 0.5, 0, 1));
+    const UseFaceColors = HasActiveFaceColors(Prim.FaceColors);
 
     const EncodeAt = (U, V, Out8) => {
       const Col = SampleChannel(Mat, "colour", U, V);
@@ -285,6 +376,54 @@ export class MaterialAtlasSynchronizer {
     };
 
     const Scratch = new Uint8Array(32);
+
+    // Per-Face Individual Colour & Pattern Atlas (3x2 face cells inside 64x64 tile: 0=-X, 1=+X, 2=-Y, 3=+Y, 4=-Z, 5=+Z)
+    if (UseFaceColors) {
+      const FallbackHex = Mat.Channels.colour?.Fill || "#c8c6c2";
+      const FallbackRough = Clamp(Number(Mat.Channels.roughness?.Fill ?? 0.42), 0.02, 1);
+      const FallbackMetal = Clamp(Number(Mat.Channels.metallic?.Fill ?? 0.0), 0, 1);
+      const Specs = [0, 1, 2, 3, 4, 5].map((Fi) =>
+        NormalizeFaceSpec(Prim.FaceColors, Fi, FallbackHex, FallbackRough, FallbackMetal),
+      );
+      EncodeAt(0.5, 0.5, Scratch);
+      for (let Py = 0; Py < ATLAS_TILE_SIZE; ++Py) {
+        const Tv = Math.max(0, Math.min(0.9999, (Py - 0.5) / (ATLAS_TILE_SIZE - 2)));
+        const CellRow = Tv < 0.5 ? 0 : 1;
+        const RawFv = Tv * 2.0 - CellRow;
+        const Fv = Math.max(0, Math.min(1, (RawFv - 0.08) / 0.84));
+        for (let Px = 0; Px < ATLAS_TILE_SIZE; ++Px) {
+          const Tu = Math.max(0, Math.min(0.9999, (Px - 0.5) / (ATLAS_TILE_SIZE - 2)));
+          const CellCol = Tu < 1 / 3 ? 0 : Tu < 2 / 3 ? 1 : 2;
+          const RawFu = Tu * 3.0 - CellCol;
+          const Fu = Math.max(0, Math.min(1, (RawFu - 0.08) / 0.84));
+          const FaceIdx = CellRow * 3 + CellCol;
+          const Eval = EvaluateFacePatternColor(Specs[FaceIdx], Fu, Fv);
+          Scratch[0] = Byte(SrgbToLinear(Eval.Out[0]));
+          Scratch[1] = Byte(SrgbToLinear(Eval.Out[1]));
+          Scratch[2] = Byte(SrgbToLinear(Eval.Out[2]));
+          Scratch[4] = Byte(Clamp(Eval.Metal, 0, 1));
+          Scratch[5] = Byte(Clamp(Eval.Rough, 0.02, 1));
+          Scratch[28] = Byte(Clamp(Eval.Emit / 20.0, 0, 1));
+          Scratch[29] = Eval.Emit > 3.5 ? 255 : UnlitBit;
+
+          for (let Slot = 0; Slot < TILES_PER_PRIM; ++Slot) {
+            const TileIdx = BaseTileIndex + Slot;
+            const TileCol = TileIdx % ATLAS_COLS;
+            const TileRow = Math.floor(TileIdx / ATLAS_COLS);
+            const DstIdx =
+              ((TileRow * ATLAS_TILE_SIZE + Py) * ATLAS_WIDTH +
+                (TileCol * ATLAS_TILE_SIZE + Px)) *
+              4;
+            const SrcOff = Slot * 4;
+            this.Pixels[DstIdx] = Scratch[SrcOff];
+            this.Pixels[DstIdx + 1] = Scratch[SrcOff + 1];
+            this.Pixels[DstIdx + 2] = Scratch[SrcOff + 2];
+            this.Pixels[DstIdx + 3] = Scratch[SrcOff + 3];
+          }
+        }
+      }
+      return;
+    }
 
     // Fast path when all 20 channels are constant Fill!
     if (IsAllFillConstant(Mat)) {

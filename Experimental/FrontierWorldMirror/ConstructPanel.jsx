@@ -203,12 +203,13 @@ export default function ConstructPanel({ Catalogue, Add, Close }) {
                         onDragEnd={DragPayload ? EndWorldActorDrag : undefined}
                         onClick={() => Pick(Subject)}
                       >
-                        {Subject.Panel === "geometry" && DragPayload?.Template?.PrimitiveShape ? (
+                        {DragPayload?.Template?.PropId ||
+                        (Subject.Panel === "geometry" && DragPayload?.Template?.PrimitiveShape) ? (
                           <AnalyticalShapeThumbnail
-                            Shape={DragPayload.Template.PrimitiveShape}
-                            Material={DragPayload.Properties?.Material}
-                            Size={54}
-                            Style={{ border: "1px solid rgba(255,255,255,0.1)" }}
+                            PropId={DragPayload?.Template?.PropId || null}
+                            Shape={DragPayload?.Template?.PrimitiveShape || "box"}
+                            Material={DragPayload?.Properties?.Material}
+                            Size={56}
                           />
                         ) : (
                           <Icon Name={Subject.Icon} Size={52} />

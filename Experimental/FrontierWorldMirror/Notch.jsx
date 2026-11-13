@@ -148,6 +148,22 @@ export default function Notch({
             <header>
               Control Center{" "}
               <span>
+                <a
+                  href="../ProjectBrowser/index.html"
+                  style={{
+                    fontSize: 11.5,
+                    fontWeight: 500,
+                    padding: "3px 8px",
+                    borderRadius: 6,
+                    color: "inherit",
+                    textDecoration: "none",
+                    border: "1px solid rgba(255,255,255,0.16)",
+                    marginRight: 6,
+                  }}
+                  title="Open Frontier Project Browser"
+                >
+                  Projects
+                </a>
                 <Glyph Name="WirelessSignal" Size={16} />
                 <button
                   aria-label="Control Center settings"

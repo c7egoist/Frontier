@@ -157,7 +157,7 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
       this._SecMat = { ...this._Mat };
     }
 
-    PackScene(CompiledScene, AtlasPixels, MaxPrims = 14, MaxLights = 2) {
+    PackScene(CompiledScene, AtlasPixels, MaxPrims = 96, MaxLights = 6) {
       const PCount = Math.min(MaxPrims, CompiledScene.Primitives.length);
       const Prims = new Array(PCount);
       for (let I = 0; I < PCount; ++I) {
@@ -171,7 +171,7 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
         const Hy = Math.max(1e-4, P.HalfExtents[1]);
         const Hz = Math.max(1e-4, P.HalfExtents[2]);
         const BoundR = Len3(Hx, Hy, Hz) * 1.06;
-        const IsUniform = IsPrimAtlasUniform(AtlasPixels, I);
+        const IsUniform = !P.FaceAtlas && IsPrimAtlasUniform(AtlasPixels, I);
         let ConstMat = null;
         if (IsUniform && AtlasPixels) {
           ConstMat = { ...this._Mat };
@@ -180,6 +180,8 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
         Prims[I] = {
           Cx: P.Center[0], Cy: P.Center[1], Cz: P.Center[2],
           Shape: P.Shape | 0,
+          PickCode: P.PickCode || (1 + I),
+          FaceAtlas: !!P.FaceAtlas,
           Hx, Hy, Hz,
           BoundR,
           BoundR2: BoundR * BoundR,
@@ -207,6 +209,8 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
         Lights[I] = {
           Cx: L.Center[0], Cy: L.Center[1], Cz: L.Center[2],
           Hw: L.HalfWidth, Hh: L.HalfHeight,
+          QuadVisible: L.QuadVisible !== false,
+          PickCode: L.PickCode || (112 + I),
           RadR: L.Radiance[0], RadG: L.Radiance[1], RadB: L.Radiance[2],
         };
       }
@@ -459,9 +463,38 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
         }
       }
 
-      if (Backface) { Lnx = -Lnx; Lny = -Lny; Lnz = -Lnz; }
-      const NLen = Math.max(1e-6, Len3(Lnx, Lny, Lnz));
-      Lnx /= NLen; Lny /= NLen; Lnz /= NLen;
+      const RawNLen = Math.max(1e-6, Len3(Lnx, Lny, Lnz));
+      const Unx = Lnx / RawNLen, Uny = Lny / RawNLen, Unz = Lnz / RawNLen;
+      if (P.FaceAtlas) {
+        let FaceIdx = 2;
+        let Fu = Clamp(U, 0, 1);
+        let Fv = Clamp(V, 0, 1);
+        if (Shape >= 2) {
+          if (Unz > 0.85) {
+            FaceIdx = 5;
+            Fu = Clamp((Lpx / Math.max(1e-4, Hx)) * 0.5 + 0.5, 0, 1);
+            Fv = Clamp((Lpy / Math.max(1e-4, Hy)) * 0.5 + 0.5, 0, 1);
+          } else if (Unz < -0.85) {
+            FaceIdx = 4;
+            Fu = Clamp((Lpx / Math.max(1e-4, Hx)) * 0.5 + 0.5, 0, 1);
+            Fv = Clamp((Lpy / Math.max(1e-4, Hy)) * 0.5 + 0.5, 0, 1);
+          } else {
+            FaceIdx = 2;
+          }
+        } else {
+          const Ax = Math.abs(Unx), Ay = Math.abs(Uny), Az = Math.abs(Unz);
+          if (Ax >= Ay && Ax >= Az) FaceIdx = Unx > 0 ? 1 : 0;
+          else if (Ay >= Ax && Ay >= Az) FaceIdx = Uny > 0 ? 3 : 2;
+          else FaceIdx = Unz > 0 ? 5 : 4;
+        }
+        const CellCol = FaceIdx % 3;
+        const CellRow = (FaceIdx / 3) | 0;
+        U = (CellCol + 0.08 + Fu * 0.84) / 3.0;
+        V = (CellRow + 0.08 + Fv * 0.84) / 2.0;
+      }
+
+      if (Backface) { Lnx = -Unx; Lny = -Uny; Lnz = -Unz; }
+      else { Lnx = Unx; Lny = Uny; Lnz = Unz; }
 
       const Wnx = P.R0x * Lnx + P.R1x * Lny + P.R2x * Lnz;
       const Wny = P.R0y * Lnx + P.R1y * Lny + P.R2y * Lnz;
@@ -813,6 +846,7 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
       if (Math.abs(Rdz) > 1e-5) {
         for (let Li = 0; Li < Lights.length; ++Li) {
           const L = Lights[Li];
+          if (L.QuadVisible === false) continue;
           const Tq = (L.Cz - Roz) / Rdz;
           if (Tq > 0.002 && Tq < BestT) {
             if (Math.abs(Rox + Rdx * Tq - L.Cx) <= L.Hw && Math.abs(Roy + Rdy * Tq - L.Cy) <= L.Hh) {
@@ -844,6 +878,7 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
         EndRow,
         ViewModeCode,
         ShowGrid,
+        TransparentBackground = false,
       } = Params;
 
       const { Prims, Lights } = this.PackScene(CompiledScene, AtlasPixels);
@@ -908,7 +943,7 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
           if (ViewModeCode >= 10) {
             const Dbg = ViewModeCode - 10;
             if (Hit.hit) {
-              EntityCode = 1 + Hit.primIdx;
+              EntityCode = Prims[Hit.primIdx].PickCode || (1 + Hit.primIdx);
               HitDist = Hit.t;
               const Mat = this.FetchMaterialInto(Prims, AtlasPixels, Hit.primIdx, Hit.u, Hit.v, this._Mat);
               if (Dbg === 1) {
@@ -917,15 +952,45 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
               } else if (Dbg === 2) {
                 LinR = Fract(EntityCode * 0.37); LinG = Fract(EntityCode * 0.61); LinB = Fract(EntityCode * 0.83);
               } else if (Dbg === 3) {
+                LinR = 0.5 + 0.5 * Rdx; LinG = 0.5 + 0.5 * Rdy; LinB = 0.5;
+              } else if (Dbg === 4) {
+                const Ci = Hit.primIdx + 1;
+                LinR = Fract(Ci * 0.29); LinG = Fract(Ci * 0.53); LinB = Fract(Ci * 0.79);
+              } else if (Dbg === 5) {
+                const Hv = Math.floor((1.0 - Clamp(Hit.t / 14.0, 0, 1)) * 8.0) / 8.0;
+                LinR = Hv; LinG = Hv; LinB = Hv;
+              } else if (Dbg === 6) {
                 LinR = Math.pow(Clamp(Mat.baseR, 0, 1), 1 / 2.2);
                 LinG = Math.pow(Clamp(Mat.baseG, 0, 1), 1 / 2.2);
                 LinB = Math.pow(Clamp(Mat.baseB, 0, 1), 1 / 2.2);
-              } else if (Dbg === 4) {
+              } else if (Dbg === 7 || Dbg === 10) {
                 LinR = Hit.nx * 0.5 + 0.5; LinG = Hit.ny * 0.5 + 0.5; LinB = Hit.nz * 0.5 + 0.5;
-              } else if (Dbg === 5) {
+              } else if (Dbg === 8) {
                 LinR = Mat.roughness; LinG = Mat.roughness; LinB = Mat.roughness;
-              } else {
+              } else if (Dbg === 9) {
                 LinR = Mat.metallic; LinG = Mat.metallic; LinB = Mat.metallic;
+              } else if (Dbg === 11) {
+                const Rm = Clamp(1.0 - Mat.roughness * 0.6, 0.2, 1.0);
+                LinR = 0.15 * Rm; LinG = 0.78 * Rm; LinB = 0.52 * Rm;
+              } else if (Dbg === 12) {
+                const Rw = Clamp(Math.max(0.08, Hit.nx * SunDir[0] + Hit.ny * SunDir[1] + Hit.nz * SunDir[2]), 0, 1);
+                LinR = Rw; LinG = Rw; LinB = Rw;
+              } else if (Dbg === 13) {
+                const Ra = Clamp(Mat.ao, 0.1, 1.0);
+                LinR = 0.28 * Ra; LinG = 0.56 * Ra; LinB = 0.96 * Ra;
+              } else if (Dbg === 14) {
+                const Par = (((Px >> 4) + (Py >> 4)) & 1) ? 0.35 : 0.0;
+                LinR = Mix(Mat.baseR * 0.55, 0.95, Par);
+                LinG = Mix(Mat.baseG * 0.55, 0.68, Par);
+                LinB = Mix(Mat.baseB * 0.55, 0.22, Par);
+              } else {
+                const Gx = Math.abs(Fract(Hit.px * 4) - 0.5);
+                const Gy = Math.abs(Fract(Hit.py * 4) - 0.5);
+                const Gz = Math.abs(Fract(Hit.pz * 4) - 0.5);
+                const W = Math.min(Gx, Gy, Gz) < 0.04 ? 1.0 : 0.0;
+                LinR = Mix(Hit.nx * 0.3 + 0.3, 0.38, W);
+                LinG = Mix(Hit.ny * 0.3 + 0.3, 0.84, W);
+                LinB = Mix(Hit.nz * 0.3 + 0.3, 1.0, W);
               }
             } else {
               LinR = 0.06; LinG = 0.07; LinB = 0.09;
@@ -942,12 +1007,13 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
 
           if (TQuad < Hit.t) {
             LinR = QuadOut[0]; LinG = QuadOut[1]; LinB = QuadOut[2];
-            EntityCode = 32 + (QuadOut[3] | 0);
+            const LiHit = QuadOut[3] | 0;
+            EntityCode = Lights[LiHit]?.PickCode || (112 + LiHit);
             HitDist = TQuad;
           } else if (Hit.hit) {
-            EntityCode = 1 + Hit.primIdx;
-            HitDist = Hit.t;
             const P = Prims[Hit.primIdx];
+            EntityCode = P.PickCode || (1 + Hit.primIdx);
+            HitDist = Hit.t;
             const Mat = this.FetchMaterialInto(Prims, AtlasPixels, Hit.primIdx, Hit.u, Hit.v, this._Mat);
 
             const Bx = Hit.ny * Hit.tz - Hit.nz * Hit.ty;
@@ -1263,6 +1329,16 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
               LinB += SpecEnvB * FenvB * EScale;
             }
           } else {
+            if (TransparentBackground) {
+              DepthOut[PixIdx] = HitDist;
+              EntityOut[PixIdx] = 0;
+              const O4 = PixIdx * 4;
+              RgbaOut[O4] = 0;
+              RgbaOut[O4 + 1] = 0;
+              RgbaOut[O4 + 2] = 0;
+              RgbaOut[O4 + 3] = 0;
+              continue;
+            }
             this.EvalSky(Rdx, Rdy, Rdz, SkyRadiance, SunDir, SunIrradiance, SkyOut);
             LinR = SkyOut[0]; LinG = SkyOut[1]; LinB = SkyOut[2];
             if (ShowGrid && Math.abs(Rdz) > 1e-4) {

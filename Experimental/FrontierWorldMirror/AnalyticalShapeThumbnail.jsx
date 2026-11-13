@@ -1,52 +1,73 @@
 import React, { useEffect, useState } from "react";
 import { RenderAnalyticalThumbnailDataUrl } from "./ModelThumbnailRenderer.js";
 
+let SyncRenderBudget = 10;
+
 export function AnalyticalShapeThumbnail({
+  PropId = null,
   Shape = "cone",
   Scale = null,
   Material = null,
+  FaceColors = null,
   Size = 48,
   ClassName = "",
   Style = undefined,
 }) {
-  const [Src, SetSrc] = useState(() =>
-    RenderAnalyticalThumbnailDataUrl({
-      Shape,
-      Scale,
-      Material,
-      Size: Math.max(56, Size * 2),
-    }),
-  );
+  const RenderPx = Math.min(96, Math.max(52, Math.round(Size * 1.6)));
+  const [Src, SetSrc] = useState(() => {
+    if (SyncRenderBudget > 0) {
+      SyncRenderBudget -= 1;
+      return RenderAnalyticalThumbnailDataUrl({
+        PropId,
+        Shape,
+        Scale,
+        Material,
+        FaceColors,
+        Size: RenderPx,
+      });
+    }
+    return "";
+  });
 
   useEffect(() => {
-    const Next = RenderAnalyticalThumbnailDataUrl({
-      Shape,
-      Scale,
-      Material,
-      Size: Math.max(56, Size * 2),
-    });
-    if (Next !== Src) SetSrc(Next);
-  }, [Shape, Size, Scale, Material]);
+    let Cancelled = false;
+    const Handle = setTimeout(() => {
+      if (Cancelled) return;
+      const Next = RenderAnalyticalThumbnailDataUrl({
+        PropId,
+        Shape,
+        Scale,
+        Material,
+        FaceColors,
+        Size: RenderPx,
+      });
+      if (!Cancelled && Next && Next !== Src) SetSrc(Next);
+    }, 0);
+    return () => {
+      Cancelled = true;
+      clearTimeout(Handle);
+    };
+  }, [PropId, Shape, RenderPx, Scale, Material, FaceColors]);
 
   if (!Src) {
     return (
       <span
         className={"analytical-thumb-fallback " + ClassName}
-        data-thumb-shape={Shape}
+        data-thumb-shape={PropId || Shape}
         style={{
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
           width: Size,
           height: Size,
-          borderRadius: 8,
-          background: "#181a1f",
-          color: "#d4d4d0",
-          fontSize: Math.max(9, Math.round(Size * 0.28)),
+          background: "transparent",
+          color: "rgba(220,224,232,0.55)",
+          fontSize: Math.max(8, Math.round(Size * 0.28)),
+          flexShrink: 0,
           ...Style,
         }}
       >
-        3D
+        ◇
       </span>
     );
   }
@@ -58,17 +79,20 @@ export function AnalyticalShapeThumbnail({
       width={Size}
       height={Size}
       draggable={false}
-      data-thumb-shape={Shape}
+      data-thumb-shape={PropId || Shape}
       className={"analytical-thumb-img " + ClassName}
       style={{
         width: Size,
         height: Size,
-        objectFit: "cover",
-        borderRadius: Math.max(5, Math.round(Size * 0.16)),
+        objectFit: "contain",
+        background: "transparent",
         display: "block",
+        flexShrink: 0,
         pointerEvents: "none",
         ...Style,
       }}
     />
   );
 }
+
+export default AnalyticalShapeThumbnail;

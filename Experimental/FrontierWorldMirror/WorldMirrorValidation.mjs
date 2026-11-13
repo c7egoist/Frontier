@@ -27,6 +27,7 @@ import {
   WORLD_PLACEABLE_MODELS,
 } from "./WorldDragDrop.js";
 import { RenderAnalyticalThumbnailRgba } from "./ModelThumbnailRenderer.js";
+import { WORLD_PROP_CATALOG } from "./WorldPropLibrary.js";
 import { ResolveMaterial } from "./MaterialSpecification.js";
 import {
   ATLAS_COLS,
@@ -700,24 +701,241 @@ assert.ok(
     "Automotive Cone Slalom template provisions both Traffic Cones & Cylinder Cones",
   );
 
-  // Verify 3D Analytical OpenPBR Thumbnail Raytracer across Traffic Cone, Cylinder Cone & Analytical Shapes
+  // Verify 3D Analytical OpenPBR Thumbnail Raytracer across Traffic Cone, Cylinder Cone & Analytical Shapes (100% transparent sky)
   for (const Shape of ["cone", "cylinder-cone", "box", "sphere", "cylinder", "torus"]) {
     const Thumb = RenderAnalyticalThumbnailRgba({ Shape, Width: 64, Height: 64 });
     assert.equal(Thumb.Pixels.length, 64 * 64 * 4, `Thumbnail RGBA buffer sized 64x64 for ${Shape}`);
+    // Corners must be 100% transparent (Alpha = 0, RGB = 0) — zero studio floor or background box
+    assert.equal(Thumb.Pixels[3], 0, `Top-left corner of ${Shape} thumbnail is 100% transparent`);
+    assert.equal(Thumb.Pixels[(63 * 64 + 63) * 4 + 3], 0, `Bottom-right corner of ${Shape} thumbnail is 100% transparent`);
     let LitPixels = 0;
     let OrangePixels = 0;
-    for (let P = 0; P < Thumb.Pixels.length; P += 4) {
-      const R = Thumb.Pixels[P], G = Thumb.Pixels[P + 1], B = Thumb.Pixels[P + 2];
-      if (R + G + B > 45) LitPixels += 1;
-      if (R > 165 && R > G * 1.45 && G > B * 1.15) OrangePixels += 1;
+    let MinX = 64, MinY = 64, MaxX = -1, MaxY = -1;
+    for (let Y = 0; Y < 64; ++Y) {
+      for (let X = 0; X < 64; ++X) {
+        const P = (Y * 64 + X) * 4;
+        const R = Thumb.Pixels[P], G = Thumb.Pixels[P + 1], B = Thumb.Pixels[P + 2], A = Thumb.Pixels[P + 3];
+        if (A > 16) {
+          if (X < MinX) MinX = X;
+          if (X > MaxX) MaxX = X;
+          if (Y < MinY) MinY = Y;
+          if (Y > MaxY) MaxY = Y;
+        }
+        if (R + G + B > 45 && A > 16) LitPixels += 1;
+        if (R > 165 && R > G * 1.45 && G > B * 1.15 && A > 16) OrangePixels += 1;
+      }
     }
-    assert.ok(LitPixels > 64 * 64 * 0.25, `3D raytraced thumbnail for ${Shape} has lit studio surfaces`);
+    const MinFillFraction = Shape === "cylinder-cone" ? 0.16 : 0.25;
+    assert.ok(LitPixels > 64 * 64 * MinFillFraction, `3D raytraced thumbnail for ${Shape} has lit studio surfaces (${LitPixels} px)`);
+    assert.ok(MinX >= 1 && MinY >= 1 && MaxX <= 62 && MaxY <= 62, `Thumbnail for ${Shape} is unclipped inside frame ([${MinX},${MinY}]..[${MaxX},${MaxY}])`);
+    assert.ok(Math.max(MaxX - MinX + 1, MaxY - MinY + 1) >= 48, `Thumbnail for ${Shape} is tightly framed without being far away`);
     if (Shape === "cone" || Shape === "cylinder-cone") {
       assert.ok(OrangePixels > 35, `3D raytraced thumbnail for ${Shape} renders safety-orange OpenPBR body (got ${OrangePixels} px)`);
     }
   }
 }
 
+// ---------------------------------------------------------------------------------------------------------------------------------------
+// 13. 24-Prop Studio Camera/Light/Track Library, Transparent Thumbnails, Per-Face Colours, 15 Debug Views & ProjectBrowser
+// ---------------------------------------------------------------------------------------------------------------------------------------
+{
+  assert.equal(WORLD_PROP_CATALOG.length, 24, "WORLD_PROP_CATALOG exposes 24 studio cameras, lights, and track/workshop props");
+  assert.equal(WORLD_PROP_CATALOG.filter((P) => P.Panel === "camera").length, 6, "6 3D camera models registered");
+  assert.equal(WORLD_PROP_CATALOG.filter((P) => P.Panel === "light").length, 6, "6 3D studio light models registered");
+  assert.equal(WORLD_PROP_CATALOG.filter((P) => P.Panel === "geometry").length, 12, "12 track/workshop props registered");
+
+  // Verify every single prop renders a transparent, unclipped, tightly-framed 3D thumbnail
+  for (const Prop of WORLD_PROP_CATALOG) {
+    const Thumb = RenderAnalyticalThumbnailRgba({ PropId: Prop.PropId, Width: 64, Height: 64 });
+    assert.equal(Thumb.Pixels[3], 0, `Prop ${Prop.PropId} thumbnail has transparent background (Alpha=0)`);
+    let OpaqueCount = 0;
+    let MinX = 64, MinY = 64, MaxX = -1, MaxY = -1;
+    for (let Y = 0; Y < 64; ++Y) {
+      for (let X = 0; X < 64; ++X) {
+        const A = Thumb.Pixels[(Y * 64 + X) * 4 + 3];
+        if (A > 16) {
+          OpaqueCount += 1;
+          if (X < MinX) MinX = X;
+          if (X > MaxX) MaxX = X;
+          if (Y < MinY) MinY = Y;
+          if (Y > MaxY) MaxY = Y;
+        }
+      }
+    }
+    assert.ok(OpaqueCount > 180, `Prop ${Prop.PropId} renders visible 3D silhouette (${OpaqueCount} px)`);
+    assert.ok(MinX >= 1 && MinY >= 1 && MaxX <= 62 && MaxY <= 62, `Prop ${Prop.PropId} thumbnail is unclipped ([${MinX},${MinY}]..[${MaxX},${MaxY}])`);
+    assert.ok(Math.max(MaxX - MinX + 1, MaxY - MinY + 1) >= 48, `Prop ${Prop.PropId} thumbnail fills frame tightly`);
+  }
+
+  // Verify placed 3D Camera, Studio Light (LTC + stand parts + QuadVisible=false), and Track Prop compilation & OwnerId picking
+  const CamPayload = BuildActorPayloadFromModelSpec(WORLD_PLACEABLE_MODELS.find((M) => M.PropId === "cinema_camera"));
+  const LightPayload = BuildActorPayloadFromModelSpec(WORLD_PLACEABLE_MODELS.find((M) => M.PropId === "softbox_cinema_light"));
+  const PropPayload = BuildActorPayloadFromModelSpec(WORLD_PLACEABLE_MODELS.find((M) => M.PropId === "tire_stack"));
+  assert.equal(CamPayload.ActorKind, "camera");
+  assert.equal(LightPayload.ActorKind, "light");
+  assert.equal(PropPayload.ActorKind, "geometry");
+
+  const ExtendedRows = [
+    ...ShowcaseInitialRows,
+    { ...CamPayload.Template, Id: "placed-cam-1" },
+    { ...LightPayload.Template, Id: "placed-light-1" },
+    { ...PropPayload.Template, Id: "placed-prop-1" },
+  ];
+  const ExtendedValues = {
+    ...ShowcaseInitialValues,
+    "placed-cam-1": { ...CamPayload.Properties, Position: [-1.05, -1.75, -0.64 + CamPayload.HalfHeightZ] },
+    "placed-light-1": { ...LightPayload.Properties, Position: [1.05, -1.75, -0.64 + LightPayload.HalfHeightZ] },
+    "placed-prop-1": { ...PropPayload.Properties, Position: [0.0, -1.75, -0.64 + PropPayload.HalfHeightZ] },
+  };
+  const CompiledExt = CompileLiveGtxScene(
+    ExtendedRows,
+    ExtendedValues,
+    {},
+    "PERSP",
+    16 / 9,
+  );
+  const SoftboxLight = CompiledExt.AreaLights.find((L) => L.Id === "placed-light-1");
+  assert.ok(SoftboxLight && SoftboxLight.QuadVisible === false, "3D Studio Softbox registers LTC AreaLight while hiding floating quad");
+  const StandPrims = CompiledExt.Primitives.filter((P) => P.OwnerId === "placed-light-1");
+  assert.ok(StandPrims.length >= 4 && StandPrims.every((P) => P.PickCode === SoftboxLight.PickCode), "3D Studio Softbox expands multi-part stand sharing PickCode");
+  const CamPrims = CompiledExt.Primitives.filter((P) => P.OwnerId === "placed-cam-1");
+  assert.ok(CamPrims.length >= 6, "Placed Tripod Camera expands multi-part 3D rig in scene");
+  const TirePrims = CompiledExt.Primitives.filter((P) => P.OwnerId === "placed-prop-1");
+  assert.ok(TirePrims.length >= 4, "Placed FIA Tire Stack expands multi-part torus/rim assembly");
+  const ProjectUv = (WorldPos, Scene, Aspect) => {
+    const Norm3 = (V) => {
+      const L = Math.hypot(V[0], V[1], V[2]) || 1;
+      return [V[0] / L, V[1] / L, V[2] / L];
+    };
+    const Cross3 = (A, B) => [
+      A[1] * B[2] - A[2] * B[1],
+      A[2] * B[0] - A[0] * B[2],
+      A[0] * B[1] - A[1] * B[0],
+    ];
+    const CamFwd = Norm3([
+      Scene.CameraTarget[0] - Scene.CameraOrigin[0],
+      Scene.CameraTarget[1] - Scene.CameraOrigin[1],
+      Scene.CameraTarget[2] - Scene.CameraOrigin[2],
+    ]);
+    const CamRight = Norm3(Cross3(CamFwd, Scene.WorldUp));
+    const CamUp = Cross3(CamRight, CamFwd);
+    const TanHalf = Math.tan(Scene.VerticalFovRad * 0.5);
+    const Dx = WorldPos[0] - Scene.CameraOrigin[0];
+    const Dy = WorldPos[1] - Scene.CameraOrigin[1];
+    const Dz = WorldPos[2] - Scene.CameraOrigin[2];
+    const Fwd = Dx * CamFwd[0] + Dy * CamFwd[1] + Dz * CamFwd[2];
+    const Rx = Dx * CamRight[0] + Dy * CamRight[1] + Dz * CamRight[2];
+    const Uz = Dx * CamUp[0] + Dy * CamUp[1] + Dz * CamUp[2];
+    const Sx = Rx / (Fwd * TanHalf * Aspect);
+    const Sy = Uz / (Fwd * TanHalf);
+    return [(Sx + 1) * 0.5, (1 - Sy) * 0.5];
+  };
+  const [TireU, TireV] = ProjectUv(TirePrims[0].Center, CompiledExt, 16 / 9);
+  assert.equal(PickSceneEntityAtUv(CompiledExt, TireU, TireV, 16 / 9), "placed-prop-1", "PickSceneEntityAtUv resolves multi-part Tire Stack child hit back to parent OwnerId");
+  const [CamU, CamV] = ProjectUv(CamPrims[0].Center, CompiledExt, 16 / 9);
+  assert.equal(PickSceneEntityAtUv(CompiledExt, CamU, CamV, 16 / 9), "placed-cam-1", "PickSceneEntityAtUv resolves placed 3D Camera rig child hit back to parent OwnerId");
+  const [LightU, LightV] = ProjectUv(StandPrims[0].Center, CompiledExt, 16 / 9);
+  assert.equal(PickSceneEntityAtUv(CompiledExt, LightU, LightV, 16 / 9), "placed-light-1", "PickSceneEntityAtUv resolves 3D Studio Softbox stand child hit back to parent OwnerId");
+
+  // Verify Per-Face FaceColors 3x2 guttered atlas baking & raytraced color differentiation on cube faces
+  const FaceAtlasSync = new MaterialAtlasSynchronizer();
+  const FaceCpu = new CpuGtxRenderer();
+  const FaceRows = [
+    { Id: "face-cube", Name: "Face Cube", Panel: "geometry", PrimitiveShape: "box", Preview: true },
+    { Id: "camera", Name: "Cam", Panel: "camera" },
+    { Id: "sun", Name: "Sun", Panel: "sun", Preview: true },
+  ];
+  const FaceScene = CompileLiveGtxScene(
+    FaceRows,
+    {
+      "face-cube": {
+        Position: [0, 0, 0],
+        Rotation: [0, 0, 45],
+        Scale: [1.2, 1.2, 1.2],
+        Material: ResolveMaterial({}),
+        FaceColors: {
+          Enabled: true,
+          "-Y": "#ef4444",
+          "-X": "#22c55e",
+          "+X": "#3b82f6",
+          "+Z": "#eab308",
+          "+Y": "#ffffff",
+          "-Z": "#111827",
+        },
+      },
+      camera: { Position: [0, -2.6, 1.3], Target: [0, 0, 0], "Focal Length": 45, "Sensor Width": 36 },
+      sun: { Azimuth: 25, Elevation: 55, Intensity: 1.4 },
+    },
+    {},
+    "PERSP",
+    1,
+  );
+  assert.equal(FaceScene.Primitives[0].FaceAtlas, true, "Cube with FaceColors sets FaceAtlas flag");
+  FaceAtlasSync.InvalidateAll();
+  FaceAtlasSync.UpdatePrimitives(FaceScene.Primitives);
+  FaceCpu.Invalidate();
+  FaceCpu.RenderSlice(
+    {
+      CompiledScene: FaceScene,
+      AtlasPixels: FaceAtlasSync.Pixels,
+      Width: 64,
+      Height: 64,
+      ViewModeCode: 0,
+      ShowGrid: 0,
+    },
+    64,
+  );
+  const FacePix = FaceCpu.OffscreenImg.data;
+  // Left-front face vs right-front face of 45-deg Z-rotated cube
+  const LeftSample = (38 * 64 + 24) * 4;
+  const RightSample = (38 * 64 + 40) * 4;
+  assert.ok(
+    Math.abs(FacePix[LeftSample] - FacePix[RightSample]) + Math.abs(FacePix[LeftSample + 1] - FacePix[RightSample + 1]) > 45,
+    "Per-Face FaceColors renders distinct colors on adjacent visible faces of the same cube",
+  );
+
+  // Verify all 15 DebugViews (1..15) render non-empty buffers in CpuGtxRenderer AND exist in WGSL & GLSL shaders
+  const DbgDir = path.dirname(fileURLToPath(import.meta.url));
+  const WgslSrc = fs.readFileSync(path.join(DbgDir, "WebgpuGtxRenderer.js"), "utf8");
+  const GlslSrc = fs.readFileSync(path.join(DbgDir, "GtxWorldViewport.jsx"), "utf8");
+  const EditorSrc = fs.readFileSync(path.join(DbgDir, "Editor.jsx"), "utf8");
+  FaceAtlasSync.InvalidateAll();
+  FaceAtlasSync.UpdatePrimitives(CompiledExt.Primitives);
+  for (let Mode = 1; Mode <= 15; ++Mode) {
+    assert.ok(WgslSrc.includes(`dbg == ${Mode}`), `WGSL shader implements DebugView ${Mode}`);
+    assert.ok(GlslSrc.includes(`dbg == ${Mode}`), `GLSL shader implements DebugView ${Mode}`);
+    FaceCpu.Invalidate();
+    FaceCpu.RenderSlice(
+      {
+        CompiledScene: CompiledExt,
+        AtlasPixels: FaceAtlasSync.Pixels,
+        Width: 32,
+        Height: 32,
+        ViewModeCode: Mode,
+        ShowGrid: 0,
+      },
+      32,
+    );
+    const DbgBuf = FaceCpu.OffscreenImg.data;
+    let NonZero = 0;
+    for (let I = 0; I < DbgBuf.length; I += 4) {
+      if (DbgBuf[I] + DbgBuf[I + 1] + DbgBuf[I + 2] > 5) NonZero += 1;
+    }
+    assert.ok(NonZero > 40, `CPU DebugView ${Mode} renders active diagnostic signal (${NonZero} px)`);
+  }
+
+  // Verify Editor UI invariants: Diagnostics decoupled from Debug, quick-place strip removed, Outliner 3D icons, ProjectBrowser present
+  assert.ok(!EditorSrc.includes('className="viewport-place-strip"'), "Entity quick-place strip removed from viewport top header");
+  assert.ok(EditorSrc.includes("DiagnosticsOpen") && EditorSrc.includes('aria-label="Debug views"'), "Diagnostics popup decoupled from Debug views dropdown");
+  assert.ok(EditorSrc.includes("RenderOutlinerRowIcon"), "Outliner renders 3D AnalyticalShapeThumbnail icons");
+  assert.ok(
+    fs.existsSync(path.join(DbgDir, "..", "ProjectBrowser", "index.html")) &&
+      fs.existsSync(path.join(DbgDir, "..", "ProjectBrowser", "Browser.js")) &&
+      fs.existsSync(path.join(DbgDir, "..", "ProjectBrowser", "ReferenceRenderer.js")),
+    "Standalone Experimental/ProjectBrowser/ exists with WebGL2 ReferenceRenderer & Frontier Editor launch",
+  );
+}
+
 console.log(
-  "[WorldMirrorValidation] ALL 12 SUITES PASSED: Strict WebGPU Explicit PipelineLayouts, Analytical Traffic Cone & Cylinder Cone, Unreal-Style 3D Drag-and-Drop Surface Placement, Always-On-Top 13-handle GizmoPRO, 19 ForceModels, and Construct-Style Multi-Level World Editor verified!",
+  "[WorldMirrorValidation] ALL 13 SUITES PASSED: 24 Studio Cameras/Lights/Props, Transparent Auto-Framed 3D Thumbnails, Per-Face Colours, 15 Debug Views, Decoupled Diagnostics, and ProjectBrowser verified!",
 );

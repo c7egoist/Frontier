@@ -13,6 +13,13 @@ import {
   PickForceBeacon,
   ResolveForceValues,
 } from "./ForceFieldCatalog.js";
+import {
+  EulerDegToMat3,
+  ExpandPropPrimitives,
+  GetWorldPropById,
+  HasActiveFaceColors,
+  TransformVec3ByMat3,
+} from "./WorldPropLibrary.js";
 
 export const ConstructForceTemplates = FORCE_MODELS.map((Law) => ({
   Id: `template-force-${Law.Id.toLowerCase()}`,
@@ -576,53 +583,93 @@ export function CompileLiveGtxScene(
     : 0;
   const ExposureGain = CanonicalEditorCamera.ExposureGain * Math.pow(2, EvComp);
 
-  // LTC Area Quad Lights (up to 4)
+  // LTC Area Quad Lights (up to 6, including Studio Light rigs!)
   const AreaLights = [];
+  const LightPickMap = new Map();
   for (const Row of Rows) {
     if (Row.Panel !== "light") continue;
     if (!RowEffectivelyVisible(Row, Rows, Hidden)) continue;
     const Rec = Values?.[Row.Id] || {};
+    const PropDef = GetWorldPropById(Row.PropId || Rec.PropId);
     const RefProps = Rec.ReferenceInspector?.Properties || {};
-    const Pos = Array.isArray(Rec.Position)
+    const RawPos = Array.isArray(Rec.Position)
       ? Rec.Position
       : Array.isArray(RefProps.pos)
         ? RefProps.pos
         : [0.55, 0.35, 1.82];
-    const Width = Array.isArray(Rec.Scale)
-      ? Number(Rec.Scale[0]) || Number(RefProps.width) || 1.7
-      : Number(RefProps.width) || 1.7;
-    const Height = Array.isArray(Rec.Scale)
-      ? Number(Rec.Scale[1]) || Number(RefProps.height) || 1.3
-      : Number(RefProps.height) || 1.3;
+    let EmitCenter = [Number(RawPos[0]) || 0, Number(RawPos[1]) || 0, Number(RawPos[2]) || 0];
+    if (PropDef?.LightEmitter?.Offset) {
+      const RotDeg = Array.isArray(Rec.Rotation) ? Rec.Rotation : [0, 0, 0];
+      const OffW = TransformVec3ByMat3(EulerDegToMat3(RotDeg), PropDef.LightEmitter.Offset);
+      EmitCenter = [EmitCenter[0] + OffW[0], EmitCenter[1] + OffW[1], EmitCenter[2] + OffW[2]];
+    }
+    const DefaultW = PropDef?.LightEmitter?.Width ?? 1.7;
+    const DefaultH = PropDef?.LightEmitter?.Height ?? 1.3;
+    const Width = PropDef
+      ? Number(RefProps.width) || DefaultW
+      : Array.isArray(Rec.Scale)
+        ? Number(Rec.Scale[0]) || Number(RefProps.width) || DefaultW
+        : Number(RefProps.width) || DefaultW;
+    const Height = PropDef
+      ? Number(RefProps.height) || DefaultH
+      : Array.isArray(Rec.Scale)
+        ? Number(Rec.Scale[1]) || Number(RefProps.height) || DefaultH
+        : Number(RefProps.height) || DefaultH;
+    const BaseLumens = PropDef?.LightEmitter?.Lumens ?? 2400;
     const LumensRatio =
       typeof RefProps.lumens === "number"
-        ? (Math.max(0, RefProps.lumens) / 2400) * Math.max(0, Number(RefProps.dimmer ?? 1))
+        ? (Math.max(0, RefProps.lumens) / BaseLumens) * Math.max(0, Number(RefProps.dimmer ?? 1))
         : Number(Rec.Intensity ?? 7.5) / 7.5;
     const TintRgb =
       typeof RefProps.color === "string" && /^#[0-9a-f]{6}$/i.test(RefProps.color)
         ? HexToLinearRgb(RefProps.color, [1.0, 0.88, 0.72])
         : null;
+    const FallbackEmit = PropDef?.LightEmitter?.Radiance || [7.5, 6.6, 5.4];
     const BaseEmit = TintRgb
       ? [TintRgb[0] * 7.5, TintRgb[1] * 7.5, TintRgb[2] * 7.5]
       : Array.isArray(Rec.EmittedRadiance)
         ? Rec.EmittedRadiance
-        : [7.5, 6.6, 5.4];
+        : FallbackEmit;
+    const PickCode = 112 + AreaLights.length;
+    LightPickMap.set(Row.Id, PickCode);
     AreaLights.push({
       Id: Row.Id,
-      Center: [Number(Pos[0]) || 0, Number(Pos[1]) || 0, Number(Pos[2]) || 0],
+      PickCode,
+      QuadVisible: !PropDef,
+      Center: EmitCenter,
       HalfWidth: Math.max(0.08, Math.abs(Width) * 0.5),
       HalfHeight: Math.max(0.08, Math.abs(Height) * 0.5),
       Radiance: BaseEmit.map((C) => Math.max(0, C * LumensRatio)),
     });
-    if (AreaLights.length >= 4) break;
+    if (AreaLights.length >= 6) break;
   }
 
-  // Geometry Primitives (up to 24: opaque + 2-layer glass shells)
+  // Geometry, Multi-Part Props, Placed Camera Rigs & Studio Light Rigs (up to 96 primitives)
   const Primitives = [];
+  let NextActorPickCode = 1;
   for (const Row of Rows) {
-    if (Row.Panel !== "geometry") continue;
-    if (!RowEffectivelyVisible(Row, Rows, Hidden)) continue;
     const Rec = Values?.[Row.Id] || {};
+    const PropId = Row.PropId || Rec.PropId || (Row.Panel === "camera" && Row.Id !== "camera" ? "engine_camera" : null);
+    const IsRenderableProp =
+      Boolean(PropId) && ["geometry", "camera", "light"].includes(Row.Panel) && Row.Id !== "camera";
+    if (Row.Panel !== "geometry" && !IsRenderableProp) continue;
+    if (!RowEffectivelyVisible(Row, Rows, Hidden)) continue;
+
+    if (IsRenderableProp && GetWorldPropById(PropId)) {
+      const SharedPickCode =
+        Row.Panel === "light" && LightPickMap.has(Row.Id)
+          ? LightPickMap.get(Row.Id)
+          : NextActorPickCode++;
+      const Expanded = ExpandPropPrimitives({ ...Row, PropId }, Rec, SharedPickCode);
+      for (const SubPrim of Expanded) {
+        if (Primitives.length >= 96) break;
+        Primitives.push(SubPrim);
+      }
+      if (Primitives.length >= 96) break;
+      continue;
+    }
+
+    if (Row.Panel !== "geometry") continue;
     const Pos = Array.isArray(Rec.Position) ? Rec.Position : [0, 0.5, 0];
     const Rot = Array.isArray(Rec.Rotation) ? Rec.Rotation : [0, 0, 0];
     const Scale = Array.isArray(Rec.Scale) ? Rec.Scale : [0.8, 0.8, 0.8];
@@ -631,7 +678,8 @@ export function CompileLiveGtxScene(
 
     const BaseColor = HexToLinearRgb(Ch.colour?.Fill, [0.78, 0.77, 0.75]);
     const Metallic = Math.max(0, Math.min(1, Number(Ch.metallic?.Fill ?? 0)));
-    const Roughness = Math.max(0.02, Math.min(1, Number(Ch.roughness?.Fill ?? 0.35)));
+    const Roughness = Math.max(0, Math.min(1, Number(Ch.roughness?.Fill ?? 0.35)));
+    const ClampedRoughness = Math.max(0.02, Roughness);
     const Anisotropy = Math.max(-0.95, Math.min(0.95, Number(Ch.anisotropy?.Fill ?? 0)));
     const CoatWeight = Math.max(0, Math.min(1, Number(Ch.coat?.Fill ?? 0)));
     const CoatRoughness = Math.max(0.02, Math.min(1, Number(Ch.coatRoughness?.Fill ?? 0.08)));
@@ -643,7 +691,7 @@ export function CompileLiveGtxScene(
         : Math.max(0, Math.min(1, Number(Ch.transmission?.Fill ?? 0)));
     const Ior = Math.max(1.02, Math.min(2.5, Number(Ch.ior?.Fill ?? Ch.reflectance?.Fill ?? 1.5)));
     const Emission = Math.max(0, Number(Ch.emission?.Fill ?? 0));
-    const DiffuseRoughness = Number(Rec.DiffuseRoughness ?? Roughness * 0.85);
+    const DiffuseRoughness = Number(Rec.DiffuseRoughness ?? ClampedRoughness * 0.85);
     const EdgeTintF82 = Array.isArray(Rec.EdgeTintF82)
       ? Rec.EdgeTintF82
       : [1, 1, 1];
@@ -657,9 +705,13 @@ export function CompileLiveGtxScene(
       (Transmission > 0.45 && Ch.transmission?.Source === "Fill") ||
       Mat.Type === "Glass" ||
       (Opacity < 0.92 && Ch.opacity?.Source === "Fill");
+    const UseFaceAtlas = HasActiveFaceColors(Rec.FaceColors);
+    const PickCode = NextActorPickCode++;
 
     Primitives.push({
       Id: Row.Id,
+      OwnerId: Row.Id,
+      PickCode,
       Name: Row.Name,
       Shape: ShapeKindCode(Row),
       Center: [Number(Pos[0]) || 0, Number(Pos[1]) || 0, Number(Pos[2]) || 0],
@@ -672,11 +724,13 @@ export function CompileLiveGtxScene(
       CastShadows: (Rec["Cast shadows"] ?? !IsTransparentShell) ? 1 : 0,
       GiContributor: (Rec.GI ?? !IsTransparentShell) ? 1 : 0,
       GlassShell: IsTransparentShell,
+      FaceAtlas: UseFaceAtlas,
+      FaceColors: UseFaceAtlas ? Rec.FaceColors : null,
       ResolvedMaterial: Mat,
       MaterialType: Mat.Type,
       BaseColor,
       Metallic,
-      Roughness,
+      Roughness: ClampedRoughness,
       DiffuseRoughness,
       Anisotropy,
       CoatWeight,
@@ -690,7 +744,7 @@ export function CompileLiveGtxScene(
       Abbe,
       Attenuation,
     });
-    if (Primitives.length >= 32) break;
+    if (Primitives.length >= 96) break;
   }
 
   // Analytical ForceFields & VectorFields (Pass 3A ForceOverlay — zero rigid-body physics!)
@@ -961,7 +1015,7 @@ export function PickSceneEntityAtUv(CompiledScene, U, V, Aspect) {
   let BestId = null;
 
   for (const Prim of CompiledScene.Primitives) {
-    if (Prim.Id === "__drag_preview__") continue;
+    if (Prim.Id === "__drag_preview__" || Prim.OwnerId === "__drag_preview__") continue;
     const WorldRel = [
       RayOrigin[0] - Prim.Center[0],
       RayOrigin[1] - Prim.Center[1],
@@ -972,11 +1026,12 @@ export function PickSceneEntityAtUv(CompiledScene, U, V, Aspect) {
     const Hit = IntersectScenePrimLocal(Prim, Rel, LocalDir, BestT);
     if (Hit && Hit.T < BestT) {
       BestT = Hit.T;
-      BestId = Prim.Id;
+      BestId = Prim.OwnerId || Prim.Id;
     }
   }
 
   for (const Light of CompiledScene.AreaLights) {
+    if (Light.QuadVisible === false) continue;
     if (Math.abs(RayDir[2]) > 1e-5) {
       const T = (Light.Center[2] - RayOrigin[2]) / RayDir[2];
       if (T > 0.05 && T < BestT) {
@@ -1013,7 +1068,7 @@ export function RaycastWorldPlacementAtUv(
   let BestHitId = null;
 
   for (const Prim of CompiledScene.Primitives) {
-    if (Prim.Id === IgnoreId || Prim.GlassShell) continue;
+    if (Prim.Id === IgnoreId || Prim.OwnerId === IgnoreId || Prim.GlassShell) continue;
     // Skip overhead ceiling baffles so top-down or angled rays never snap actors onto the roof!
     if (Prim.Center[2] > 1.35 && Prim.HalfExtents[2] < 0.25) continue;
 
@@ -1031,7 +1086,7 @@ export function RaycastWorldPlacementAtUv(
     // Only snap onto upward-facing support surfaces (floors, pedestals, boxes) — ray passes through side/back walls to hit the floor in front!
     if (WorldNormal[2] >= 0.45 && Hit.T < BestT) {
       BestT = Hit.T;
-      BestHitId = Prim.Id;
+      BestHitId = Prim.OwnerId || Prim.Id;
       BestSurface = [
         RayOrigin[0] + RayDir[0] * Hit.T,
         RayOrigin[1] + RayDir[1] * Hit.T,
