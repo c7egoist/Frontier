@@ -125,7 +125,15 @@ enum class ControlIcon : uint8_t
     UndoArrow            = 75, // [-] - Step backward undo icon (HTML Undo)
     RedoArrow            = 76, // [-] - Step forward redo icon (HTML Redo)
     DownloadExport       = 77, // [-] - Export / download tray arrow icon (HTML Download)
-    Count                = 78, // [count] - Total control icons
+    EraserTool           = 78, // [-] - Paint eraser tool icon (HTML Eraser)
+    FillBucket           = 79, // [-] - Flood fill bucket tool icon (HTML Fill)
+    PipetteDropper       = 80, // [-] - Colour sample pipette tool icon (HTML Pipette)
+    MoveArrows           = 81, // [-] - 4-way transform/move tool icon (HTML Move)
+    UploadImport         = 82, // [-] - Upload / import asset arrow icon (HTML Upload)
+    BakeBox              = 83, // [-] - High/low baker isometric cube icon (HTML Bake)
+    VolumeBoxes          = 84, // [-] - Stacked 3D volume grid icon (HTML Volume)
+    PinAnchor            = 85, // [-] - Surface anchor pin icon (HTML Pin)
+    Count                = 86, // [count] - Total control icons
 };
 
 //------------------------------------------------------------------------------------------------------------------------

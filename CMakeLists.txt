@@ -195,6 +195,16 @@ set(FRONTIER_UI_COMPONENT_SOURCES
     Engine/Workspaces/Texturing/PatternStampToolHeaderPane.cpp
     Engine/Workspaces/Texturing/PatternStampInspectorPane.cpp
     Engine/Workspaces/Texturing/PatternStampWorkspaceHost.cpp
+    Engine/Workspaces/Texturing/BakingWorkspaceSession.cpp
+    Engine/Workspaces/Texturing/BakingTargetsPane.cpp
+    Engine/Workspaces/Texturing/BakingViewportPane.cpp
+    Engine/Workspaces/Texturing/BakingInspectorPane.cpp
+    Engine/Workspaces/Texturing/BakingWorkspaceHost.cpp
+    Engine/Workspaces/Texturing/TexturePaintSession.cpp
+    Engine/Workspaces/Texturing/TexturePaintLayerStackPane.cpp
+    Engine/Workspaces/Texturing/TexturePaintViewportPane.cpp
+    Engine/Workspaces/Texturing/TexturePaintInspectorPane.cpp
+    Engine/Workspaces/Texturing/TexturePaintWorkspaceHost.cpp
     Engine/GeometricRaster/Rasterization/ImGuiOverlayRasterization.cpp
     Engine/GeometricRaster/GlobalIllumination/ShowcaseGalleryScene.cpp
     Engine/Input/ImGuiInputAdapter.cpp
@@ -596,6 +606,8 @@ if(BUILD_TESTING)
     frontier_register_exhibit(UVWorkspaceUIValidation           Exhibits/UVWorkspaceUIValidation.cpp)
     frontier_register_exhibit(MaterialWorkspaceUIValidation     Exhibits/MaterialWorkspaceUIValidation.cpp)
     frontier_register_exhibit(PatternStampWorkspaceUIValidation Exhibits/PatternStampWorkspaceUIValidation.cpp)
+    frontier_register_exhibit(BakingWorkspaceUIValidation       Exhibits/BakingWorkspaceUIValidation.cpp)
+    frontier_register_exhibit(TexturePaintWorkspaceUIValidation Exhibits/TexturePaintWorkspaceUIValidation.cpp)
     frontier_register_exhibit(UVParameterizationValidation      Exhibits/UVParameterizationValidation.cpp)
     frontier_register_exhibit(UVInteractiveAuthoringValidation  Exhibits/UVInteractiveAuthoringValidation.cpp)
     frontier_register_exhibit(UVBoundaryValidation              Exhibits/UVBoundaryValidation.cpp)
