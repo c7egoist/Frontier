@@ -15,8 +15,9 @@ include(CTest)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-set(FRONTIER_PROFILE "Development" CACHE STRING "Active Frontier build profile (Editor, Development, Shipping)")
+set(FRONTIER_PROFILE "Editor" CACHE STRING "Active Frontier build profile (Editor, Development, Shipping)")
 set_property(CACHE FRONTIER_PROFILE PROPERTY STRINGS Editor Development Shipping)
 
 option(FRONTIER_ENABLE_EOS_SDK    "Compile proprietary Epic Online Services transport adapter instead of open-source stub" OFF)
@@ -187,10 +188,12 @@ set(FRONTIER_UI_COMPONENT_SOURCES
     Engine/Workspaces/UV/UVViewportHost.cpp
     Engine/Workspaces/UV/UVWorkspaceHost.cpp
     Engine/GeometricRaster/Rasterization/ImGuiOverlayRasterization.cpp
+    Engine/GeometricRaster/Gizmo/WorldGizmoOverlayRasterization.cpp
     Engine/GeometricRaster/GlobalIllumination/ShowcaseGalleryScene.cpp
     Engine/Input/ImGuiInputAdapter.cpp
     Engine/Configuration/InputSettings.cpp
     Engine/Configuration/ProjectSpaceRepository.cpp
+    Engine/Configuration/ProjectGenerator.cpp
     Engine/Lifecycle/WorkspaceLifecycle.cpp
 )
 if(NOT ANDROID)
@@ -415,6 +418,8 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/Input/InputExchange.cpp
     Engine/Input/InputExtension.cpp
     Engine/Lifecycle/RuntimeLifecycle.cpp
+    Engine/Lifecycle/ProjectExecutionRunner.cpp
+    Engine/Workspaces/WorkspaceCapabilityRegister.cpp
     Engine/Windowing/PlatformWindowStub.cpp
     Engine/Threading/Sync/ThreadProgressionTracker.cpp
     Engine/Threading/Tasks/TaskChannel.cpp
@@ -492,6 +497,7 @@ endif()
 if(FRONTIER_PROFILE STREQUAL "Editor")
     list(APPEND FRONTIER_ENGINE_SOURCES
         Engine/Editor/Explorer/ContentBrowser.cpp
+        Engine/Editor/Explorer/ProjectBrowser.cpp
         Engine/Editor/Workspaces/Simulation/ForcePresetBrowserPanel.cpp
         Engine/Editor/Workspaces/Simulation/ForceInspectorView.cpp
         Engine/Editor/Workspaces/Simulation/VectorFieldOverlaySequence.cpp
@@ -529,10 +535,71 @@ if(NOT ANDROID)
 endif()
 
 #------------------------------------------------------------------------------------------------------------------------
-#                                    DESKTOP APPLICATION EXECUTABLES (FRONTIERUV & FRONTIEREDITOR)
+#                         SHARED ENGINE & WORKSPACE UI BINARIES FOR GENERATED PROJECTS (Binaries/Win64)
+#------------------------------------------------------------------------------------------------------------------------
+
+set(FRONTIER_SHARED_BIN_DIR "${CMAKE_BINARY_DIR}/Binaries/Win64")
+
+add_library(FrontierEngineRuntimeDll SHARED Engine/Lifecycle/ProjectExecutionRunner.cpp)
+set_target_properties(FrontierEngineRuntimeDll PROPERTIES
+    OUTPUT_NAME                "FrontierEngine"
+    CXX_VISIBILITY_PRESET      "hidden"
+    VISIBILITY_INLINES_HIDDEN  ON
+    RUNTIME_OUTPUT_DIRECTORY   "${FRONTIER_SHARED_BIN_DIR}"
+    LIBRARY_OUTPUT_DIRECTORY   "${FRONTIER_SHARED_BIN_DIR}"
+    ARCHIVE_OUTPUT_DIRECTORY   "${FRONTIER_SHARED_BIN_DIR}"
+)
+target_compile_definitions(FrontierEngineRuntimeDll PRIVATE FRONTIER_BUILDING_ENGINE_DLL=1)
+target_link_libraries(FrontierEngineRuntimeDll PRIVATE FrontierEngine)
+if(UNIX AND NOT APPLE)
+    target_link_options(FrontierEngineRuntimeDll PRIVATE "-Wl,--exclude-libs,ALL")
+endif()
+
+if(NOT ANDROID AND NOT FRONTIER_PROFILE STREQUAL "Shipping")
+    add_library(FrontierWorkspaceUiDll SHARED Engine/Lifecycle/ProjectExecutionRunner.cpp)
+    set_target_properties(FrontierWorkspaceUiDll PROPERTIES
+        OUTPUT_NAME                "FrontierWorkspaceUi"
+        CXX_VISIBILITY_PRESET      "hidden"
+        VISIBILITY_INLINES_HIDDEN  ON
+        RUNTIME_OUTPUT_DIRECTORY   "${FRONTIER_SHARED_BIN_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY   "${FRONTIER_SHARED_BIN_DIR}"
+        ARCHIVE_OUTPUT_DIRECTORY   "${FRONTIER_SHARED_BIN_DIR}"
+    )
+    target_compile_definitions(FrontierWorkspaceUiDll PRIVATE
+        FRONTIER_BUILDING_WORKSPACE_UI_DLL=1
+        FRONTIER_COMPILE_WORKSPACE_UI_RUNNER=1
+        "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\""
+    )
+    target_link_libraries(FrontierWorkspaceUiDll PRIVATE FrontierEngine FrontierImGui)
+    if(UNIX AND NOT APPLE)
+        target_link_options(FrontierWorkspaceUiDll PRIVATE "-Wl,--exclude-libs,ALL")
+    endif()
+endif()
+
+foreach(CFG_TYPE DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+    set_target_properties(FrontierEngineRuntimeDll PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY_${CFG_TYPE} "${FRONTIER_SHARED_BIN_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY_${CFG_TYPE} "${FRONTIER_SHARED_BIN_DIR}"
+        ARCHIVE_OUTPUT_DIRECTORY_${CFG_TYPE} "${FRONTIER_SHARED_BIN_DIR}"
+    )
+    if(TARGET FrontierWorkspaceUiDll)
+        set_target_properties(FrontierWorkspaceUiDll PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY_${CFG_TYPE} "${FRONTIER_SHARED_BIN_DIR}"
+            LIBRARY_OUTPUT_DIRECTORY_${CFG_TYPE} "${FRONTIER_SHARED_BIN_DIR}"
+            ARCHIVE_OUTPUT_DIRECTORY_${CFG_TYPE} "${FRONTIER_SHARED_BIN_DIR}"
+        )
+    endif()
+endforeach()
+
+#------------------------------------------------------------------------------------------------------------------------
+#                              DESKTOP APPLICATION EXECUTABLES (FRONTIER, FRONTIERUV & FRONTIEREDITOR)
 #------------------------------------------------------------------------------------------------------------------------
 
 if(NOT ANDROID AND NOT FRONTIER_PROFILE STREQUAL "Shipping")
+    add_executable(Frontier Engine/Lifecycle/FrontierHostLaunch.cpp)
+    target_compile_definitions(Frontier PRIVATE "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\"")
+    target_link_libraries(Frontier PRIVATE FrontierEngine FrontierImGui)
+
     add_executable(FrontierUV Engine/Lifecycle/FrontierUVLaunch.cpp)
     target_compile_definitions(FrontierUV PRIVATE "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\"")
     target_link_libraries(FrontierUV PRIVATE FrontierEngine FrontierImGui)
@@ -591,6 +658,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(UVAuthoringChaosValidation        Exhibits/UVAuthoringChaosValidation.cpp)
     frontier_register_exhibit(NetworkingSpaceValidation         Exhibits/NetworkingSpaceValidation.cpp)
     frontier_register_exhibit(VectorFieldValidation             Exhibits/VectorFieldValidation.cpp)
+    frontier_register_exhibit(ProjectBrowserValidation          Exhibits/ProjectBrowserValidation.cpp)
 
     if(NOT ANDROID AND NOT FRONTIER_PROFILE STREQUAL "Shipping")
         add_test(

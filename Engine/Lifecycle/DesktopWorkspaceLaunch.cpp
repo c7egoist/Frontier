@@ -23,7 +23,9 @@
 #include "Engine/Workspaces/UV/UVWorkspaceHost.h"
 
 #if FRONTIER_EDITOR_ENABLED
+#include "Engine/Components/Controls/CapsuleButton.h"
 #include "Engine/Editor/Explorer/ContentBrowser.h"
+#include "Engine/Editor/Explorer/ProjectBrowser.h"
 #include "Engine/Lifecycle/EditorLifecycle.h"
 #endif
 
@@ -264,14 +266,43 @@ int LaunchDesktopWorkspace(
         else if (Arg == "--open-browser")
         {
             InitialOptions.OpenContentBrowser = true;
+            InitialOptions.OpenProjectBrowser = false;
         }
         else if (Arg == "--close-browser")
         {
             InitialOptions.OpenContentBrowser = false;
+            InitialOptions.OpenProjectBrowser = false;
         }
         else if (Arg == "--world" || Arg == "--world-editor")
         {
-            InitialOptions.OpenWorldEditor = true;
+            InitialOptions.OpenWorldEditor    = true;
+            InitialOptions.OpenProjectBrowser = false;
+        }
+        else if (Arg == "--uv" || Arg == "--uv-workspace")
+        {
+            InitialOptions.OpenWorldEditor    = false;
+            InitialOptions.OpenProjectBrowser = false;
+            InitialOptions.DefaultLaunchMode  = Configuration::HostLaunchMode::StandaloneWorkspace;
+        }
+        else if (Arg == "--project-browser")
+        {
+            InitialOptions.OpenProjectBrowser = true;
+        }
+        else if (Arg == "--project-reader")
+        {
+            InitialOptions.OpenProjectBrowser   = true;
+            InitialOptions.PreviewReaderOnStart = true;
+        }
+        else if (Arg == "--new-project")
+        {
+            InitialOptions.OpenProjectBrowser  = true;
+            InitialOptions.OpenNewProjectModal = true;
+        }
+        else if (Arg.starts_with("--project="))
+        {
+            InitialOptions.StartupProjectSpacePath = std::filesystem::path(Arg.substr(10u));
+            InitialOptions.OpenProjectBrowser      = false;
+            InitialOptions.OpenWorldEditor         = true;
         }
     }
 
@@ -284,17 +315,43 @@ int LaunchDesktopWorkspace(
     }
 
 #if FRONTIER_EDITOR_ENABLED
+    enum class ActiveHostSurface : uint8_t
+    {
+        ProjectBrowserSurface = 0u,
+        WorldEditorSurface    = 1u,
+        UvWorkspaceSurface    = 2u,
+    };
+
     const bool StandaloneUVLaunch =
         (EngineConfig.QueryLaunchMode() == Configuration::HostLaunchMode::StandaloneWorkspace) &&
-        !InitialOptions.OpenWorldEditor;
+        !InitialOptions.OpenWorldEditor &&
+        !InitialOptions.OpenProjectBrowser;
+
+    ActiveHostSurface CurrentSurface = InitialOptions.OpenProjectBrowser
+                                           ? ActiveHostSurface::ProjectBrowserSurface
+                                           : (StandaloneUVLaunch ? ActiveHostSurface::UvWorkspaceSurface : ActiveHostSurface::WorldEditorSurface);
 #else
     const bool StandaloneUVLaunch = true;
 #endif
 
     GeometricRaster::UVWorkspaceRasterizer UVRasterizer {};
-    if (StandaloneUVLaunch && !UVRasterizer.InitializeRasterizer(&DeviceInterchange, CompiledShaderDir))
+    bool UvStackInitialized = false;
+    auto EnsureUvStackReady = [&]() -> bool
     {
-        std::fprintf(stderr, "[FrontierHost] UVWorkspaceRasterizer initialization failed.\n");
+        if (UvStackInitialized)
+        {
+            return true;
+        }
+        if (!UVRasterizer.InitializeRasterizer(&DeviceInterchange, CompiledShaderDir))
+        {
+            std::fprintf(stderr, "[FrontierHost] UVWorkspaceRasterizer initialization failed.\n");
+            return false;
+        }
+        UvStackInitialized = true;
+        return true;
+    };
+    if (StandaloneUVLaunch && !EnsureUvStackReady())
+    {
         return 1;
     }
 
@@ -337,86 +394,188 @@ int LaunchDesktopWorkspace(
     }
 
     Workspaces::UVWorkspaceHost UVHost {};
-    if (StandaloneUVLaunch)
-    {
-        UVHost.ConfigureLaunchPolicy(EngineConfig);
-        (void)UVHost.AccessSession().InitializeGPUSolvers(&DeviceInterchange, CompiledShaderDir);
-        (void)UVHost.AttachVulkanRasterizer(&UVRasterizer);
-
-        if (!InitialOptions.StartupImportPath.empty())
-        {
-            std::string ImportDiag {};
-            if (!UVHost.IntakeExternalFileDrop(InitialOptions.StartupImportPath, ImportDiag))
-            {
-                std::fprintf(stderr, "[FrontierHost] Startup import failed: %s\n", ImportDiag.c_str());
-            }
-        }
-    }
-
-#if FRONTIER_EDITOR_ENABLED
-    const bool UseFullEditorLifecycle = !StandaloneUVLaunch;
-    Lifecycle::EditorLifecycle EditorLoop {};
-    Editor::Explorer::ContentBrowser StandaloneBrowser {};
-#else
-    ContentBrowserPanel StandaloneBrowserPanel {};
-#endif
-
     Components::HeadlessWorkspaceDockContainer StandaloneDock {};
     ControlCentrePanel                         StandaloneControlCentre {};
     Input::InputExtension                      InputCoordinator {};
     InputCoordinator.Initialize();
 
 #if FRONTIER_EDITOR_ENABLED
-    if (UseFullEditorLifecycle)
+    Lifecycle::EditorLifecycle       EditorLoop {};
+    Editor::Explorer::ContentBrowser StandaloneBrowser {};
+    Editor::Explorer::ProjectBrowser HostProjectBrowser {};
+    bool                             EditorStackReady = false;
+    bool                             UvHostReady      = false;
+    bool                             ProjectBrowserInitialized = false;
+
+    auto EnsureProjectBrowserReady = [&]()
     {
-        Lifecycle::EditorStartupConfiguration EditorCfg {};
-        EditorCfg.WindowDescriptor   = Windowing::WindowConfigurationDescriptor::ConstructApplicationWindow(
-            InitialOptions.WindowTitle, InitialOptions.InitialWidthPx, InitialOptions.InitialHeightPx);
-        EditorCfg.FontRepositoryRoot    = RepositoryRootPath / "EngineContent/FontsArchives";
-        EditorCfg.PopulateShowcaseScene = true;
-        // UV Editor runs strictly standalone via FrontierUV executable — do not attach UVHost inside FrontierEditor.
-        if (!EditorLoop.Initialize(EditorCfg))
+        if (ProjectBrowserInitialized)
         {
-            std::fprintf(stderr, "[FrontierHost] EditorLifecycle initialization failed.\n");
+            return;
+        }
+        HostProjectBrowser.InitializeDefaultCollection(
+            RepositoryRootPath / "Projects",
+            RepositoryRootPath,
+            CompiledShaderDir.parent_path());
+        if (InitialOptions.PreviewReaderOnStart)
+        {
+            HostProjectBrowser.ActivateEntryByIndex(0);
+        }
+        if (InitialOptions.OpenNewProjectModal)
+        {
+            HostProjectBrowser.OpenNewProjectSheet("AeroGallery", RepositoryRootPath / "Projects");
+        }
+        ProjectBrowserInitialized = true;
+    };
+
+    auto EnsureEditorLifecycleReady = [&](const std::filesystem::path& ProjectSpaceFile, std::string_view ProjectTitle) -> bool
+    {
+        if (!EditorStackReady)
+        {
+            Lifecycle::EditorStartupConfiguration EditorCfg {};
+            EditorCfg.WindowDescriptor = Windowing::WindowConfigurationDescriptor::ConstructApplicationWindow(
+                InitialOptions.WindowTitle, InitialOptions.InitialWidthPx, InitialOptions.InitialHeightPx);
+            EditorCfg.FontRepositoryRoot    = RepositoryRootPath / "EngineContent/FontsArchives";
+            EditorCfg.ProjectSpacePath      = ProjectSpaceFile.empty() ? InitialOptions.StartupProjectSpacePath : ProjectSpaceFile;
+            EditorCfg.PopulateShowcaseScene = true;
+            if (!EditorLoop.Initialize(EditorCfg))
+            {
+                std::fprintf(stderr, "[FrontierHost] EditorLifecycle initialization failed.\n");
+                return false;
+            }
+            (void)EditorLoop.AttachVulkanGizmoOverlay(&DeviceInterchange, CompiledShaderDir);
+            EditorLoop.AssignReturnToProjectBrowserCallback(
+                [&]()
+                {
+                    EnsureProjectBrowserReady();
+                    CurrentSurface = ActiveHostSurface::ProjectBrowserSurface;
+                });
+            auto& EditorBrowserPanel = EditorLoop.AccessContentBrowser().AccessPanel();
+            EditorBrowserPanel.ConfigureShelfExtent(
+                InitialOptions.OpenContentBrowser ? ContentShelfExtent::SplitHalf : ContentShelfExtent::Closed,
+                true);
+            (void)EditorBrowserPanel.ActivateCategory(ContentCategory::Colours);
+            EditorStackReady = true;
+        }
+        if (!ProjectTitle.empty())
+        {
+            EditorLoop.ConfigureActiveProjectTitle(ProjectTitle);
+        }
+        return true;
+    };
+
+    auto EnsureUvHostReady = [&](const std::filesystem::path& GeometryPath) -> bool
+    {
+        if (!EnsureUvStackReady())
+        {
+            return false;
+        }
+        if (!UvHostReady)
+        {
+            UVHost.ConfigureLaunchPolicy(EngineConfig);
+            (void)UVHost.AccessSession().InitializeGPUSolvers(&DeviceInterchange, CompiledShaderDir);
+            (void)UVHost.AttachVulkanRasterizer(&UVRasterizer);
+
+            ThemeRepository ThemeRepo {};
+            (void)StandaloneDock.Initialize(
+                Windowing::WindowConfigurationDescriptor::ConstructApplicationWindow(
+                    InitialOptions.WindowTitle, InitialOptions.InitialWidthPx, InitialOptions.InitialHeightPx));
+            Components::ConfigureImGuiWorkspaceStyle(StandaloneDock.ActiveTabMetrics());
+            Components::ConfigureImGuiWorkspaceTheme(StandaloneDock.ActiveTabMetrics(), ThemeRepo);
+            StandaloneControlCentre.AttachTypefaces(&Typography);
+            StandaloneControlCentre.AccessDraftAppearance().Theme = ThemePreset::Dark;
+            StandaloneControlCentre.ApplyDraftAppearanceImmediate();
+            StandaloneControlCentre.AccessNotificationStream().ClearPending();
+
+            StandaloneBrowser.AttachThemeRepository(&StandaloneControlCentre.QueryThemeRepository());
+            UVHost.AttachContentBrowser(&StandaloneBrowser);
+            StandaloneBrowser.AccessPanel().ConfigureShelfExtent(
+                InitialOptions.OpenContentBrowser ? ContentShelfExtent::SplitHalf : ContentShelfExtent::Closed,
+                true);
+            (void)StandaloneBrowser.AccessPanel().ActivateCategory(ContentCategory::Colours);
+            UVHost.RegisterDockPanes(StandaloneDock);
+            UvHostReady = true;
+        }
+        const std::filesystem::path PathToLoad = GeometryPath.empty() ? InitialOptions.StartupImportPath : GeometryPath;
+        if (!PathToLoad.empty())
+        {
+            std::string ImportDiag {};
+            const std::string Ext = PathToLoad.extension().string();
+            if (Ext == ".obj" || Ext == ".OBJ" || Ext == ".GeometrySpace" || Ext == ".geometryspace")
+            {
+                (void)UVHost.IntakeExternalFileDrop(PathToLoad, ImportDiag);
+            }
+        }
+        return true;
+    };
+
+    HostProjectBrowser.AssignLaunchWorkspaceCallback(
+        [&](const Editor::Explorer::BrowserWorkspaceLaunchDirective& Directive)
+        {
+            if (Directive.TargetWorkspace == Workspaces::HostWorkspaceTarget::UVWorkspace)
+            {
+                if (EnsureUvHostReady(Directive.SelectedFilePath))
+                {
+                    CurrentSurface = ActiveHostSurface::UvWorkspaceSurface;
+                }
+            }
+            else
+            {
+                if (EnsureEditorLifecycleReady(Directive.SelectedFilePath, Directive.ProjectTitle))
+                {
+                    CurrentSurface = ActiveHostSurface::WorldEditorSurface;
+                }
+            }
+        });
+
+    if (CurrentSurface == ActiveHostSurface::ProjectBrowserSurface)
+    {
+        EnsureProjectBrowserReady();
+    }
+    else if (CurrentSurface == ActiveHostSurface::WorldEditorSurface)
+    {
+        if (!EnsureEditorLifecycleReady(InitialOptions.StartupProjectSpacePath, {}))
+        {
             ImGui::DestroyContext(GuiCtx);
             return 1;
         }
-        auto& EditorBrowserPanel = EditorLoop.AccessContentBrowser().AccessPanel();
-        EditorBrowserPanel.ConfigureShelfExtent(
-            InitialOptions.OpenContentBrowser ? ContentShelfExtent::SplitHalf : ContentShelfExtent::Closed,
-            true);
-        (void)EditorBrowserPanel.ActivateCategory(ContentCategory::Colours);
     }
     else
-#endif
     {
-        ThemeRepository ThemeRepo {};
-        (void)StandaloneDock.Initialize(
-            Windowing::WindowConfigurationDescriptor::ConstructApplicationWindow(
-                InitialOptions.WindowTitle, InitialOptions.InitialWidthPx, InitialOptions.InitialHeightPx));
-        Components::ConfigureImGuiWorkspaceStyle(StandaloneDock.ActiveTabMetrics());
-        Components::ConfigureImGuiWorkspaceTheme(StandaloneDock.ActiveTabMetrics(), ThemeRepo);
-        StandaloneControlCentre.AttachTypefaces(&Typography);
-        StandaloneControlCentre.AccessDraftAppearance().Theme = ThemePreset::Dark;
-        StandaloneControlCentre.ApplyDraftAppearanceImmediate();
-        StandaloneControlCentre.AccessNotificationStream().ClearPending();
-#if FRONTIER_EDITOR_ENABLED
-        StandaloneBrowser.AttachThemeRepository(&StandaloneControlCentre.QueryThemeRepository());
-        UVHost.AttachContentBrowser(&StandaloneBrowser);
-        StandaloneBrowser.AccessPanel().ConfigureShelfExtent(
-            InitialOptions.OpenContentBrowser ? ContentShelfExtent::SplitHalf : ContentShelfExtent::Closed,
-            true);
-        (void)StandaloneBrowser.AccessPanel().ActivateCategory(ContentCategory::Colours);
-#else
-        StandaloneBrowserPanel.AttachThemeRepository(&StandaloneControlCentre.QueryThemeRepository());
-        UVHost.AttachContentBrowserPanel(&StandaloneBrowserPanel);
-        StandaloneBrowserPanel.ConfigureShelfExtent(
-            InitialOptions.OpenContentBrowser ? ContentShelfExtent::SplitHalf : ContentShelfExtent::Closed,
-            true);
-        (void)StandaloneBrowserPanel.ActivateCategory(ContentCategory::Colours);
-#endif
-        UVHost.RegisterDockPanes(StandaloneDock);
+        if (!EnsureUvHostReady(InitialOptions.StartupImportPath))
+        {
+            ImGui::DestroyContext(GuiCtx);
+            return 1;
+        }
     }
+#else
+    ContentBrowserPanel StandaloneBrowserPanel {};
+    UVHost.ConfigureLaunchPolicy(EngineConfig);
+    (void)UVHost.AccessSession().InitializeGPUSolvers(&DeviceInterchange, CompiledShaderDir);
+    (void)UVHost.AttachVulkanRasterizer(&UVRasterizer);
+    if (!InitialOptions.StartupImportPath.empty())
+    {
+        std::string ImportDiag {};
+        (void)UVHost.IntakeExternalFileDrop(InitialOptions.StartupImportPath, ImportDiag);
+    }
+    ThemeRepository ThemeRepo {};
+    (void)StandaloneDock.Initialize(
+        Windowing::WindowConfigurationDescriptor::ConstructApplicationWindow(
+            InitialOptions.WindowTitle, InitialOptions.InitialWidthPx, InitialOptions.InitialHeightPx));
+    Components::ConfigureImGuiWorkspaceStyle(StandaloneDock.ActiveTabMetrics());
+    Components::ConfigureImGuiWorkspaceTheme(StandaloneDock.ActiveTabMetrics(), ThemeRepo);
+    StandaloneControlCentre.AttachTypefaces(&Typography);
+    StandaloneControlCentre.AccessDraftAppearance().Theme = ThemePreset::Dark;
+    StandaloneControlCentre.ApplyDraftAppearanceImmediate();
+    StandaloneControlCentre.AccessNotificationStream().ClearPending();
+    StandaloneBrowserPanel.AttachThemeRepository(&StandaloneControlCentre.QueryThemeRepository());
+    UVHost.AttachContentBrowserPanel(&StandaloneBrowserPanel);
+    StandaloneBrowserPanel.ConfigureShelfExtent(
+        InitialOptions.OpenContentBrowser ? ContentShelfExtent::SplitHalf : ContentShelfExtent::Closed,
+        true);
+    (void)StandaloneBrowserPanel.ActivateCategory(ContentCategory::Colours);
+    UVHost.RegisterDockPanes(StandaloneDock);
+#endif
 
     GeometricRaster::ImGuiOverlayRasterization SwapchainPresenter {};
 #if !defined(__ANDROID__)
@@ -475,26 +634,39 @@ int LaunchDesktopWorkspace(
         SurfaceW = Extent.SurfacePixelWidth;
         SurfaceH = Extent.SurfacePixelHeight;
 #if FRONTIER_EDITOR_ENABLED
-        if (UseFullEditorLifecycle)
+        if (EditorStackReady)
         {
             if (auto* HostSurface = EditorLoop.AccessDockContainer().AccessOperatingSurface(Components::HostWindowToken{ 0u }))
             {
                 HostSurface->ResizeSurface(SurfaceW, SurfaceH, Extent.DpiScaleFactor);
             }
         }
-        else
-#endif
+        if (UvHostReady)
         {
             if (auto* HostSurface = StandaloneDock.AccessOperatingSurface(Components::HostWindowToken{ 0u }))
             {
                 HostSurface->ResizeSurface(SurfaceW, SurfaceH, Extent.DpiScaleFactor);
             }
         }
+#else
+        if (auto* HostSurface = StandaloneDock.AccessOperatingSurface(Components::HostWindowToken{ 0u }))
+        {
+            HostSurface->ResizeSurface(SurfaceW, SurfaceH, Extent.DpiScaleFactor);
+        }
+#endif
 
         (void)Input::ImGuiInputAdapter::ForwardEditorExchangeToImGui(InputCoordinator, Io);
 
         const auto DroppedPaths = InputCoordinator.ConsumeDroppedFilePaths();
-        if (StandaloneUVLaunch)
+#if FRONTIER_EDITOR_ENABLED
+        if (CurrentSurface == ActiveHostSurface::ProjectBrowserSurface)
+        {
+            for (const std::string& DropFile : DroppedPaths)
+            {
+                (void)HostProjectBrowser.RegisterDiskPathInCollection(std::filesystem::path(DropFile), true);
+            }
+        }
+        else if (CurrentSurface == ActiveHostSurface::UvWorkspaceSurface && UvHostReady)
         {
             for (const std::string& DropFile : DroppedPaths)
             {
@@ -502,6 +674,13 @@ int LaunchDesktopWorkspace(
                 (void)UVHost.IntakeExternalFileDrop(DropFile, DropDiag);
             }
         }
+#else
+        for (const std::string& DropFile : DroppedPaths)
+        {
+            std::string DropDiag {};
+            (void)UVHost.IntakeExternalFileDrop(DropFile, DropDiag);
+        }
+#endif
 #endif
 
         Io.DisplaySize = ImVec2(static_cast<float>(SurfaceW), static_cast<float>(SurfaceH));
@@ -509,28 +688,48 @@ int LaunchDesktopWorkspace(
 
         SwapchainPresenter.PrepareImGuiFrame();
         ImGui::NewFrame();
+        const Rectangle2D FullBounds { 0.0f, 0.0f, static_cast<float>(SurfaceW), static_cast<float>(SurfaceH) };
 #if FRONTIER_EDITOR_ENABLED
-        if (UseFullEditorLifecycle)
+        if (CurrentSurface == ActiveHostSurface::ProjectBrowserSurface)
         {
-            (void)EditorLoop.ExecuteAuthoringTick(Dt);
+            HostProjectBrowser.Render(FullBounds, Dt, 1.0f);
+        }
+        else if (CurrentSurface == ActiveHostSurface::WorldEditorSurface)
+        {
+            (void)EditorLoop.ExecuteExternalDesktopTick(Dt);
             Input::InputExtension::AssignActiveCoordinator(&InputCoordinator);
             EditorLoop.PresentPrimaryEditorImGui(Dt);
         }
         else
-#endif
         {
             Components::ConfigureImGuiWorkspaceTheme(
                 StandaloneDock.ActiveTabMetrics(),
                 StandaloneControlCentre.QueryThemeRepository());
             StandaloneDock.PresentWindowImGuiPanes(Components::HostWindowToken{ 0u });
-            const Rectangle2D FullBounds { 0.0f, 0.0f, static_cast<float>(SurfaceW), static_cast<float>(SurfaceH) };
-#if FRONTIER_EDITOR_ENABLED
             StandaloneBrowser.Render(FullBounds, Dt, 1.0f);
-#else
-            StandaloneBrowserPanel.Render(FullBounds, Dt, 1.0f);
-#endif
             StandaloneControlCentre.Render(FullBounds, Dt, static_cast<float>(1.0 / Dt));
+
+            if (!StandaloneControlCentre.QueryOpen())
+            {
+                PixelSpace TopOverlay(ImGui::GetForegroundDrawList(), Point2D{ 0.0f, 0.0f }, 1.0f);
+                const Point2D MouseLogical = TopOverlay.QueryMousePosition();
+                ControlPointer Ptr { MouseLogical.X, MouseLogical.Y, TopOverlay.QueryMouseDown(0), TopOverlay.QueryMouseClicked(0), TopOverlay.QueryMouseReleased(0) };
+                ButtonDescriptor Desc { "Projects", ButtonTone::Secondary, 10.5f, 12.0f };
+                if (CapsuleButton::Construct(TopOverlay, { std::max(320.0f, static_cast<float>(SurfaceW) * 0.5f + 98.0f), 3.0f, 82.0f, 23.0f }, Desc, Ptr).Pressed)
+                {
+                    EnsureProjectBrowserReady();
+                    CurrentSurface = ActiveHostSurface::ProjectBrowserSurface;
+                }
+            }
         }
+#else
+        Components::ConfigureImGuiWorkspaceTheme(
+            StandaloneDock.ActiveTabMetrics(),
+            StandaloneControlCentre.QueryThemeRepository());
+        StandaloneDock.PresentWindowImGuiPanes(Components::HostWindowToken{ 0u });
+        StandaloneBrowserPanel.Render(FullBounds, Dt, 1.0f);
+        StandaloneControlCentre.Render(FullBounds, Dt, static_cast<float>(1.0 / Dt));
+#endif
         ImGui::Render();
 
         if (!SwapchainPresenter.PresentImGuiBatches(ImGui::GetDrawData(), SurfaceW, SurfaceH))
@@ -561,18 +760,22 @@ int LaunchDesktopWorkspace(
 
     SwapchainPresenter.TeardownOverlay();
 #if FRONTIER_EDITOR_ENABLED
-    if (UseFullEditorLifecycle)
+    HostProjectBrowser.ReleaseGpuTextures();
+    if (EditorStackReady)
     {
         EditorLoop.Finalize();
     }
-    else
-#endif
+    if (UvHostReady)
     {
         StandaloneDock.Finalize();
-    }
-    if (StandaloneUVLaunch)
-    {
         UVHost.AccessSession().TeardownGPUSolvers();
+    }
+#else
+    StandaloneDock.Finalize();
+    UVHost.AccessSession().TeardownGPUSolvers();
+#endif
+    if (UvStackInitialized)
+    {
         UVRasterizer.TeardownRasterizer();
     }
     InputCoordinator.Finalize();

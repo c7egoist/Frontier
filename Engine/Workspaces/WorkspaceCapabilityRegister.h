@@ -1,0 +1,63 @@
+/*============================================================================================================================================
+                                                        WORKSPACECAPABILITYREGISTER.H
+============================================================================================================================================*/
+// 🧩 Registry of active Frontier host workspace capabilities ("Frontier" World Editor & "UVWorkspace" UV Authoring) for Project Browser
+
+#pragma once
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                        INCLUDES
+//------------------------------------------------------------------------------------------------------------------------
+
+#include <cstdint>
+#include <filesystem>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace Frontier::Workspaces
+{
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                      ENUMERATIONS
+//------------------------------------------------------------------------------------------------------------------------
+
+enum class HostWorkspaceTarget : uint8_t
+{
+    FrontierWorld = 0u, // [-] - Open with Frontier (EditorLifecycle + TieredWorldRenderSequence + ShowcaseGalleryScene)
+    UVWorkspace   = 1u, // [-] - Open with UVWorkspace (UVWorkspaceHost dual 2D UV + 3D Surface viewports)
+};
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                       STRUCTURES
+//------------------------------------------------------------------------------------------------------------------------
+
+struct WorkspaceCapabilityEntry
+{
+    HostWorkspaceTarget Target             = HostWorkspaceTarget::FrontierWorld;
+    std::string         Identifier         {}; // [-] - Stable token stored in .projectspace ("Frontier", "UVWorkspace")
+    std::string         ActionTitle        {}; // [-] - Launch button caption ("Open with Frontier", "Open with UVWorkspace")
+    std::string         DomainDescription  {}; // [-] - Short capability summary shown in Details & New Project sheet
+    bool                EnabledInBuild     = true;
+};
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  FUNCTION PROTOTYPES
+//------------------------------------------------------------------------------------------------------------------------
+
+class WorkspaceCapabilityRegister
+{
+public:
+    WorkspaceCapabilityRegister();
+
+    [[nodiscard]] std::span<const WorkspaceCapabilityEntry> QueryAllCapabilities() const noexcept;
+    [[nodiscard]] std::vector<WorkspaceCapabilityEntry>     QueryPermittedForPath(const std::filesystem::path& FilePath) const;
+    [[nodiscard]] const WorkspaceCapabilityEntry*           FindByTarget(HostWorkspaceTarget Target) const noexcept;
+    [[nodiscard]] const WorkspaceCapabilityEntry*           FindByIdentifier(std::string_view Identifier) const noexcept;
+
+private:
+    std::vector<WorkspaceCapabilityEntry> RegisteredEntries {};
+};
+
+} // namespace Frontier::Workspaces

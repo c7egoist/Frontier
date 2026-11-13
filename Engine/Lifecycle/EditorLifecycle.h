@@ -17,8 +17,10 @@
 #include "Engine/Components/ControlCentre/ControlCentrePanel.h"
 #include "Engine/Components/Docking/WorkspaceDockContainer.h"
 #include "Engine/Editor/Explorer/ContentBrowser.h"
+#include "Engine/Editor/Viewports/TransformGizmo.h"
 #include "Engine/Editor/Workspaces/Simulation/ForceInspectorView.h"
 #include "Engine/Editor/Workspaces/Simulation/ForcePresetBrowserPanel.h"
+#include "Engine/GeometricRaster/Gizmo/WorldGizmoOverlayRasterization.h"
 #include "Engine/GeometricRaster/GlobalIllumination/ShowcaseGalleryScene.h"
 #include "Engine/Input/InputExtension.h"
 #include "Engine/Lifecycle/LifecycleSequence.h"
@@ -87,12 +89,20 @@ public:
     }
 
     [[nodiscard]] bool Initialize(const EditorStartupConfiguration& Configuration = {}) noexcept;
-    void               PopulateShowcaseGallerySession(uint32_t RenderWidthPx = 640u, uint32_t RenderHeightPx = 360u);
+    [[nodiscard]] bool AttachVulkanGizmoOverlay(
+        GeometricRaster::VulkanInterchange* BoundDevice,
+        const std::filesystem::path&        CompiledShaderDirectory);
+    void               AssignReturnToProjectBrowserCallback(std::function<void()> Callback);
+    void               ConfigureActiveProjectTitle(std::string_view ProjectTitle);
+    void               PopulateShowcaseGallerySession(uint32_t RenderWidthPx = 640u, uint32_t RenderHeightPx = 384u);
     void               RefreshShowcaseViewportRaster();
+    void               FrameShowcaseCameraSelection() noexcept;
     [[nodiscard]] OutlinerSlotToken SpawnForceFieldEntry(const SimulationSpace::ForceFields::ForceSourceRecordEntry& SourcePreset);
     [[nodiscard]] GeometricRaster::ShowcaseWorldSceneBundle* AccessShowcaseScene() noexcept { return ShowcaseBundle.get(); }
+    [[nodiscard]] Editor::TransformGizmo&                    AccessTransformGizmo() noexcept { return WorldTransformGizmo; }
     [[nodiscard]] SimulationSpace::ForceFields::ForceFieldAccumulator& AccessForceAccumulator() noexcept { return ForceAccumulator; }
     [[nodiscard]] bool ExecuteAuthoringTick(double Δt);
+    [[nodiscard]] bool ExecuteExternalDesktopTick(double Δt);
     [[nodiscard]] bool Suspend() noexcept;
     [[nodiscard]] bool Resume() noexcept;
     void               RequestTermination() noexcept;
@@ -121,6 +131,10 @@ private:
 
     void AttachForceFieldAuthoringToActivePanes();
     void SynchronizeForceFieldsWithOutliner(double Δt);
+    void SynchronizeShowcaseGizmoAnchor() noexcept;
+    void HandleShowcaseViewportInteraction(uint32_t PaneIndex, Rectangle2D PaneBounds, const PaneInputReading& Input);
+    void HandleShowcaseNavigationDirective(ViewportNavigationDirective Directive);
+    void SynchronizeContentBrowserColourTargets();
 
     EditorStartupConfiguration                 StartupConfig          {};     // [-]     - Applied editor startup settings
     Components::HeadlessWorkspaceDockContainer DockContainer          {};     // [-]     - Intra-app trapezoidal docking container
@@ -130,8 +144,17 @@ private:
     WorkspaceLifecycle                         Workspaces             {};     // [-]     - Multi-document workspace session loop
     Input::InputExtension                      InputCoordinator       {};     // [-]     - Hardware input & OS feedback coordinator
     LifecycleSequence                          EditorSequence         {};     // [-]     - Registered GPU .slang overlay & editor hooks
-    std::unique_ptr<GeometricRaster::ShowcaseWorldSceneBundle>  ShowcaseBundle   {};     // [-]  - Mounted Cornell-Studio Gallery scene & Outliner tokens
-    std::unique_ptr<GeometricRaster::TieredWorldRenderSequence> ShowcaseRenderer {};     // [-]  - Calibrated Tier 1 GTX world renderer
+    std::unique_ptr<GeometricRaster::ShowcaseWorldSceneBundle>       ShowcaseBundle       {}; // [-] - Mounted Cornell-Studio Gallery scene & Outliner tokens
+    std::unique_ptr<GeometricRaster::TieredWorldRenderSequence>      ShowcaseRenderer     {}; // [-] - Calibrated Tier 1 GTX / Tier 2 RTX world renderer
+    std::unique_ptr<GeometricRaster::WorldGizmoOverlayRasterization> WorldGizmoRasterizer {}; // [-] - Vulkan .slang 3D Gizmo overlay rasterizer
+    Editor::TransformGizmo                                           WorldTransformGizmo  {}; // [-] - 13-handle 3D Slate GizmoPRO manipulator
+    Mathematics::SpatialTransform                                    GizmoActiveTransform {}; // [-] - Working SpatialTransform during active drag
+    OutlinerSlotToken                                                LastGizmoSlot        {}; // [id]- Slot currently anchored by WorldTransformGizmo
+    Point2D                                                          LastPointerPosition  {}; // [px]- Previous frame viewport pointer coordinate
+    bool                                                             PointerTrackingValid = false;
+    bool                                                             CameraInteractiveDrag = false;
+    std::function<void()>                                            ReturnToBrowserCallback {};
+    std::string                                                      ActiveProjectTitle   {};
     SimulationSpace::ForceFields::ForceFieldAccumulator ForceAccumulator    {};   // [-]  - Analytical ForceModel / VectorField evaluator (no physics)
     SimulationSpace::ForceFields::FieldLatticeCascade   ForceLatticeCascade {};   // [-]  - 4-tier ForceField clipmap metrics
     Editor::Simulation::ForceInspectorView              ForceInspector      {};   // [-]  - 4-tab ForceField Inspector (Field/Formula/Layers/Cache)
