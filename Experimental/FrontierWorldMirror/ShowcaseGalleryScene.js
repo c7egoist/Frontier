@@ -18,6 +18,7 @@ import {
   ExpandPropPrimitives,
   GetWorldPropById,
   HasActiveFaceColors,
+  IsFanProp,
   TransformVec3ByMat3,
 } from "./WorldPropLibrary.js";
 
@@ -553,10 +554,12 @@ export function CompileLiveGtxScene(
     OrthoHalfHeight = 1.95;
   }
 
-  // Sun emitter
+  // Sun emitter (supports both Visibility Eye and Outliner Power Toggle)
   const SunRow = Rows.find((Row) => Row.Panel === "sun");
-  const SunVisible = SunRow ? RowEffectivelyVisible(SunRow, Rows, Hidden) : true;
   const SunRec = (SunRow && Values?.[SunRow.Id]) || Values?.sun || {};
+  const SunVisible =
+    (SunRow ? RowEffectivelyVisible(SunRow, Rows, Hidden) : true) &&
+    SunRec.Powered !== false;
   const SunDir = NormalizeVec3(
     Array.isArray(SunRec.Direction) ? SunRec.Direction : [0.42, -0.55, 0.72],
     [0.42, -0.55, 0.72],
@@ -583,26 +586,61 @@ export function CompileLiveGtxScene(
     : 0;
   const ExposureGain = CanonicalEditorCamera.ExposureGain * Math.pow(2, EvComp);
 
-  // LTC Area Quad Lights (up to 6, including Studio Light rigs!)
+  // LTC Area Quad Lights (up to 12, including directional Studio Light rigs!)
   const AreaLights = [];
   const LightPickMap = new Map();
+  let NextLightSlot = 0;
   for (const Row of Rows) {
     if (Row.Panel !== "light") continue;
     if (!RowEffectivelyVisible(Row, Rows, Hidden)) continue;
     const Rec = Values?.[Row.Id] || {};
     const PropDef = GetWorldPropById(Row.PropId || Rec.PropId);
+    const PickCode = 400 + NextLightSlot++;
+    LightPickMap.set(Row.Id, PickCode);
+
+    // When toggled OFF in Outliner, keep the 3D fixture visible (in Primitives below) while turning emission OFF!
+    if (Rec.Powered === false) continue;
+
     const RefProps = Rec.ReferenceInspector?.Properties || {};
     const RawPos = Array.isArray(Rec.Position)
       ? Rec.Position
       : Array.isArray(RefProps.pos)
         ? RefProps.pos
         : [0.55, 0.35, 1.82];
+    const RotDeg = Array.isArray(Rec.Rotation)
+      ? Rec.Rotation
+      : Array.isArray(RefProps.rot)
+        ? RefProps.rot
+        : [0, 0, 0];
+    const MRot = EulerDegToMat3(RotDeg);
     let EmitCenter = [Number(RawPos[0]) || 0, Number(RawPos[1]) || 0, Number(RawPos[2]) || 0];
     if (PropDef?.LightEmitter?.Offset) {
-      const RotDeg = Array.isArray(Rec.Rotation) ? Rec.Rotation : [0, 0, 0];
-      const OffW = TransformVec3ByMat3(EulerDegToMat3(RotDeg), PropDef.LightEmitter.Offset);
+      const OffW = TransformVec3ByMat3(MRot, PropDef.LightEmitter.Offset);
       EmitCenter = [EmitCenter[0] + OffW[0], EmitCenter[1] + OffW[1], EmitCenter[2] + OffW[2]];
     }
+
+    // Build orthonormal 3D light basis (Right, Up, Normal) so directional Studio Lights shine where aimed!
+    const LocalAim = PropDef?.LightEmitter?.AimDir || [0, 0, -1];
+    const WorldNormal = NormalizeVec3(TransformVec3ByMat3(MRot, LocalAim), [0, 0, -1]);
+    let WorldRight = NormalizeVec3(TransformVec3ByMat3(MRot, [1, 0, 0]), [1, 0, 0]);
+    const DotRN = WorldRight[0] * WorldNormal[0] + WorldRight[1] * WorldNormal[1] + WorldRight[2] * WorldNormal[2];
+    WorldRight = NormalizeVec3(
+      [
+        WorldRight[0] - DotRN * WorldNormal[0],
+        WorldRight[1] - DotRN * WorldNormal[1],
+        WorldRight[2] - DotRN * WorldNormal[2],
+      ],
+      [1, 0, 0],
+    );
+    const WorldUpAxis = NormalizeVec3(
+      [
+        WorldNormal[1] * WorldRight[2] - WorldNormal[2] * WorldRight[1],
+        WorldNormal[2] * WorldRight[0] - WorldNormal[0] * WorldRight[2],
+        WorldNormal[0] * WorldRight[1] - WorldNormal[1] * WorldRight[0],
+      ],
+      [0, 1, 0],
+    );
+
     const DefaultW = PropDef?.LightEmitter?.Width ?? 1.7;
     const DefaultH = PropDef?.LightEmitter?.Height ?? 1.3;
     const Width = PropDef
@@ -630,23 +668,27 @@ export function CompileLiveGtxScene(
       : Array.isArray(Rec.EmittedRadiance)
         ? Rec.EmittedRadiance
         : FallbackEmit;
-    const PickCode = 112 + AreaLights.length;
-    LightPickMap.set(Row.Id, PickCode);
     AreaLights.push({
       Id: Row.Id,
       PickCode,
       QuadVisible: !PropDef,
+      Omni: Boolean(PropDef?.LightEmitter?.Omni),
       Center: EmitCenter,
+      Right: WorldRight,
+      Up: WorldUpAxis,
+      Normal: WorldNormal,
       HalfWidth: Math.max(0.08, Math.abs(Width) * 0.5),
       HalfHeight: Math.max(0.08, Math.abs(Height) * 0.5),
       Radiance: BaseEmit.map((C) => Math.max(0, C * LumensRatio)),
     });
-    if (AreaLights.length >= 6) break;
+    if (AreaLights.length >= 12) break;
   }
 
-  // Geometry, Multi-Part Props, Placed Camera Rigs & Studio Light Rigs (up to 96 primitives)
+  // Geometry, Multi-Part Props, Placed Camera Rigs, Fans & Studio Light Rigs (up to 384 primitives)
   const Primitives = [];
   let NextActorPickCode = 1;
+  let HasSpinningFans = false;
+  const FanSpinDeg = Number(ExtraOptions?.FanSpinDeg || 0);
   for (const Row of Rows) {
     const Rec = Values?.[Row.Id] || {};
     const PropId = Row.PropId || Rec.PropId || (Row.Panel === "camera" && Row.Id !== "camera" ? "engine_camera" : null);
@@ -660,12 +702,18 @@ export function CompileLiveGtxScene(
         Row.Panel === "light" && LightPickMap.has(Row.Id)
           ? LightPickMap.get(Row.Id)
           : NextActorPickCode++;
-      const Expanded = ExpandPropPrimitives({ ...Row, PropId }, Rec, SharedPickCode);
+      const RowIsFan = IsFanProp({ ...Row, PropId }, Rec);
+      if (RowIsFan && Rec.Powered !== false) {
+        HasSpinningFans = true;
+      }
+      const RecForBuild =
+        RowIsFan && Rec.Powered !== false ? { ...Rec, __FanSpinDeg: FanSpinDeg } : Rec;
+      const Expanded = ExpandPropPrimitives({ ...Row, PropId }, RecForBuild, SharedPickCode);
       for (const SubPrim of Expanded) {
-        if (Primitives.length >= 96) break;
+        if (Primitives.length >= 384) break;
         Primitives.push(SubPrim);
       }
-      if (Primitives.length >= 96) break;
+      if (Primitives.length >= 384) break;
       continue;
     }
 
@@ -744,7 +792,7 @@ export function CompileLiveGtxScene(
       Abbe,
       Attenuation,
     });
-    if (Primitives.length >= 96) break;
+    if (Primitives.length >= 384) break;
   }
 
   // Analytical ForceFields & VectorFields (Pass 3A ForceOverlay — zero rigid-body physics!)
@@ -753,6 +801,7 @@ export function CompileLiveGtxScene(
     if (Row.Panel !== "force") continue;
     if (!RowEffectivelyVisible(Row, Rows, Hidden)) continue;
     const Rec = Values?.[Row.Id] || {};
+    if (Rec.Powered === false) continue;
     const Pos = Array.isArray(Rec.Position) ? Rec.Position : [0, 0, 1.4];
     const Rot = Array.isArray(Rec.Rotation) ? Rec.Rotation : [0, 0, 0];
     const Force = ResolveForceValues(Rec.Force, Row.ForceModel || "LinearWind");
@@ -781,6 +830,7 @@ export function CompileLiveGtxScene(
         ).join(";");
 
   return {
+    HasSpinningFans,
     CameraOrigin,
     CameraTarget,
     WorldUp,
@@ -1095,11 +1145,17 @@ export function RaycastWorldPlacementAtUv(
     }
   }
 
-  // Fallback to ground plane (z = -0.64 canonical gallery floor & shader ground grid level)
+  // Fallback to actual floor plane in the compiled scene (or -0.64 gallery default if no floor exists)
   if (!BestSurface) {
-    const GroundZ = -0.64;
+    let GroundZ = -0.64;
+    for (const Prim of CompiledScene.Primitives) {
+      if (Prim.Shape === 0 && Prim.HalfExtents[0] >= 2.5 && Prim.HalfExtents[1] >= 2.5 && Prim.HalfExtents[2] <= 0.4) {
+        GroundZ = Prim.Center[2] + Prim.HalfExtents[2];
+        break;
+      }
+    }
     if (RayDir[2] < -0.02) {
-      const TGround = Math.min(18.0, Math.max(0.4, (GroundZ - RayOrigin[2]) / RayDir[2]));
+      const TGround = Math.min(36.0, Math.max(0.4, (GroundZ - RayOrigin[2]) / RayDir[2]));
       BestSurface = [
         RayOrigin[0] + RayDir[0] * TGround,
         RayOrigin[1] + RayDir[1] * TGround,
@@ -1114,8 +1170,8 @@ export function RaycastWorldPlacementAtUv(
     }
   }
 
-  const ClampedX = +Math.max(-8.0, Math.min(8.0, BestSurface[0])).toFixed(3);
-  const ClampedY = +Math.max(-8.0, Math.min(8.0, BestSurface[1])).toFixed(3);
+  const ClampedX = +Math.max(-40.0, Math.min(40.0, BestSurface[0])).toFixed(3);
+  const ClampedY = +Math.max(-40.0, Math.min(40.0, BestSurface[1])).toFixed(3);
   const PlacedZ = +(BestSurface[2] + Math.max(0, Number(HalfHeightZ) || 0)).toFixed(3);
   return {
     Position: [ClampedX, ClampedY, PlacedZ],

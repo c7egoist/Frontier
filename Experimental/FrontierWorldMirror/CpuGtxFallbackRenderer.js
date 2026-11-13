@@ -157,7 +157,7 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
       this._SecMat = { ...this._Mat };
     }
 
-    PackScene(CompiledScene, AtlasPixels, MaxPrims = 96, MaxLights = 6) {
+    PackScene(CompiledScene, AtlasPixels, MaxPrims = 384, MaxLights = 12) {
       const PCount = Math.min(MaxPrims, CompiledScene.Primitives.length);
       const Prims = new Array(PCount);
       for (let I = 0; I < PCount; ++I) {
@@ -206,11 +206,18 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
       const Lights = new Array(LCount);
       for (let I = 0; I < LCount; ++I) {
         const L = CompiledScene.AreaLights[I];
+        const Right = L.Right || [1, 0, 0];
+        const Up = L.Up || [0, 1, 0];
+        const Normal = L.Normal || [0, 0, -1];
         Lights[I] = {
           Cx: L.Center[0], Cy: L.Center[1], Cz: L.Center[2],
+          Rx: Right[0], Ry: Right[1], Rz: Right[2],
+          Ux: Up[0], Uy: Up[1], Uz: Up[2],
+          Nx: Normal[0], Ny: Normal[1], Nz: Normal[2],
+          Omni: Boolean(L.Omni),
           Hw: L.HalfWidth, Hh: L.HalfHeight,
           QuadVisible: L.QuadVisible !== false,
-          PickCode: L.PickCode || (112 + I),
+          PickCode: L.PickCode || (400 + I),
           RadR: L.Radiance[0], RadG: L.Radiance[1], RadB: L.Radiance[2],
         };
       }
@@ -532,6 +539,44 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
       return this.FinalizeHit(Prims, BestIdx, Rox, Roy, Roz, Rdx, Rdy, Rdz, BestT, false, OutHit);
     }
 
+    EvalLocalPrimSdf(Shape, Lpx, Lpy, Lpz, Hx, Hy, Hz) {
+      if (Shape === 4) {
+        const MajorR = Math.max(Hx, Hy) * 0.68;
+        const MinorR = Math.max(0.04, Hz * 0.55);
+        return Len2(Len2(Lpx, Lpy) - MajorR, Lpz) - MinorR;
+      }
+      if (Shape === 3) {
+        const Rad = Math.max(Hx, Hy);
+        const ZBase = -0.78 * Hz;
+        const DPlinth = SdBox(Lpx, Lpy, Lpz - 0.5 * (-Hz + ZBase), Rad, Rad, 0.5 * (ZBase + Hz));
+        const TAlpha = Clamp((Lpz - ZBase) / Math.max(1e-4, Hz - ZBase), 0.0, 1.0);
+        const RAtZ = Mix(0.72 * Rad, 0.13 * Rad, TAlpha);
+        const Dx = Len2(Lpx, Lpy) - RAtZ;
+        const Dy = Math.abs(Lpz - 0.5 * (ZBase + Hz)) - 0.5 * (Hz - ZBase);
+        const DCone = Math.min(Math.max(Dx, Dy), 0.0) + Len2(Math.max(Dx, 0.0), Math.max(Dy, 0.0));
+        return Math.min(DPlinth, DCone);
+      }
+      if (Shape === 5) {
+        const Rad = Math.max(Hx, Hy);
+        const ZBase = -0.84 * Hz;
+        const Bx = Len2(Lpx, Lpy) - 0.97 * Rad;
+        const By = Math.abs(Lpz - 0.5 * (-Hz + ZBase)) - 0.5 * (ZBase + Hz);
+        const DBot = Math.min(Math.max(Bx, By), 0.0) + Len2(Math.max(Bx, 0.0), Math.max(By, 0.0));
+        const TAlpha = Clamp((Lpz - ZBase) / Math.max(1e-4, Hz - ZBase), 0.0, 1.0);
+        const RAtZ = Mix(0.50 * Rad, 0.37 * Rad, TAlpha);
+        const Tx = Len2(Lpx, Lpy) - RAtZ;
+        const Ty = Math.abs(Lpz - 0.5 * (ZBase + Hz)) - 0.5 * (Hz - ZBase);
+        const DTop = Math.min(Math.max(Tx, Ty), 0.0) + Len2(Math.max(Tx, 0.0), Math.max(Ty, 0.0));
+        return Math.min(DBot, DTop);
+      }
+      if (Shape >= 2) {
+        const Cx = Len2(Lpx, Lpy) - Math.max(Hx, Hy);
+        const Cy = Math.abs(Lpz) - Hz;
+        return Math.min(Math.max(Cx, Cy), 0.0) + Len2(Math.max(Cx, 0.0), Math.max(Cy, 0.0));
+      }
+      return SdBox(Lpx, Lpy, Lpz, Hx, Hy, Hz);
+    }
+
     ClosestRayPrimSoftVis(P, Ox, Oy, Oz, DirX, DirY, DirZ, TanSun) {
       const Dx = Ox - P.Cx, Dy = Oy - P.Cy, Dz = Oz - P.Cz;
       const Lox = P.R0x * Dx + P.R0y * Dy + P.R0z * Dz;
@@ -545,7 +590,7 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
       const BoundR = P.BoundR * 1.27;
       const TCenter = -(Lox * Ldx + Loy * Ldy + Loz * Ldz);
       if (TCenter < -BoundR) return 1.0;
-      const MaxPen = 0.005 + Math.max(0.05, TCenter) * TanSun;
+      const MaxPen = 0.004 + Math.max(0.04, TCenter) * TanSun;
       const Tc = TCenter > 0 ? TCenter : 0;
       const Perp = Len3(Lox + Ldx * Tc, Loy + Ldy * Tc, Loz + Ldz * Tc);
       if (Perp > BoundR + MaxPen) return 1.0;
@@ -560,8 +605,8 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
         const RMean = (Hx + Hy + Hz) * 0.3333333;
         const WorldT = TUnit / DLen;
         const Clearance = (Len3(Ux + Dnx * TUnit, Uy + Dny * TUnit, Uz + Dnz * TUnit) - 1.0) * RMean;
-        const ConeR = 0.004 + WorldT * TanSun;
-        return Smoothstep(-ConeR * 0.35, ConeR, Clearance);
+        const ConeR = 0.0025 + WorldT * TanSun;
+        return Smoothstep(-ConeR * 0.45, ConeR, Clearance);
       }
 
       const Hpx = Hx + MaxPen, Hpy = Hy + MaxPen, Hpz = Hz + MaxPen;
@@ -571,25 +616,82 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
       const T0x = (-Hpx - Lox) * InvX, T1x = (Hpx - Lox) * InvX;
       const T0y = (-Hpy - Loy) * InvY, T1y = (Hpy - Loy) * InvY;
       const T0z = (-Hpz - Loz) * InvZ, T1z = (Hpz - Loz) * InvZ;
-      const TNear = Math.max(0.004, T0x < T1x ? T0x : T1x, T0y < T1y ? T0y : T1y, T0z < T1z ? T0z : T1z);
-      const TFar = Math.min(18.0, T0x > T1x ? T0x : T1x, T0y > T1y ? T0y : T1y, T0z > T1z ? T0z : T1z);
+      const TNear = Math.max(0.003, T0x < T1x ? T0x : T1x, T0y < T1y ? T0y : T1y, T0z < T1z ? T0z : T1z);
+      const TFar = Math.min(24.0, T0x > T1x ? T0x : T1x, T0y > T1y ? T0y : T1y, T0z > T1z ? T0z : T1z);
       if (TNear > TFar) return 1.0;
 
-      const TMid = 0.5 * (TNear + TFar);
-      const ConeR = 0.004 + TMid * TanSun;
-      const Lpx = Lox + Ldx * TMid, Lpy = Loy + Ldy * TMid, Lpz = Loz + Ldz * TMid;
-      const CMin = ConeR * 1.25;
-      const DSil = P.Shape >= 2
-        ? Math.max(Len2(Lpx, Lpy) - Math.max(Hx, Hy), Math.abs(Lpz) - Math.max(Hz, CMin))
-        : SdBox(Lpx, Lpy, Lpz, Math.max(Hx, CMin), Math.max(Hy, CMin), Math.max(Hz, CMin));
-      return Smoothstep(-ConeR, ConeR, DSil);
+      let BestVis = 1.0;
+      if (P.Shape === 0) {
+        const Tb0x = (-Hx - Lox) * InvX, Tb1x = (Hx - Lox) * InvX;
+        const Tb0y = (-Hy - Loy) * InvY, Tb1y = (Hy - Loy) * InvY;
+        const Tb0z = (-Hz - Loz) * InvZ, Tb1z = (Hz - Loz) * InvZ;
+        const TbNear = Math.max(Tb0x < Tb1x ? Tb0x : Tb1x, Tb0y < Tb1y ? Tb0y : Tb1y, Tb0z < Tb1z ? Tb0z : Tb1z);
+        const TbFar = Math.min(Tb0x > Tb1x ? Tb0x : Tb1x, Tb0y > Tb1y ? Tb0y : Tb1y, Tb0z > Tb1z ? Tb0z : Tb1z);
+        if (TbNear <= TbFar && TbFar > 0.003) {
+          const TSeed = Clamp(0.5 * (Math.max(0.003, TbNear) + TbFar), TNear, TFar);
+          const DSeed = SdBox(Lox + Ldx * TSeed, Loy + Ldy * TSeed, Loz + Ldz * TSeed, Hx, Hy, Hz);
+          const CSeed = 0.002 + TSeed * TanSun;
+          BestVis = Math.min(BestVis, Smoothstep(-CSeed, CSeed, DSeed));
+        }
+      } else if (P.Shape === 4) {
+        const MajorR = Math.max(Hx, Hy) * 0.68;
+        const MinorR = Math.max(0.04, Hz * 0.55);
+        const ARing = Ldx * Ldx + Ldy * Ldy;
+        if (ARing > 1e-6) {
+          const BRing = Lox * Ldx + Loy * Ldy;
+          const CRing = Lox * Lox + Loy * Loy - MajorR * MajorR;
+          const DiscR = BRing * BRing - ARing * CRing;
+          if (DiscR >= 0.0) {
+            const SqR = Math.sqrt(DiscR);
+            const Tr0 = Clamp((-BRing - SqR) / ARing, TNear, TFar);
+            const Tr1 = Clamp((-BRing + SqR) / ARing, TNear, TFar);
+            const C0R = 0.002 + Tr0 * TanSun;
+            const C1R = 0.002 + Tr1 * TanSun;
+            const D0 = Len2(Len2(Lox + Ldx * Tr0, Loy + Ldy * Tr0) - MajorR, Loz + Ldz * Tr0) - MinorR;
+            const D1 = Len2(Len2(Lox + Ldx * Tr1, Loy + Ldy * Tr1) - MajorR, Loz + Ldz * Tr1) - MinorR;
+            BestVis = Math.min(BestVis, Smoothstep(-C0R, C0R, D0), Smoothstep(-C1R, C1R, D1));
+          } else {
+            const TCl = Clamp(-BRing / ARing, TNear, TFar);
+            const CCl = 0.002 + TCl * TanSun;
+            const DCl = Len2(Len2(Lox + Ldx * TCl, Loy + Ldy * TCl) - MajorR, Loz + Ldz * TCl) - MinorR;
+            BestVis = Math.min(BestVis, Smoothstep(-CCl, CCl, DCl));
+          }
+        }
+        if (Math.abs(Ldz) > 1e-5) {
+          const Tz0 = Clamp(-Loz / Ldz, TNear, TFar);
+          const Cz0 = 0.002 + Tz0 * TanSun;
+          const Dz0 = Len2(Len2(Lox + Ldx * Tz0, Loy + Ldy * Tz0) - MajorR, Loz + Ldz * Tz0) - MinorR;
+          BestVis = Math.min(BestVis, Smoothstep(-Cz0, Cz0, Dz0));
+        }
+      } else {
+        const XyLen2 = Ldx * Ldx + Ldy * Ldy;
+        if (XyLen2 > 1e-6) {
+          const TAxis = Clamp(-(Lox * Ldx + Loy * Ldy) / XyLen2, TNear, TFar);
+          const DAxis = this.EvalLocalPrimSdf(P.Shape, Lox + Ldx * TAxis, Loy + Ldy * TAxis, Loz + Ldz * TAxis, Hx, Hy, Hz);
+          const CAxis = 0.002 + TAxis * TanSun;
+          BestVis = Math.min(BestVis, Smoothstep(-CAxis, CAxis, DAxis));
+        }
+      }
+
+      const Span = Math.max(0.004, TFar - TNear);
+      const StepU = Span / 16.0;
+      for (let S = 0; S <= 16; ++S) {
+        const T = TNear + StepU * S;
+        const D = this.EvalLocalPrimSdf(P.Shape, Lox + Ldx * T, Loy + Ldy * T, Loz + Ldz * T, Hx, Hy, Hz);
+        const ConeR = 0.002 + T * TanSun;
+        const V = Smoothstep(-ConeR, ConeR, D);
+        if (V < BestVis) BestVis = V;
+        if (BestVis <= 0.002) return 0.0;
+      }
+      return BestVis;
     }
 
-    EvaluateSoftConeVis(Prims, Ox, Oy, Oz, DirX, DirY, DirZ, MaxDist, TanAngle, MinVis, SelfIdx) {
+    EvaluateSoftConeVis(Prims, Ox, Oy, Oz, DirX, DirY, DirZ, MaxDist, TanAngle, MinVis, SelfIdx, SkipPickCode = -1) {
       let Vis = 1.0;
       for (let I = 0; I < Prims.length; ++I) {
         if (I === SelfIdx) continue;
         const P = Prims[I];
+        if (SkipPickCode >= 0 && P.PickCode === SkipPickCode) continue;
         if (!P.CastShadows || P.GlassShell) continue;
         const TProj = (P.Cx - Ox) * DirX + (P.Cy - Oy) * DirY + (P.Cz - Oz) * DirZ;
         if (TProj <= -0.5 || TProj >= MaxDist) continue;
@@ -886,7 +988,7 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
         CameraOrigin, CameraTarget, WorldUp,
         SunDir, SunIrradiance, SunAngularRadiusRad, SkyRadiance, ExposureGain,
       } = CompiledScene;
-      const TanSun = Math.tan((SunAngularRadiusRad || 0.009) * 2.1);
+      const TanSun = Math.tan((SunAngularRadiusRad || 0.009) * 1.15);
 
       let FwdX = CameraTarget[0] - CameraOrigin[0];
       let FwdY = CameraTarget[1] - CameraOrigin[1];
@@ -1187,22 +1289,7 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
                 }
               }
 
-              // 2. Clipped 4-Subquad Solid-Angle Area Lights + Analytical Softbox Penumbra
-              let AreaVis0 = 1.0;
-              if (Lights.length > 0) {
-                const L0 = Lights[0];
-                const Tlx = L0.Cx - Hit.px, Tly = L0.Cy - Hit.py, Tlz = L0.Cz - Hit.pz;
-                const DistL = Len3(Tlx, Tly, Tlz);
-                if (DistL >= 0.05) {
-                  const TanArea = Clamp((Len2(L0.Hw, L0.Hh) * 0.65) / Math.max(DistL, 0.35), 0.18, 0.55);
-                  AreaVis0 = this.EvaluateSoftConeVis(
-                    Prims,
-                    Hit.px + Nx * 0.008, Hit.py + Ny * 0.008, Hit.pz + Nz * 0.008,
-                    Tlx / DistL, Tly / DistL, Tlz / DistL, DistL - 0.04, TanArea, 0.38, Hit.primIdx,
-                  );
-                }
-              }
-
+              // 2. Clipped 4-Subquad Solid-Angle Area Lights + Directed Studio Light Soft Shadows
               const DotVN = Vx * Nx + Vy * Ny + Vz * Nz;
               const Rx2 = -Vx + 2.0 * DotVN * Nx;
               const Ry2 = -Vy + 2.0 * DotVN * Ny;
@@ -1213,14 +1300,16 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
                 let DiffR = 0, DiffG = 0, DiffB = 0;
                 for (let Sy = -1; Sy <= 1; Sy += 2) {
                   for (let Sx = -1; Sx <= 1; Sx += 2) {
-                    const Dvx = L.Cx + Sx * L.Hw * 0.5 - Hit.px;
-                    const Dvy = L.Cy + Sy * L.Hh * 0.5 - Hit.py;
-                    const Dvz = L.Cz - Hit.pz;
+                    const UOff = Sx * L.Hw * 0.5;
+                    const VOff = Sy * L.Hh * 0.5;
+                    const Dvx = L.Cx + L.Rx * UOff + L.Ux * VOff - Hit.px;
+                    const Dvy = L.Cy + L.Ry * UOff + L.Uy * VOff - Hit.py;
+                    const Dvz = L.Cz + L.Rz * UOff + L.Uz * VOff - Hit.pz;
                     const D2 = Math.max(Dvx * Dvx + Dvy * Dvy + Dvz * Dvz, 0.08);
                     const InvD = 1.0 / Math.sqrt(D2);
                     const Wix = Dvx * InvD, Wiy = Dvy * InvD, Wiz = Dvz * InvD;
                     const CSurf = Math.max(0, Nx * Wix + Ny * Wiy + Nz * Wiz);
-                    const CEmit = Math.max(0, -Wiz);
+                    const CEmit = L.Omni ? 0.65 : Math.max(0, -(Wix * L.Nx + Wiy * L.Ny + Wiz * L.Nz));
                     if (CSurf > 0 && CEmit > 0) {
                       const W = (CSurf * Math.min((L.Hw * L.Hh * CEmit) / D2, 0.85)) / PI;
                       DiffR += L.RadR * W;
@@ -1230,18 +1319,34 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
                   }
                 }
                 if (DiffR + DiffG + DiffB > 1e-5) {
-                  const AreaVis = Li === 0 ? AreaVis0 : 1.0;
+                  let AreaVis = 1.0;
+                  const Tlx = L.Cx - Hit.px, Tly = L.Cy - Hit.py, Tlz = L.Cz - Hit.pz;
+                  const DistL = Len3(Tlx, Tly, Tlz);
+                  if (DistL >= 0.05) {
+                    const TanArea = Clamp((Len2(L.Hw, L.Hh) * 0.48) / Math.max(DistL, 0.35), 0.10, 0.38);
+                    AreaVis = this.EvaluateSoftConeVis(
+                      Prims,
+                      Hit.px + Nx * 0.007, Hit.py + Ny * 0.007, Hit.pz + Nz * 0.007,
+                      Tlx / DistL, Tly / DistL, Tlz / DistL, DistL - 0.05, TanArea, 0.18, Hit.primIdx, L.PickCode,
+                    );
+                  }
                   const Kd = (1.0 - Mat.metallic) * (1.0 - Mat.transmission);
                   LinR += Kd * Mat.baseR * DiffR * AreaVis;
                   LinG += Kd * Mat.baseG * DiffG * AreaVis;
-                  LinB += Kd * Mat.baseB * DiffB * AreaVis;
+                  LinB += Kd * Mat.baseB * DiffG * 0 + Kd * Mat.baseB * DiffB * AreaVis;
 
-                  if (Math.abs(Rz2) > 1e-4) {
-                    const TPlane = (L.Cz - Hit.pz) / Rz2;
-                    if (TPlane > 0.01) {
-                      const Clx = Clamp(Hit.px + Rx2 * TPlane, L.Cx - L.Hw, L.Cx + L.Hw) - Hit.px;
-                      const Cly = Clamp(Hit.py + Ry2 * TPlane, L.Cy - L.Hh, L.Cy + L.Hh) - Hit.py;
-                      const Clz = L.Cz - Hit.pz;
+                  const RDenom = Rx2 * L.Nx + Ry2 * L.Ny + Rz2 * L.Nz;
+                  if (Math.abs(RDenom) > 1e-4) {
+                    const TPlane = ((L.Cx - Hit.px) * L.Nx + (L.Cy - Hit.py) * L.Ny + (L.Cz - Hit.pz) * L.Nz) / RDenom;
+                    if (TPlane > 0.01 && (L.Omni || RDenom < 0.0)) {
+                      const RelX = Hit.px + Rx2 * TPlane - L.Cx;
+                      const RelY = Hit.py + Ry2 * TPlane - L.Cy;
+                      const RelZ = Hit.pz + Rz2 * TPlane - L.Cz;
+                      const UClamp = Clamp(RelX * L.Rx + RelY * L.Ry + RelZ * L.Rz, -L.Hw, L.Hw);
+                      const VClamp = Clamp(RelX * L.Ux + RelY * L.Uy + RelZ * L.Uz, -L.Hh, L.Hh);
+                      const Clx = (L.Cx + L.Rx * UClamp + L.Ux * VClamp) - Hit.px;
+                      const Cly = (L.Cy + L.Ry * UClamp + L.Uy * VClamp) - Hit.py;
+                      const Clz = (L.Cz + L.Rz * UClamp + L.Uz * VClamp) - Hit.pz;
                       const ClLen = Math.max(1e-5, Len3(Clx, Cly, Clz));
                       const Lsx = Clx / ClLen, Lsy = Cly / ClLen, Lsz = Clz / ClLen;
                       const SpecSpread = Math.max(0.04, Mat.roughness * Mat.roughness);
