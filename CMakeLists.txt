@@ -186,6 +186,15 @@ set(FRONTIER_UI_COMPONENT_SOURCES
     Engine/Workspaces/UV/UVViewportInteractor.cpp
     Engine/Workspaces/UV/UVViewportHost.cpp
     Engine/Workspaces/UV/UVWorkspaceHost.cpp
+    Engine/Workspaces/Texturing/MaterialWorkspaceSession.cpp
+    Engine/Workspaces/Texturing/MaterialSurfacePane.cpp
+    Engine/Workspaces/Texturing/MaterialInspectorPane.cpp
+    Engine/Workspaces/Texturing/MaterialWorkspaceHost.cpp
+    Engine/Workspaces/Texturing/PatternStampStackSession.cpp
+    Engine/Workspaces/Texturing/PatternStampLayerStackPane.cpp
+    Engine/Workspaces/Texturing/PatternStampToolHeaderPane.cpp
+    Engine/Workspaces/Texturing/PatternStampInspectorPane.cpp
+    Engine/Workspaces/Texturing/PatternStampWorkspaceHost.cpp
     Engine/GeometricRaster/Rasterization/ImGuiOverlayRasterization.cpp
     Engine/GeometricRaster/GlobalIllumination/ShowcaseGalleryScene.cpp
     Engine/Input/ImGuiInputAdapter.cpp
@@ -585,6 +594,8 @@ if(BUILD_TESTING)
     frontier_register_exhibit(TieredWorldRenderValidation    Exhibits/TieredWorldRenderValidation.cpp)
     frontier_register_exhibit(UVRasterPickingGizmoValidation    Exhibits/UVRasterPickingGizmoValidation.cpp)
     frontier_register_exhibit(UVWorkspaceUIValidation           Exhibits/UVWorkspaceUIValidation.cpp)
+    frontier_register_exhibit(MaterialWorkspaceUIValidation     Exhibits/MaterialWorkspaceUIValidation.cpp)
+    frontier_register_exhibit(PatternStampWorkspaceUIValidation Exhibits/PatternStampWorkspaceUIValidation.cpp)
     frontier_register_exhibit(UVParameterizationValidation      Exhibits/UVParameterizationValidation.cpp)
     frontier_register_exhibit(UVInteractiveAuthoringValidation  Exhibits/UVInteractiveAuthoringValidation.cpp)
     frontier_register_exhibit(UVBoundaryValidation              Exhibits/UVBoundaryValidation.cpp)
