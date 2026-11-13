@@ -1268,7 +1268,7 @@ export class SoftwarePreviewEngine
                                     Pt.x = Np[0] + Math.cos(Ang) * 0.14;
                                     Pt.y = Np[1] - 0.04;
                                     Pt.z = Np[2] + Math.sin(Ang) * 0.14;
-                                    if (ParentTorn || (BallR > 0 && Math.hypot(Pt.x - BallX, Pt.y - BallY, Pt.z - BallZ) < BallR + 0.18))
+                                    if (ParentTorn || (BallR > 0 && Math.hypot(Pt.x - BallX, Pt.y - BallY, Pt.z - BallZ) < BallR + 0.24 && BallSpd > Math.max(1.8, TearThresh * 0.55)))
                                     {
                                         Pt.detachAge = 0;
                                         Pt.vx = BallVx * 0.45 + (Math.random() - 0.5) * 1.4;

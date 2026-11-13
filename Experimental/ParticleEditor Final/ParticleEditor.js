@@ -3103,10 +3103,9 @@ function ConstructEffectInspector(Page, Effect)
             Range(WebSecSrc, BindEffect(Effect, P, 'webSpinRate', { Label: 'Spinning speed' }), 0.15, 4.0, 0.05, 2, '×');
             Range(WebSecSrc, BindEffect(Effect, P, 'webSpokes', { Label: Cls.WebMode === 1 ? 'Radial spokes' : 'Anchor chord density' }), 8, 28, 1, 0, '');
             Range(WebSecSrc, BindEffect(Effect, P, 'webRings', { Label: Cls.WebMode === 1 ? 'Capture spiral turns' : 'Tangle mesh depth' }), 6, 22, 1, 0, '');
-            AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
-        }
             Range(WebSecSrc, BindEffect(Effect, P, 'webSag', { Label: 'Silk gravity catenary sag' }), 0.0, 0.65, 0.01, 2, 'm');
             Range(WebSecSrc, BindEffect(Effect, P, 'webDew', { Label: Cls.WebMode === 1 ? 'Morning dew glints' : 'Dust & gossamer shimmer' }), 0.0, 1.0, 0.02, 2, '');
+            AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
         }
         if (Cls.IsArc)
         {
