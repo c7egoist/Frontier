@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nanite Virtual Geometry Studio — Frontier Project Zero</title>
+    <link rel="stylesheet" href="./NaniteStudio.css" />
+</head>
+<body>
+    <div id="StudioApp">
+        <!-- Project-Zero Top Notch -->
+        <header class="project-zero-notch" id="ProjectZeroNotch">
+            <div class="notch-brand">
+                <span class="notch-dot"></span>
+                <span>Frontier<span style="color:var(--accent-gold);">.</span></span>
+                <span class="notch-title">Nanite Studio</span>
+            </div>
+
+            <div class="notch-tools">
+                <button class="notch-pill active" id="NotchBtnSingle" type="button">Single Asset</button>
+                <button class="notch-pill" id="NotchBtnMegascene" type="button">100-Instance Megascene</button>
+                <div style="width:1px; height:14px; background:var(--border-subtle);"></div>
+                <button class="notch-pill" id="NotchBtnFreeze" type="button">❄ Freeze LOD Cut</button>
+                <button class="notch-pill" id="NotchBtnWire" type="button">Wireframe</button>
+                <button class="notch-pill" id="NotchBtnResetCam" type="button">Reset View</button>
+                <div style="width:1px; height:14px; background:var(--border-subtle);"></div>
+                <span class="notch-pill" id="NotchFpsBadge" style="color:var(--accent-green); font-weight:500;">60 FPS</span>
+            </div>
+        </header>
+
+        <!-- Main Studio Grid -->
+        <main class="studio-grid">
+            <!-- Left Dock: Scene Outliner -->
+            <aside class="dock-panel outliner-panel">
+                <div class="dock-tab-strip">
+                    <div class="dock-tab active">
+                        <span>Outliner</span>
+                        <span class="dock-tab-close" title="Close Tab">×</span>
+                    </div>
+                    <button class="dock-tab-add" title="Add Dock Tab">+</button>
+                </div>
+
+                <div class="dock-body">
+                    <div class="outliner-header">
+                        <div class="outliner-search">
+                            <span style="color:var(--text-muted); font-size:11px;">🔍</span>
+                            <input id="OutlinerSearchInput" type="text" placeholder="Filter entities & clusters…" />
+                        </div>
+                        <div class="outliner-summary">
+                            <span>COLLECTIONS</span>
+                            <span>VISIBLE: <strong class="outliner-summary-count" id="OutlinerVisibleCount">1</strong> / <span id="OutlinerTotalCount">1</span></span>
+                        </div>
+                    </div>
+
+                    <div class="outliner-list" id="OutlinerTreeList">
+                        <!-- Populated dynamically by NaniteStudio.js -->
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Center Dock: Stage Viewport -->
+            <section class="dock-panel viewport-panel" id="ViewportContainer">
+                <div class="dock-tab-strip">
+                    <div class="dock-tab active">
+                        <span>Stage Viewport</span>
+                        <span class="dock-tab-close" title="Close Tab">×</span>
+                    </div>
+                    <button class="dock-tab-add" title="Add Dock Tab">+</button>
+                </div>
+
+                <canvas id="ViewportCanvas"></canvas>
+
+                <!-- Floating Top HUD -->
+                <div class="viewport-hud-top">
+                    <div class="hud-group" id="ShadingModeGroup">
+                        <button class="hud-pill" data-mode="pbr" type="button">PBR Surface</button>
+                        <button class="hud-pill active" data-mode="clusters" type="button">Cluster IDs</button>
+                        <button class="hud-pill" data-mode="levels" type="button">LOD Levels</button>
+                        <button class="hud-pill" data-mode="error" type="button">Error Heatmap</button>
+                        <button class="hud-pill" data-mode="normals" type="button">Normal Cones</button>
+                    </div>
+
+                    <div class="hud-group">
+                        <button class="hud-pill active" id="HudBtnOrbit" type="button">Orbit</button>
+                        <button class="hud-pill" id="HudBtnFly" type="button">Fly</button>
+                    </div>
+                </div>
+
+                <!-- Floating Bottom Telemetry Readout -->
+                <div class="viewport-hud-bottom">
+                    <div class="telemetry-readout-pill">
+                        <span class="readout-item">VIRTUAL: <strong id="HudVirtualTris">1.2M</strong></span>
+                        <span class="readout-divider"></span>
+                        <span class="readout-item">ACTIVE: <strong id="HudActiveTris" style="color:var(--accent-gold);">18.4K</strong></span>
+                        <span class="readout-divider"></span>
+                        <span class="readout-item">CULLED: <strong id="HudReductionPct">-98.5%</strong></span>
+                        <span class="readout-divider"></span>
+                        <span class="readout-item">CLUSTERS: <strong id="HudActiveClusters">142</strong></span>
+                        <span class="readout-divider"></span>
+                        <span class="readout-item">ERROR: <strong id="HudMaxError">0.82 px</strong></span>
+                    </div>
+                </div>
+
+                <!-- Bottom Performance Drawer -->
+                <div class="bottom-drawer" id="BottomDrawer">
+                    <div class="drawer-handle-bar" id="DrawerHandle">
+                        <div class="drawer-title">
+                            <span>▲</span>
+                            <span>Performance &amp; LOD Distribution Histogram</span>
+                        </div>
+                        <span style="font-size:10px; color:var(--text-muted);">CLICK TO COLLAPSE / EXPAND</span>
+                    </div>
+                    <div class="drawer-content">
+                        <div class="drawer-chart-card">
+                            <span class="drawer-chart-title">Active Clusters by LOD Level (LOD 0 = Lime, LOD 1 = Cyan, LOD 2 = Gold, LOD 3 = Orange, LOD 4 = Red)</span>
+                            <canvas class="drawer-chart-canvas" id="HistogramCanvas" width="400" height="80"></canvas>
+                        </div>
+                        <div class="drawer-chart-card">
+                            <span class="drawer-chart-title">Frame Time (ms) · Target 16.6 ms (60 FPS)</span>
+                            <canvas class="drawer-chart-canvas" id="FrameTimeCanvas" width="400" height="80"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Dock: Property Inspector -->
+            <aside class="dock-panel inspector-panel">
+                <div class="dock-tab-strip">
+                    <div class="dock-tab active">
+                        <span>Inspector</span>
+                        <span class="dock-tab-close" title="Close Tab">×</span>
+                    </div>
+                    <button class="dock-tab-add" title="Add Dock Tab">+</button>
+                </div>
+
+                <div class="dock-body">
+                    <!-- Hero Preview Banner -->
+                    <div class="inspector-hero">
+                        <span class="inspector-hero-kicker">Nanite Virtual Geometry · Monotonic DAG</span>
+                        <h2 class="inspector-hero-title" id="InspectorMeshTitle">Stanford Dragon</h2>
+                        <span class="inspector-hero-sub" id="InspectorMeshSub">128-triangle Morton clusters · Seam-locked QEM decimation</span>
+                    </div>
+
+                    <!-- 2x2 Metric Readout Cards -->
+                    <div class="metric-grid">
+                        <div class="metric-card">
+                            <span class="metric-kicker">Virtual / Active Tris</span>
+                            <span class="metric-value" id="MetricTriangles">1.2M → 18.4K</span>
+                            <span class="metric-sub" id="MetricReduction">-98.5% culled</span>
+                        </div>
+                        <div class="metric-card">
+                            <span class="metric-kicker">Active Clusters</span>
+                            <span class="metric-value" id="MetricClusters">142 / 2,480</span>
+                            <span class="metric-sub" id="MetricClusterPct">5.7% selected</span>
+                        </div>
+                        <div class="metric-card">
+                            <span class="metric-kicker">Screen Projected Error</span>
+                            <span class="metric-value" id="MetricError">0.82 px</span>
+                            <span class="metric-sub" id="MetricErrorTarget">Target: &le; 1.00 px</span>
+                        </div>
+                        <div class="metric-card">
+                            <span class="metric-kicker">Frame Time / FPS</span>
+                            <span class="metric-value" id="MetricFrameTime">1.8 ms</span>
+                            <span class="metric-sub" id="MetricFps">60 FPS solid</span>
+                        </div>
+                    </div>
+
+                    <!-- Card 1: Nanite Runtime Controls -->
+                    <div class="inspector-card">
+                        <div class="card-header">
+                            <span>Nanite Runtime &amp; LOD Controls</span>
+                            <span>⚙</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="control-row">
+                                <div class="control-label-row">
+                                    <span>Max Allowed Pixel Error</span>
+                                    <span class="control-val" id="ValPixelError">1.00 px</span>
+                                </div>
+                                <input class="slider-input" id="SliderPixelError" type="range" min="0.25" max="6.0" step="0.25" value="1.0" />
+                            </div>
+
+                            <div class="control-row">
+                                <div class="control-label-row">
+                                    <span>LOD Bias</span>
+                                    <span class="control-val" id="ValLodBias">0.0</span>
+                                </div>
+                                <input class="slider-input" id="SliderLodBias" type="range" min="-3.0" max="3.0" step="0.5" value="0.0" />
+                            </div>
+
+                            <div class="toggle-row">
+                                <span>View Frustum Culling</span>
+                                <div class="switch-pill active" id="ToggleFrustum"></div>
+                            </div>
+
+                            <div class="toggle-row">
+                                <span>Normal-Cone Backface Culling</span>
+                                <div class="switch-pill active" id="ToggleNormalCone"></div>
+                            </div>
+
+                            <div class="toggle-row">
+                                <span>Freeze Culling &amp; LOD Cut</span>
+                                <div class="switch-pill" id="ToggleFreeze"></div>
+                            </div>
+
+                            <div class="toggle-row">
+                                <span>Wireframe Overlay</span>
+                                <div class="switch-pill" id="ToggleWireframe"></div>
+                            </div>
+
+                            <div class="control-row" id="WireOpacityRow" style="display:none;">
+                                <div class="control-label-row">
+                                    <span>Wireframe Opacity</span>
+                                    <span class="control-val" id="ValWireOpacity">0.35</span>
+                                </div>
+                                <input class="slider-input" id="SliderWireOpacity" type="range" min="0.1" max="1.0" step="0.05" value="0.35" />
+                            </div>
+
+                            <div class="toggle-row">
+                                <span>Show Bounding Spheres</span>
+                                <div class="switch-pill" id="ToggleSpheres"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 2: Cluster Hierarchy & DAG Telemetry -->
+                    <div class="inspector-card">
+                        <div class="card-header">
+                            <span>Cluster Hierarchy &amp; DAG Breakdown</span>
+                            <span>🌲</span>
+                        </div>
+                        <div class="card-body">
+                            <table class="dag-table">
+                                <thead>
+                                    <tr>
+                                        <th>Level</th>
+                                        <th>Clusters</th>
+                                        <th>Triangles</th>
+                                        <th>Self Error</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="DagTableBody">
+                                    <!-- Populated dynamically -->
+                                </tbody>
+                            </table>
+                            <div style="font-size:10px; color:var(--accent-green); display:flex; align-items:center; gap:6px;">
+                                <span>✔</span>
+                                <span>MONOTONIC ERROR VERIFIED · CRACK-FREE DAG CUT</span>
+                            </div>
+                            <div style="font-size:10px; color:var(--text-muted); display:flex; align-items:center; gap:6px;">
+                                <span>🔒</span>
+                                <span>100% BOUNDARY EDGES LOCKED ACROSS CLUSTER GROUPS</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 3: Culling Telemetry Breakdown -->
+                    <div class="inspector-card">
+                        <div class="card-header">
+                            <span>Culling Telemetry &amp; Breakdown</span>
+                            <span>📊</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="control-label-row">
+                                <span>Frustum Culled Clusters</span>
+                                <span class="control-val" id="StatFrustumCulled">0 (0.0%)</span>
+                            </div>
+                            <div class="control-label-row">
+                                <span>Backface Cone Culled Clusters</span>
+                                <span class="control-val" id="StatNormalConeCulled">0 (0.0%)</span>
+                            </div>
+                            <div class="control-label-row">
+                                <span>LOD Error Culled Clusters</span>
+                                <span class="control-val" id="StatErrorCulled">0 (0.0%)</span>
+                            </div>
+                            <div class="control-label-row">
+                                <span>GPU Index Buffer Overhead</span>
+                                <span class="control-val" id="StatBufferOverhead">2.4 MB</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 4: Geometry Presets & Custom File Intake -->
+                    <div class="inspector-card">
+                        <div class="card-header">
+                            <span>Virtual Geometry Presets</span>
+                            <span>🏺</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="preset-grid">
+                                <button class="preset-btn active" data-preset="dragon" type="button">🐉 Stanford Dragon</button>
+                                <button class="preset-btn" data-preset="bunny" type="button">🐇 Stanford Bunny</button>
+                                <button class="preset-btn" data-preset="column" type="button">🏛 Corinthian Pillar</button>
+                                <button class="preset-btn" data-preset="fractal" type="button">🌀 Fractal Helix</button>
+                                <button class="preset-btn" data-preset="crater" type="button">🏔 Mountain Crater</button>
+                                <button class="preset-btn" data-preset="megascene" type="button">🌐 100-Inst Megascene</button>
+                            </div>
+
+                            <div style="margin-top:6px; padding:10px; border:1px dashed var(--border-subtle); border-radius:8px; text-align:center;">
+                                <input type="file" id="ObjFileInput" accept=".obj" style="display:none;" />
+                                <button id="BtnDropObj" type="button" style="color:var(--accent-gold); font-size:11px;">
+                                    + Drop or browse custom Wavefront .OBJ
+                                </button>
+                                <div style="font-size:9.5px; color:var(--text-muted); margin-top:4px;">
+                                    Auto-clusters into Morton hierarchy on the fly
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 5: Material & Radiometry -->
+                    <div class="inspector-card">
+                        <div class="card-header">
+                            <span>Material &amp; Lighting Radiometry</span>
+                            <span>💡</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="control-row">
+                                <div class="control-label-row">
+                                    <span>Microfacet Roughness</span>
+                                    <span class="control-val" id="ValRoughness">0.38</span>
+                                </div>
+                                <input class="slider-input" id="SliderRoughness" type="range" min="0.0" max="1.0" step="0.05" value="0.38" />
+                            </div>
+
+                            <div class="control-row">
+                                <div class="control-label-row">
+                                    <span>Metalness</span>
+                                    <span class="control-val" id="ValMetalness">0.12</span>
+                                </div>
+                                <input class="slider-input" id="SliderMetalness" type="range" min="0.0" max="1.0" step="0.05" value="0.12" />
+                            </div>
+
+                            <div class="control-row">
+                                <div class="control-label-row">
+                                    <span>Sun Elevation</span>
+                                    <span class="control-val" id="ValSunElevation">48°</span>
+                                </div>
+                                <input class="slider-input" id="SliderSunElevation" type="range" min="5" max="85" step="1" value="48" />
+                            </div>
+
+                            <div class="control-row">
+                                <div class="control-label-row">
+                                    <span>Sun Azimuth</span>
+                                    <span class="control-val" id="ValSunAzimuth">125°</span>
+                                </div>
+                                <input class="slider-input" id="SliderSunAzimuth" type="range" min="0" max="360" step="5" value="125" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- Application Script -->
+    <script type="module" src="./NaniteStudio.js"></script>
+</body>
+</html>

@@ -19,6 +19,7 @@
 | **`VehicleLab/`** | `ControlVehicle` `FCT1` mesh inspection, VR38DETT torque & turbo spool curves, Pacejka MF6.1 tyre thermal/slip solver, and 10 telemetry channels. | `Frontier-OLD` @ `438aeaf` | `Engine/Physics/` (`JoltPhysics` wheeled vehicle + Pacejka/thermal solver) + `Engine/Assets/` + `Engine/Editor/` |
 | **`UVEditor/`** | Synchronized 2D UDIM layout & 3D mesh viewport, LSCM conformal unwrapping, seam authoring, GPU wireframe overlays, and importance-weighted packing. | `c7egoist/Frontier` @ `3350774` | `Engine/Geometry/` (LSCM unwrap & UDIM packer) + `Shaders/` (GPU UV/wireframe overlays) + `Engine/Editor/` |
 | **`TextureStudio/`** | Five-workspace texturing suite: `#material` look-dev, `#pattern` noise-scaled layer stack, `#stamp` decals, `#paint` 3D brush projection, and `#bake` mesh + volume SDF baking. | `c7egoist/Frontier` @ `3350774` | `Engine/Materials/`, `Engine/Assets/`, & `Shaders/` (`.slang` procedural noise, brush projection, AO/curvature/SDF bakers) + `Engine/Editor/` |
+| **`NaniteStudio/`** | Continuous virtual geometry cluster LOD streaming, 30-bit Morton partitioning, seam-locked QEM decimation, monotonic DAG cut solver, normal-cone backface & frustum culling, Freeze LOD visualizer, and 100-instance Megascene. | Inspired by `bdwhst/Vulcanite` | `Engine/SpatialAcceleration/ClusterPyramid.{h,cpp}` + `Engine/GeometricRaster/Visibility/ClusterCullEncoder.{h,cpp}` + `Engine/Editor/` |
 
 ---
 
@@ -48,4 +49,5 @@ node Experimental/ForceFieldEditor/ForceFieldValidation.mjs
 node Experimental/VehicleLab/AssetInspectorValidation.mjs
 node Experimental/UVEditor/UVValidation.mjs
 node Experimental/TextureStudio/TextureStudioValidation.mjs
+node Experimental/NaniteStudio/NaniteValidation.mjs
 ```
