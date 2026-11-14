@@ -25,6 +25,7 @@
         </a>
         <nav class="NavPills" id="NavPills" aria-label="Sections"></nav>
         <div class="TopActions">
+            <button class="GhostPill PaletteButton" id="PaletteButton" title="Command palette (Ctrl/⌘ K)"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>Jump to…<kbd>⌘K</kbd></button>
             <button class="GhostPill" id="ImportDatasetButton" title="Load your own asset list (JSON)">Import JSON</button>
             <button class="GhostPill" id="ImportImageButton" title="Use your own background image (or drop one anywhere)">Background</button>
             <button class="GhostPill" id="EditButton" aria-expanded="false" aria-controls="EditorDrawer">Edit</button>
@@ -59,6 +60,8 @@
                 <article class="Glass FeaturePanel" id="FeaturePanel" aria-live="polite"></article>
                 <article class="Glass ChainPanel" id="ChainPanel"></article>
             </div>
+
+            <article class="Glass CompositionPanel" id="CompositionPanel" aria-label="Texture memory composition"></article>
         </section>
 
         <!-- Right: headline + selectors + detail -->
@@ -78,7 +81,10 @@
                     <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
                     <input id="SearchInput" type="search" placeholder="Search assets" aria-label="Search assets">
                 </div>
+                <div class="CompareTray" id="CompareTray" role="region" aria-label="Compared assets" hidden></div>
             </div>
+
+            <div class="BoardHost" id="BoardHost" hidden></div>
 
             <aside class="Glass DetailPanel" id="DetailPanel" aria-live="polite"></aside>
             <div class="Legend Glass" id="Legend"></div>
@@ -98,6 +104,16 @@
         <textarea id="DatasetText" spellcheck="false" aria-label="Dataset JSON"></textarea>
         <p class="Hint" id="DatasetError" role="alert"></p>
     </aside>
+
+    <!-- Floating components -->
+    <div class="Toasts" id="Toasts" aria-live="polite"></div>
+    <div class="PaletteVeil" id="PaletteVeil" hidden>
+        <div class="Palette Glass" role="dialog" aria-modal="true" aria-label="Command palette">
+            <div class="PaletteSearch"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg><input id="PaletteInput" placeholder="Search assets, sections and actions…" autocomplete="off" aria-label="Command"></div>
+            <ul class="PaletteList" id="PaletteList" role="listbox"></ul>
+            <footer class="PaletteFoot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> run</span><span><kbd>Esc</kbd> close</span><span class="Spacer"></span><span><kbd>1</kbd>–<kbd>6</kbd> sections · <kbd>C</kbd> compare · <kbd>L</kbd> locate · <kbd>X</kbd> clear · <kbd>/</kbd> search</span></footer>
+        </div>
+    </div>
 
     <div class="DropVeil" id="DropVeil" hidden><span>Drop a JSON dataset or a background image</span></div>
 

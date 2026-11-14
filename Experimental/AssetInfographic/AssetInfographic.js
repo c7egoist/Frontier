@@ -4,28 +4,12 @@
 
 import { DefaultCatalogue } from "./DefaultCatalogue.js";
 
-const Query = (Id) => document.getElementById(Id);
-const StorageKey = "Frontier.AssetInfographic.Catalogue";
-const Format = (N) => (N >= 1e6 ? (N / 1e6).toFixed(N >= 1e7 ? 0 : 1) + "M" : N >= 1e4 ? Math.round(N / 1e3) + "k" : N >= 1e3 ? (N / 1e3).toFixed(1) + "k" : String(Math.round(N)));
-const Escape = (Text) => String(Text ?? "").replace(/[&<>"']/g, (C) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[C]);
-const Tones = { ok: "#3fbf5a", warn: "#f2a33a", bad: "#e5322d", info: "#7fa6ff", idle: "#9a9aa2" };
-const CategoryHues = ["#e9e9e9", "#8fc7ff", "#c6a6ff", "#ffd27a", "#8fe0b0", "#ff9f8a"];
+import { Query, Format, Escape, Tones, CategoryHues, ComparePalette, Glyph, Icons, ResolveLods, SeededRandom, Sum, BudgetTone, DeriveTrend, SparkPath } from "./Kit.js";
+import { Boards, DeriveIssues } from "./Boards.js";
+import { InstallFloatTip, Toasts, CommandPalette, AnimateCounts } from "./Components.js";
 
-const Glyphs = {
-    boulder: '<path d="M4 17 3 11l4-6 7-1 6 5 1 7-5 4H8z"/><path d="m7 5 2 6-6 0M9 11l5 2 7 3M14 13l-2 8"/>',
-    terrain: '<path d="M2 19 8 9l4 6 3-4 7 8z"/><path d="m8 9 2 3"/>',
-    knot: '<path d="M8 6c4-3 10 0 9 5s-7 7-10 4 0-9 5-9 7 6 3 10-10 2-10-3 4-7 8-6"/>',
-    column: '<path d="M6 3h12M7 21h10M8 3v18M12 3v18M16 3v18M5 21h14"/>',
-    character: '<circle cx="12" cy="6" r="3"/><path d="M6 21v-6a6 6 0 0 1 12 0v6M9 13l-3 4M15 13l3 4"/>',
-    vehicle: '<path d="M3 15v-3l2-5h14l2 5v3z"/><circle cx="7.5" cy="16.5" r="2"/><circle cx="16.5" cy="16.5" r="2"/><path d="M5 12h14"/>',
-    tree: '<path d="M12 3 6 12h3l-4 6h14l-4-6h3z"/><path d="M12 18v3"/>',
-    crate: '<path d="M4 7l8-4 8 4v10l-8 4-8-4z"/><path d="M4 7l8 4 8-4M12 11v10"/>',
-    building: '<path d="M4 21V8l8-5 8 5v13z"/><path d="M9 21v-6h6v6M8 10h2M14 10h2"/>',
-    lamp: '<path d="M12 3v4M7 7h10l-2 6H9z"/><path d="M12 13v8M9 21h6"/>',
-    bus: '<rect x="4" y="3" width="16" height="15" rx="3"/><path d="M4 11h16M8 18v3M16 18v3"/><circle cx="8" cy="14.5" r="1"/><circle cx="16" cy="14.5" r="1"/>',
-    generic: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M4 12h16M12 4v16"/>',
-};
-const Glyph = (Name, Extra = "") => `<svg viewBox="0 0 24 24" aria-hidden="true" ${Extra}>${Glyphs[Name] || Glyphs.generic}</svg>`;
+const StorageKey = "Frontier.AssetInfographic.Catalogue";
+const BoardByLabel = { overview: "Atlas", "live map": "Atlas", map: "Atlas", atlas: "Atlas", library: "Library", assets: "Library", budgets: "Budgets", budget: "Budgets", analytics: "Analytics", insights: "Analytics", pipeline: "Pipeline", builds: "Pipeline", issues: "Issues", incidents: "Issues" };
 
 class AssetInfographic {
     constructor() {
@@ -38,14 +22,30 @@ class AssetInfographic {
         this.MetricIndex = 0;
         this.Section = 0;
         this.View = { X: 0, Y: 0, Scale: 1 };
+        this.Compare = [];
+        this.Brush = null;
+        this.LastBoard = null;
+        this.BoardPrefs = {
+            LibraryMode: "Grid", LibrarySort: ["Label", 1], LibraryGroup: false,
+            TreemapMetric: "TextureMb", HeatMode: "Requests",
+            IssueSeverity: "All", Expanded: new Set(), Snoozed: new Set(),
+        };
     }
 
     Start() {
         let Stored = null;
         try { Stored = JSON.parse(localStorage.getItem(StorageKey) || "null"); } catch { Stored = null; }
-        this.ApplyCatalogue(Stored || DefaultCatalogue, { Persist: false });
+        InstallFloatTip();
+        this.Toasts = new Toasts(Query("Toasts"));
+        this.Palette = new CommandPalette(this);
+        this.ApplyCatalogue(Stored || structuredClone(DefaultCatalogue), { Persist: false });
         this.ConstructInteractions();
-        new ResizeObserver(() => { this.FitAtlas(); this.RenderChart(); }).observe(document.body);
+        let ResizeTimer;
+        new ResizeObserver(() => {
+            this.FitAtlas(); this.RenderChart();
+            clearTimeout(ResizeTimer);
+            ResizeTimer = setTimeout(() => { if (this.ResolveBoard() !== "Atlas") this.RenderBoard(); }, 120);
+        }).observe(document.body);
         window.AssetInfographic = this; // inspection handle
     }
 
@@ -56,6 +56,9 @@ class AssetInfographic {
         this.Catalogue = Catalogue;
         for (const Metric of Catalogue.Metrics) if (!Array.isArray(Metric.Series)) Metric.Series = SynthesiseSeries(Metric);
         if (!Catalogue.Assets.some((Asset) => Asset.Id === this.SelectedId)) this.SelectedId = Catalogue.Selected || Catalogue.Assets[0].Id;
+        this.Compare = this.Compare.filter((Id) => Catalogue.Assets.some((Asset) => Asset.Id === Id));
+        this.Brush = null;
+        this.Section = Math.min(this.Section, Catalogue.Sections.length - 1);
         this.MetricIndex = Math.min(this.MetricIndex, Catalogue.Metrics.length - 1);
         if (Persist) try { localStorage.setItem(StorageKey, JSON.stringify(StripSynthesised(Catalogue))); } catch { /* quota */ }
         if (UpdateEditor) Query("DatasetText").value = JSON.stringify(StripSynthesised(Catalogue), null, 2);
@@ -69,8 +72,9 @@ class AssetInfographic {
     Category(Key) { return this.Catalogue.Categories.find((Category) => Category.Key === Key) || { Key, Label: Key, Icon: "generic" }; }
     Status(Key) { return this.Catalogue.Statuses.find((Status) => Status.Key === Key) || { Key, Label: Key, Tone: "idle" }; }
 
-    Matches(Asset) {
-        if (this.CategoryFilter && Asset.Category !== this.CategoryFilter) return false;
+    Matches(Asset, { IgnoreCategory = false, IgnoreBrush = false } = {}) {
+        if (!IgnoreCategory && this.CategoryFilter && Asset.Category !== this.CategoryFilter) return false;
+        if (!IgnoreBrush && this.Brush && !this.Brush.has(Asset.Id)) return false;
         if (this.StatusFilter && Asset.Status !== this.StatusFilter) return false;
         if (this.SearchText) {
             const Haystack = `${Asset.Label} ${Asset.Id} ${Asset.Category} ${(Asset.Tags || []).join(" ")}`.toLowerCase();
@@ -89,12 +93,19 @@ class AssetInfographic {
         this.RenderLayerSegment();
         this.RenderLegend();
         this.RenderDropdown();
+        this.RenderComposition();
+        this.RenderCompareTray();
+        this.RenderBoard();
     }
 
     // ------------------------------------------------------------- header + filters
     RenderNav() {
         const Sections = this.Catalogue.Sections;
-        Query("NavPills").innerHTML = Sections.map((Section, Index) => `<button data-section="${Index}" ${Index === this.Section ? 'aria-current="page"' : ""}>${Escape(Section.Label)}</button>`).join("");
+        const Urgent = DeriveIssues(this).filter((Issue) => Issue.Severity === "Critical" && !this.BoardPrefs.Snoozed.has(Issue.Id)).length;
+        Query("NavPills").innerHTML = Sections.map((Section, Index) => {
+            const Badge = this.ResolveBoard(Section) === "Issues" && Urgent ? `<span class="NavBadge" aria-label="${Urgent} critical">${Urgent}</span>` : "";
+            return `<button data-section="${Index}" ${Index === this.Section ? 'aria-current="page"' : ""} title="${Escape(Section.Label)} (${Index + 1})">${Escape(Section.Label)}${Badge}</button>`;
+        }).join("");
         const Section = Sections[this.Section] || Sections[0];
         Query("Headline").textContent = Section.Headline || this.Catalogue.Title;
     }
@@ -220,6 +231,7 @@ class AssetInfographic {
             <div class="ChainBars">${Lods.slice(0, 7).map((Count, Level) => `<div class="ChainBar"><span>L${Level}</span><i style="width:${Math.max(3, (Count / Max) * 100)}%;animation-delay:${Level * 40}ms"></i><span>${Format(Count)}</span></div>`).join("") || '<p class="Hint">No LOD data.</p>'}</div>`;
 
         const Budget = Math.max(0, Math.min(1.5, Asset.BudgetUse ?? 0.5));
+        const Trend = DeriveTrend(Asset), TrendTop = Math.max(1.15, ...Trend) * 1.05;
         const Circumference = 2 * Math.PI * 30;
         Query("DetailPanel").innerHTML = `<header><div><h3>${Escape(Asset.Label)}</h3><div class="Sub">${Escape(Asset.Owner || "Unassigned")} · updated ${Escape(Asset.Updated || "—")}</div></div><span class="Spacer"></span>
                 <button class="IconButton" id="FocusSelected" aria-label="Centre on ${Escape(Asset.Label)}"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v3M8 12v3M1 8h3M12 8h3"/></svg></button></header>
@@ -231,8 +243,16 @@ class AssetInfographic {
                 <div class="Fact"><b>${Asset.TextureMb ?? "—"}<small> MB</small></b><span>Texture memory</span></div>
                 <div class="Fact"><b>${Asset.Instances ?? "—"}</b><span>Placed instances</span></div>
             </div>
-            <div class="Tags">${(Asset.Tags || []).map((Tag) => `<span>${Escape(Tag)}</span>`).join("")}</div>`;
+            <div class="Trend" data-tip="${Escape(`Budget use · last 12 weeks\n${Trend.map((V) => Math.round(V * 100) + "%").join(" → ")}`)}"><span>12-week budget trend</span>
+                <svg viewBox="0 0 220 40" preserveAspectRatio="none" aria-hidden="true"><line class="Limit" x1="0" x2="220" y1="${40 - 4 - (1 / TrendTop) * 32}" y2="${40 - 4 - (1 / TrendTop) * 32}"/><path class="Area" d="${SparkPath(Trend, 220, 40, 4, [0, TrendTop])}L216 40L4 40Z"/><path d="${SparkPath(Trend, 220, 40, 4, [0, TrendTop])}" style="stroke:${BudgetTone(Budget)}"/></svg></div>
+            <div class="Tags">${(Asset.Tags || []).map((Tag) => `<span>${Escape(Tag)}</span>`).join("")}</div>
+            <div class="DetailActions">
+                <div class="StatusSwitch" role="group" aria-label="Change status">${this.Catalogue.Statuses.map((Entry) => `<button data-status-set="${Escape(Entry.Key)}" aria-pressed="${Entry.Key === Asset.Status}" style="--dot:${Tones[Entry.Tone] || Tones.idle}"><i></i>${Escape(Entry.Label)}</button>`).join("")}</div>
+                <button class="GhostPill" id="CompareSelected" aria-pressed="${this.Compare.includes(Asset.Id)}">${Icons.star}${this.Compare.includes(Asset.Id) ? "Comparing" : "Compare"}</button>
+            </div>`;
         Query("FocusSelected").addEventListener("click", () => this.FocusAsset(Asset));
+        Query("CompareSelected").addEventListener("click", () => this.ToggleCompare(Asset.Id));
+        for (const Button of Query("DetailPanel").querySelectorAll("[data-status-set]")) Button.addEventListener("click", () => this.SetStatus(Asset.Id, Button.dataset.statusSet));
 
         Query("AssetDropdownIcon").innerHTML = Glyph(Asset.Icon || Category.Icon);
         Query("AssetDropdownLabel").textContent = Asset.Label;
@@ -248,6 +268,8 @@ class AssetInfographic {
         this.SelectedId = Id;
         this.RenderSelection();
         this.RenderDropdown();
+        this.RenderCompareTray();
+        if (this.ResolveBoard() !== "Atlas") this.RenderBoard();
     }
 
     // ------------------------------------------------------------- pins + atlas
@@ -294,6 +316,8 @@ class AssetInfographic {
             Pin.classList.toggle("Dim", !this.Matches(Asset));
             Pin.style.setProperty("--pin", this.PinColour(Asset));
         }
+        this.RenderComposition();
+        this.RenderBoard();
     }
 
     RenderAtlasBackground() {
@@ -354,15 +378,196 @@ class AssetInfographic {
     }
 
     // ------------------------------------------------------------- interactions
+    // ------------------------------------------------------------- boards + shared actions
+    ResolveBoard(Section = this.Catalogue.Sections[this.Section]) {
+        if (!Section) return "Atlas";
+        if (Section.Board && (Section.Board === "Atlas" || Boards[Section.Board])) return Section.Board;
+        return BoardByLabel[String(Section.Label).toLowerCase()] || "Atlas";
+    }
+
+    GoSection(Index) {
+        this.Section = Math.max(0, Math.min(this.Catalogue.Sections.length - 1, Index));
+        const Section = this.Catalogue.Sections[this.Section];
+        if (Section.Metric !== undefined) this.MetricIndex = Math.min(Section.Metric, this.Catalogue.Metrics.length - 1);
+        this.RenderNav();
+        this.RenderMetric();
+        this.RenderCompareTray();
+        this.RenderBoard();
+    }
+
+    RenderBoard() {
+        if (!this.Catalogue) return;
+        const Name = this.ResolveBoard(), Host = Query("BoardHost");
+        document.body.dataset.board = Name;
+        document.body.classList.toggle("BoardMode", Name !== "Atlas");
+        if (Name === "Atlas") { Host.hidden = true; Host.innerHTML = ""; this.LastBoard = Name; return; }
+        const Entering = this.LastBoard !== Name;
+        const Scroll = Entering ? 0 : Host.scrollTop;
+        Host.hidden = false;
+        Host.innerHTML = Boards[Name].Render(this);
+        Boards[Name].Mount?.(this, Host);
+        Host.scrollTop = Scroll;
+        if (Entering) { Host.classList.remove("Entering"); void Host.offsetWidth; Host.classList.add("Entering"); AnimateCounts(Host); }
+        this.LastBoard = Name;
+    }
+
+    CategoryHue(Key) { return CategoryHues[Math.max(0, this.Catalogue.Categories.findIndex((Category) => Category.Key === Key)) % CategoryHues.length]; }
+    StatusKeyByTone(Tone) { return this.Catalogue.Statuses.find((Status) => Status.Tone === Tone)?.Key; }
+
+    // Budgets live in the catalogue; missing values get sensible defaults (≈10–15% headroom).
+    get Budgets() {
+        const C = this.Catalogue;
+        C.Budgets ??= {};
+        const B = C.Budgets;
+        B.TextureMb ??= Math.ceil(Sum(C.Assets, (Asset) => Asset.TextureMb) * 1.1 / 10) * 10;
+        B.Triangles ??= Math.ceil(Sum(C.Assets, (Asset) => Asset.Triangles) * 1.1 / 1e4) * 1e4;
+        B.Categories ??= {};
+        for (const Category of C.Categories) B.Categories[Category.Key] ??= Math.ceil(Sum(C.Assets.filter((Asset) => Asset.Category === Category.Key), (Asset) => Asset.TextureMb) * 1.15 / 5) * 5 || 10;
+        return B;
+    }
+
+    Toast(Message, Options) { this.Toasts.Show(Message, Options); }
+
+    Commit({ Render = true } = {}) {
+        try { localStorage.setItem(StorageKey, JSON.stringify(StripSynthesised(this.Catalogue))); } catch { /* sandboxed or full */ }
+        Query("DatasetText").value = JSON.stringify(StripSynthesised(this.Catalogue), null, 2);
+        if (Render) this.RenderAll();
+    }
+
+    // Apply a change to one asset, persist, and offer an undo toast.
+    Mutate(Id, Change, Message, Tone = "info") {
+        const Index = this.Assets.findIndex((Asset) => Asset.Id === Id);
+        if (Index < 0) return;
+        const Before = structuredClone(this.Assets[Index]);
+        Change(this.Assets[Index]);
+        this.Commit();
+        this.Toast(Message, { Tone, Action: { Label: "Undo", Run: () => { this.Assets[Index] = Before; this.Commit(); } } });
+    }
+
+    SetStatus(Id, Key) {
+        const Asset = this.Assets.find((Entry) => Entry.Id === Id);
+        if (!Asset || Asset.Status === Key) return;
+        const Status = this.Status(Key);
+        this.Mutate(Id, (Target) => { Target.Status = Key; }, `${Asset.Label} → ${Status.Label}`, Status.Tone);
+    }
+
+    ToggleCompare(Id) {
+        const Asset = this.Assets.find((Entry) => Entry.Id === Id);
+        if (!Asset) return;
+        if (this.Compare.includes(Id)) this.Compare = this.Compare.filter((Other) => Other !== Id);
+        else {
+            if (this.Compare.length >= 4) { this.Toast("Compare holds up to 4 assets — remove one first", { Tone: "warn" }); return; }
+            this.Compare = [...this.Compare, Id];
+        }
+        this.RenderSelection();
+        this.RenderCompareTray();
+        this.RenderBoard();
+    }
+
+    RenderCompareTray() {
+        const Tray = Query("CompareTray");
+        const Items = this.Compare.map((Id) => this.Assets.find((Asset) => Asset.Id === Id)).filter(Boolean);
+        Tray.hidden = !Items.length;
+        if (!Items.length) return;
+        const AnalyticsIndex = this.Catalogue.Sections.findIndex((Section) => this.ResolveBoard(Section) === "Analytics");
+        Tray.innerHTML = `<span class="TrayLabel">${Icons.compare}Compare</span>${Items.map((Asset, Index) => `<span class="TrayItem" style="--c:${ComparePalette[Index % 4]}"><i></i><button class="TrayName" data-tray-select="${Escape(Asset.Id)}">${Escape(Asset.Label)}</button><button class="IconButton" data-tray-remove="${Escape(Asset.Id)}" aria-label="Remove ${Escape(Asset.Label)}">${Icons.close}</button></span>`).join("")}
+            ${AnalyticsIndex >= 0 && this.Section !== AnalyticsIndex ? `<button class="GhostPill Primary" data-tray-open="${AnalyticsIndex}">Open radar</button>` : ""}<button class="GhostPill" data-tray-clear>Clear</button>`;
+    }
+
+    // Left-column infographic: texture memory composition by category + library health.
+    RenderComposition() {
+        const Host = Query("CompositionPanel");
+        if (!Host || !this.Catalogue) return;
+        const B = this.Budgets;
+        const Rows = this.Catalogue.Categories.map((Category) => ({ Category, Used: Sum(this.Assets.filter((Asset) => Asset.Category === Category.Key), (Asset) => Asset.TextureMb) })).filter((Row) => Row.Used > 0);
+        const Total = Sum(Rows, (Row) => Row.Used), Scale = Math.max(Total, B.TextureMb);
+        const Healthy = this.Assets.filter((Asset) => this.Status(Asset.Status).Tone === "ok" && (Asset.BudgetUse ?? 0) <= 1).length;
+        const Health = Healthy / this.Assets.length, C = 2 * Math.PI * 22;
+        const Instances = Sum(this.Assets, (Asset) => Asset.Instances), Depth = Sum(this.Assets, (Asset) => ResolveLods(Asset).length) / this.Assets.length;
+        Host.innerHTML = `<header class="PanelHeader"><h3>Texture memory</h3><span class="Spacer"></span><span class="Hint"><b style="color:${BudgetTone(Total / B.TextureMb)}">${Math.round(Total)}</b> / ${B.TextureMb} MB</span></header>
+            <div class="Composition">${Rows.map(({ Category, Used }) => `<button style="flex:0 0 ${(Used / Scale) * 100}%;background:${this.CategoryHue(Category.Key)}" data-composition="${Escape(Category.Key)}" aria-pressed="${this.CategoryFilter === Category.Key}"
+                data-tip="${Escape(`${Category.Label}
+${Math.round(Used)} MB · ${((Used / Total) * 100).toFixed(1)}% of used
+budget ${B.Categories[Category.Key]} MB`)}"></button>`).join("")}<i class="BudgetTick" style="left:${(B.TextureMb / Scale) * 100}%" data-tip="Budget ${B.TextureMb} MB"></i></div>
+            <ul class="CompositionLegend">${Rows.map(({ Category, Used }) => `<li><i style="background:${this.CategoryHue(Category.Key)}"></i>${Escape(Category.Label)}<b>${((Used / Total) * 100).toFixed(0)}%</b></li>`).join("")}</ul>
+            <div class="HealthRow">
+                <div class="Health" data-tip="${Escape(`Library health
+${Healthy} of ${this.Assets.length} assets are ready and within budget`)}"><svg viewBox="0 0 54 54" aria-hidden="true"><circle class="Track" cx="27" cy="27" r="22"/><circle class="Fill" cx="27" cy="27" r="22" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - Health)}" style="stroke:${Health < 0.5 ? Tones.warn : Tones.ok}"/></svg><b>${Math.round(Health * 100)}</b></div>
+                <div class="HealthFacts"><span><b>${Format(Instances)}</b>placed instances</span><span><b>${Depth.toFixed(1)}</b>avg LOD levels</span><span><b>${this.Assets.length}</b>assets</span></div>
+            </div>`;
+    }
+
+    ConstructCommands() {
+        const Commands = [];
+        this.Catalogue.Sections.forEach((Section, Index) => Commands.push({ Group: "Go to", Label: Section.Label, Sub: Section.Headline, Keys: String(Index + 1), Icon: Icons.chevron, Run: () => this.GoSection(Index) }));
+        for (const Asset of this.Assets) Commands.push({
+            Group: "Assets", Label: Asset.Label, Sub: `${Asset.Id} · ${this.Category(Asset.Category).Label} · ${this.Status(Asset.Status).Label}`, Icon: Glyph(Asset.Icon || this.Category(Asset.Category).Icon),
+            Run: () => { this.Select(Asset.Id); if (this.ResolveBoard() === "Atlas") this.FocusAsset(Asset); },
+        });
+        const Selected = this.Selected;
+        Commands.push(
+            { Group: "Actions", Label: this.Compare.includes(Selected.Id) ? `Remove ${Selected.Label} from compare` : `Compare ${Selected.Label}`, Keys: "C", Icon: Icons.star, Run: () => this.ToggleCompare(Selected.Id) },
+            { Group: "Actions", Label: "Locate selected on map", Keys: "L", Icon: Icons.locate, Run: () => this.LocateAsset(Selected.Id) },
+            ...["Status", "Category", "Budget"].map((Layer) => ({ Group: "Actions", Label: `Colour pins by ${Layer}`, Icon: Icons.grid, Run: () => { this.Layer = Layer; this.RenderLayerSegment(); this.RefreshFilters(); } })),
+            { Group: "Actions", Label: "Clear all filters", Keys: "X", Icon: Icons.close, Run: () => this.ClearFilters() },
+            { Group: "Actions", Label: "Next metric", Icon: Icons.chevron, Run: () => { this.MetricIndex = (this.MetricIndex + 1) % this.Catalogue.Metrics.length; this.RenderMetric(); } },
+            { Group: "Actions", Label: "Reset map view", Icon: Icons.locate, Run: () => this.FitAtlas() },
+            { Group: "Data", Label: "Edit catalogue JSON", Icon: Icons.list, Run: () => Query("EditButton").click() },
+            { Group: "Data", Label: "Import catalogue JSON", Icon: Icons.list, Run: () => Query("DatasetInput").click() },
+            { Group: "Data", Label: "Download catalogue", Icon: Icons.list, Run: () => Query("ExportButton").click() },
+            { Group: "Data", Label: "Use a background image", Icon: Icons.grid, Run: () => Query("ImageInput").click() },
+        );
+        for (const Status of this.Catalogue.Statuses) if (Status.Key !== Selected.Status) Commands.push({ Group: "Actions", Label: `Mark ${Selected.Label} as ${Status.Label}`, Icon: Icons.wrench, Run: () => this.SetStatus(Selected.Id, Status.Key) });
+        return Commands;
+    }
+
+    LocateAsset(Id) {
+        const AtlasIndex = this.Catalogue.Sections.findIndex((Section) => this.ResolveBoard(Section) === "Atlas");
+        this.Select(Id);
+        if (AtlasIndex >= 0 && this.Section !== AtlasIndex) this.GoSection(AtlasIndex);
+        this.FocusAsset(this.Selected);
+    }
+
+    ClearFilters() {
+        this.CategoryFilter = null; this.StatusFilter = null; this.Brush = null; this.SearchText = "";
+        Query("SearchInput").value = "";
+        this.RefreshFilters();
+    }
+
     ConstructInteractions() {
+        // Delegated clicks inside the active board.
+        Query("BoardHost").addEventListener("click", (Event) => {
+            const Element = Event.target.closest("[data-act]");
+            if (!Element) return;
+            const Name = Element.dataset.act, Board = Boards[this.ResolveBoard()];
+            if (Board?.Act?.(this, Name, Element, Event)) return;
+            if (Name === "select") this.Select(Element.dataset.asset);
+            else if (Name === "compare") { Event.stopPropagation(); this.ToggleCompare(Element.dataset.asset); }
+            else if (Name === "locate") this.LocateAsset(Element.dataset.asset);
+        });
+        Query("BoardHost").addEventListener("keydown", (Event) => {
+            if ((Event.key === "Enter" || Event.key === " ") && Event.target.matches("[data-act='select']")) { this.Select(Event.target.dataset.asset); Event.preventDefault(); }
+        });
+        Query("CompositionPanel").addEventListener("click", (Event) => {
+            const Segment = Event.target.closest("[data-composition]");
+            if (!Segment) return;
+            this.CategoryFilter = this.CategoryFilter === Segment.dataset.composition ? null : Segment.dataset.composition;
+            this.RefreshFilters();
+        });
+        Query("CompareTray").addEventListener("click", (Event) => {
+            const Target = Event.target.closest("button");
+            if (!Target) return;
+            if (Target.dataset.traySelect) this.Select(Target.dataset.traySelect);
+            else if (Target.dataset.trayRemove) this.ToggleCompare(Target.dataset.trayRemove);
+            else if (Target.dataset.trayOpen) this.GoSection(Number(Target.dataset.trayOpen));
+            else if (Target.hasAttribute("data-tray-clear")) { this.Compare = []; this.RenderSelection(); this.RenderCompareTray(); this.RenderBoard(); }
+        });
+        Query("PaletteButton").addEventListener("click", () => this.Palette.Open());
+
         Query("NavPills").addEventListener("click", (Event) => {
             const Button = Event.target.closest("[data-section]");
             if (!Button) return;
-            this.Section = Number(Button.dataset.section);
-            const Section = this.Catalogue.Sections[this.Section];
-            if (Section.Metric !== undefined) this.MetricIndex = Math.min(Section.Metric, this.Catalogue.Metrics.length - 1);
-            this.RenderNav();
-            this.RenderMetric();
+            this.GoSection(Number(Button.dataset.section));
         });
         Query("CategoryRow").addEventListener("click", (Event) => {
             const Chip = Event.target.closest("[data-category]");
@@ -473,12 +678,21 @@ class AssetInfographic {
         Query("DatasetInput").addEventListener("change", (Event) => { if (Event.target.files[0]) this.ImportFile(Event.target.files[0]); Event.target.value = ""; });
         Query("ImageInput").addEventListener("change", (Event) => { if (Event.target.files[0]) this.ImportFile(Event.target.files[0]); Event.target.value = ""; });
         const Veil = Query("DropVeil");
-        window.addEventListener("dragover", (Event) => { Event.preventDefault(); Veil.hidden = false; });
+        const CarriesFiles = (Event) => [...(Event.dataTransfer?.types || [])].includes("Files");
+        window.addEventListener("dragover", (Event) => { if (!CarriesFiles(Event)) return; Event.preventDefault(); Veil.hidden = false; });
         window.addEventListener("dragleave", (Event) => { if (!Event.relatedTarget) Veil.hidden = true; });
-        window.addEventListener("drop", (Event) => { Event.preventDefault(); Veil.hidden = true; const File_ = Event.dataTransfer.files[0]; if (File_) this.ImportFile(File_); });
+        window.addEventListener("drop", (Event) => { if (!CarriesFiles(Event)) return; Event.preventDefault(); Veil.hidden = true; const File_ = Event.dataTransfer.files[0]; if (File_) this.ImportFile(File_); });
         window.addEventListener("keydown", (Event) => {
-            if (Event.target.matches("input, textarea")) return;
+            if ((Event.ctrlKey || Event.metaKey) && Event.key.toLowerCase() === "k") { Event.preventDefault(); this.Palette.IsOpen ? this.Palette.Close() : this.Palette.Open(); return; }
+            if (this.Palette.IsOpen) return;
+            if (Event.target.matches("input, textarea, [role='slider']")) return;
             if (Event.key === "Escape") { SetDrawer(false); SetOpen(false); }
+            if (Event.ctrlKey || Event.metaKey || Event.altKey) return;
+            if (/^[1-9]$/.test(Event.key) && Number(Event.key) <= this.Catalogue.Sections.length) { this.GoSection(Number(Event.key) - 1); return; }
+            if (Event.key === "/") { Event.preventDefault(); Query("SearchInput").focus(); return; }
+            if (Event.key.toLowerCase() === "c") { this.ToggleCompare(this.SelectedId); return; }
+            if (Event.key.toLowerCase() === "l") { this.LocateAsset(this.SelectedId); return; }
+            if (Event.key.toLowerCase() === "x") { this.ClearFilters(); return; }
             const Index = this.Assets.findIndex((Asset) => Asset.Id === this.SelectedId);
             if (Event.key === "ArrowRight" || Event.key === "ArrowLeft") {
                 const Visible = this.Assets.filter((Asset) => this.Matches(Asset));
@@ -494,13 +708,14 @@ class AssetInfographic {
     async ImportFile(File_) {
         if (File_.type.startsWith("image/")) {
             const Reader = new FileReader();
-            Reader.onload = () => { this.BackgroundOverride = Reader.result; this.RenderAtlasBackground(); };
+            Reader.onload = () => { this.BackgroundOverride = Reader.result; this.RenderAtlasBackground(); this.Toast("Background image applied", { Tone: "ok" }); };
             Reader.readAsDataURL(File_);
             return;
         }
         try {
             this.ApplyCatalogue(JSON.parse(await File_.text()));
             Query("DatasetError").textContent = "";
+            this.Toast(`Loaded ${this.Assets.length} assets from ${File_.name}`, { Tone: "ok" });
         } catch (Failure) {
             Query("EditorDrawer").hidden = false;
             Query("EditButton").setAttribute("aria-expanded", "true");
@@ -555,23 +770,12 @@ function SynthesiseSeries(Metric) {
     return Series;
 }
 
-function ResolveLods(Asset) {
-    if (Array.isArray(Asset.Lods)) return Asset.Lods;
-    const Count = Asset.LodLevels ?? 0, Base = Asset.Triangles ?? 0;
-    return Array.from({ length: Count }, (_, Level) => Math.round(Base / 2 ** Level));
-}
-
 function InterpolateAxis(Axis, T) {
     const Parse = (Label) => { const M = /^(\d{1,2}):(\d{2})$/.exec(Label); return M ? Number(M[1]) * 60 + Number(M[2]) : null; };
     const Start = Parse(Axis[0]), End = Parse(Axis[Axis.length - 1]);
     if (Start === null || End === null) return Axis[Math.round(T * (Axis.length - 1))];
     const Minutes = Math.round(Start + (End - Start) * T);
     return `${String(Math.floor(Minutes / 60)).padStart(2, "0")}:${String(Minutes % 60).padStart(2, "0")}`;
-}
-
-function SeededRandom(Seed) {
-    let S = (Seed >>> 0) || 1;
-    return () => { S = (Math.imul(S, 1664525) + 1013904223) >>> 0; return S / 4294967296; };
 }
 
 // ----------------------------------------------------------------- relief atlas

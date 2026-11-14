@@ -9,6 +9,8 @@ export const DefaultCatalogue = {
     Background: null,
     Selected: "ENV-6023",
     HighlightStatuses: ["Ready", "Broken"],
+    // Budgets drive the Budgets board (drag markers / sliders there to edit). Omit for automatic ~10% headroom.
+    Budgets: { TextureMb: 520, Triangles: 1250000, Categories: { Props: 90, Environment: 200, Characters: 120, Vehicles: 110 } },
     Sections: [
         { Label: "Overview", Headline: "Asset Manager", Metric: 0 },
         { Label: "Library", Headline: "Asset Library", Metric: 0 },
