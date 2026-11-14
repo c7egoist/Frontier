@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Virtual Geometry Editor · Frontier</title>
+    <link rel="preload" href="./Fonts/dm-sans-latin-300-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="./VirtualGeometryEditor.css">
+</head>
+<body>
+    <main class="Workspace" id="Workspace">
+        <!-- Outliner -->
+        <aside class="Dock Left" aria-label="Outliner">
+            <div class="TabStrip" role="tablist" aria-label="Left dock">
+                <button class="Tab" role="tab" aria-selected="true" aria-controls="OutlinerPanel" id="OutlinerTab">Outliner</button>
+                <button class="Tab" role="tab" aria-selected="false" aria-controls="LevelsPanel" id="LevelsTab">Levels</button>
+            </div>
+            <section class="TabPanel" id="OutlinerPanel" role="tabpanel" aria-labelledby="OutlinerTab">
+                <div class="TileRow">
+                    <div class="Tile"><b id="OutlinerVisible">0</b><span>Visible instances</span></div>
+                    <div class="Tile"><b id="OutlinerHidden">0</b><span>Culled instances</span></div>
+                </div>
+                <label class="Search">
+                    <svg class="Icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+                    <input type="search" id="OutlinerSearch" placeholder="Search instances" aria-label="Search instances">
+                </label>
+                <div id="OutlinerCollections"></div>
+            </section>
+            <section class="TabPanel" id="LevelsPanel" role="tabpanel" aria-labelledby="LevelsTab" hidden>
+                <h4>Cluster DAG levels</h4>
+                <div id="LevelSummary"></div>
+                <h4>Live cut composition</h4>
+                <div class="LevelBars" id="CutComposition"></div>
+                <h4>Discrete chain</h4>
+                <div id="DiscreteSummary"></div>
+            </section>
+            <footer class="DockFooter"><span>Assets <b id="FooterAssets">0</b></span><span>DAG clusters <b id="FooterClusters">0</b></span><span>GPU <b id="FooterBytes">0</b></span></footer>
+        </aside>
+
+        <!-- Viewport -->
+        <section class="Viewport" id="Viewport" aria-label="Viewport">
+            <canvas id="GlCanvas" tabindex="0" aria-label="3D viewport. Drag to orbit, right-drag to pan, wheel to zoom, click to pick a cluster."></canvas>
+            <canvas id="GpuCanvas" tabindex="0" hidden aria-label="3D viewport (WebGPU)."></canvas>
+
+            <div class="ViewportTop">
+                <div class="Segmented" role="group" aria-label="LOD mode" id="ModeSegment">
+                    <button data-mode="Cluster" aria-pressed="true" title="Nanite-style cluster DAG cut (1)">Cluster DAG</button>
+                    <button data-mode="Discrete" aria-pressed="false" title="Classic discrete LOD chain with hysteresis and cross-fade (2)">Discrete</button>
+                    <button data-mode="Compare" aria-pressed="false" title="Split screen: discrete left, cluster right (3)">Compare</button>
+                </div>
+                <div class="HudStack">
+                    <div class="Overlay" id="Hud" aria-live="off"></div>
+                    <div class="Overlay Legend" id="Legend" hidden></div>
+                </div>
+            </div>
+
+            <div class="Notch" id="Notch">
+                <button class="NotchHandle" id="NotchHandle" aria-expanded="false" aria-controls="NotchDashboard">
+                    <svg class="Shape" viewBox="0 0 200 30" preserveAspectRatio="none" aria-hidden="true"><path d="M0 0 H200 L184 24 Q180 30 172 30 H28 Q20 30 16 24 Z" fill="#222"/></svg>
+                    <svg class="Icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
+                    <span id="NotchLabel">Quick tools</span>
+                </button>
+                <div class="NotchDashboard" id="NotchDashboard" role="group" aria-label="Quick tools"></div>
+            </div>
+
+            <div class="SplitDivider" id="SplitDivider" hidden role="separator" aria-label="Compare split" aria-orientation="vertical" tabindex="0"></div>
+            <span class="SplitLabel" id="SplitLabelLeft" hidden>Discrete LOD</span>
+            <span class="SplitLabel" id="SplitLabelRight" hidden>Cluster DAG</span>
+            <div class="Overlay FreezeBanner" id="FreezeBanner" hidden>Cut frozen — fly around to inspect what the frozen view selected and culled. <kbd>F</kbd> to release.</div>
+            <div class="Overlay Toast" id="Toast" style="opacity:0"></div>
+
+            <div class="ProgressVeil" id="ProgressVeil">
+                <div class="ProgressPanel" role="status" aria-live="polite">
+                    <h3 id="ProgressTitle">Building cluster DAGs…</h3>
+                    <div class="ProgressTrack"><i id="ProgressFill"></i></div>
+                    <div class="ProgressLog" id="ProgressLog"></div>
+                </div>
+            </div>
+
+            <div class="Drawer" id="Drawer">
+                <div class="DrawerHandle" id="DrawerHandle" role="button" tabindex="0" aria-expanded="false" aria-controls="DrawerBody">
+                    <span class="Grip" aria-hidden="true"></span>
+                    <h4>Asset Browser</h4>
+                    <span class="Hint" id="DrawerSummary"></span>
+                    <span class="Spacer"></span>
+                    <label class="Hint" for="LayoutSelect">Layout</label>
+                    <select id="LayoutSelect" aria-label="Scene layout"></select>
+                    <button id="ImportButton" title="Import a Wavefront OBJ (built locally in a worker)">
+                        Import OBJ
+                    </button>
+                    <input type="file" id="ImportInput" accept=".obj" hidden>
+                </div>
+                <div class="DrawerBody" id="DrawerBody"></div>
+            </div>
+        </section>
+
+        <!-- Inspector -->
+        <aside class="Dock Right" aria-label="Inspector">
+            <div class="TabStrip" role="tablist" aria-label="Right dock">
+                <button class="Tab" role="tab" aria-selected="true" aria-controls="InspectorPanel" id="InspectorTab">Inspector</button>
+                <button class="Tab" role="tab" aria-selected="false" aria-controls="StatisticsPanel" id="StatisticsTab">Statistics</button>
+                <button class="Tab" role="tab" aria-selected="false" aria-controls="BuildPanel" id="BuildTab">Build</button>
+            </div>
+            <section class="TabPanel" id="InspectorPanel" role="tabpanel" aria-labelledby="InspectorTab"></section>
+            <section class="TabPanel" id="StatisticsPanel" role="tabpanel" aria-labelledby="StatisticsTab" hidden></section>
+            <section class="TabPanel" id="BuildPanel" role="tabpanel" aria-labelledby="BuildTab" hidden></section>
+        </aside>
+    </main>
+
+    <footer class="StatusBar" id="StatusBar" aria-label="Status">
+        <span><i class="Dot Busy" id="StatusDot"></i><span id="StatusText">Starting…</span></span>
+        <span id="StatusBackend"></span>
+        <span id="StatusTriangles"></span>
+        <span id="StatusTimings"></span>
+        <span class="Push" id="StatusCamera"></span>
+    </footer>
+
+    <script type="module" src="./VirtualGeometryEditor.js"></script>
+</body>
+</html>
