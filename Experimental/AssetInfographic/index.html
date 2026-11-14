@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Asset Infographic · Frontier</title>
+    <link rel="preload" href="./Fonts/dm-sans-latin-300-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="./AssetInfographic.css">
+</head>
+<body>
+    <!-- Full-bleed backdrop: procedural relief atlas (or a dropped image) with asset pins -->
+    <div class="Backdrop" id="Backdrop" aria-label="Asset atlas. Drag to pan, wheel to zoom, click a pin to select an asset.">
+        <div class="AtlasLayer" id="AtlasLayer">
+            <canvas id="AtlasCanvas" aria-hidden="true"></canvas>
+            <img id="AtlasImage" alt="" hidden>
+            <svg class="Routes" id="Routes" viewBox="0 0 1000 625" preserveAspectRatio="none" aria-hidden="true"></svg>
+            <div class="Pins" id="Pins"></div>
+        </div>
+        <div class="Shade" aria-hidden="true"></div>
+    </div>
+
+    <header class="TopBar">
+        <a class="Brand" href="#" aria-label="Frontier asset infographic">
+            <svg viewBox="0 0 40 40" aria-hidden="true"><g stroke="currentColor" stroke-width="3.2" stroke-linecap="round"><path d="M6 20 20 6"/><path d="M8 28 28 8"/><path d="M12 32 32 12"/><path d="M20 34 34 20"/></g></svg>
+        </a>
+        <nav class="NavPills" id="NavPills" aria-label="Sections"></nav>
+        <div class="TopActions">
+            <button class="GhostPill" id="ImportDatasetButton" title="Load your own asset list (JSON)">Import JSON</button>
+            <button class="GhostPill" id="ImportImageButton" title="Use your own background image (or drop one anywhere)">Background</button>
+            <button class="GhostPill" id="EditButton" aria-expanded="false" aria-controls="EditorDrawer">Edit</button>
+            <input type="file" id="DatasetInput" accept=".json,application/json" hidden>
+            <input type="file" id="ImageInput" accept="image/*" hidden>
+        </div>
+    </header>
+
+    <main class="Layout">
+        <!-- Left glass column -->
+        <section class="Column" aria-label="Overview">
+            <div class="CategoryRow" id="CategoryRow" role="group" aria-label="Filter by category"></div>
+
+            <div class="StatusRow" id="StatusRow"></div>
+
+            <article class="Glass ChartPanel" aria-labelledby="MetricTitle">
+                <header class="PanelHeader">
+                    <h2 id="MetricTitle">Budget Efficiency</h2>
+                    <button class="IconButton" id="MetricExpand" aria-label="Cycle metric">
+                        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg>
+                    </button>
+                </header>
+                <div class="BigNumber" id="MetricValue" aria-live="polite"></div>
+                <div class="MetricMeta"><span id="MetricTarget">Target:</span><span class="Spacer"></span><span id="MetricDelta"></span></div>
+                <div class="ChartWrap">
+                    <svg class="Chart" id="Chart" role="img" aria-label="Metric over time"></svg>
+                    <div class="ChartTip" id="ChartTip" hidden></div>
+                </div>
+            </article>
+
+            <div class="BottomRow">
+                <article class="Glass FeaturePanel" id="FeaturePanel" aria-live="polite"></article>
+                <article class="Glass ChainPanel" id="ChainPanel"></article>
+            </div>
+        </section>
+
+        <!-- Right: headline + selectors + detail -->
+        <section class="Stage" aria-label="Asset atlas">
+            <h1 class="Headline" id="Headline">Asset Manager</h1>
+            <div class="SelectorRow">
+                <div class="Dropdown" id="AssetDropdown">
+                    <button class="SelectorPill" id="AssetDropdownButton" aria-haspopup="listbox" aria-expanded="false">
+                        <span class="PillIcon" id="AssetDropdownIcon"></span>
+                        <span id="AssetDropdownLabel">Asset</span>
+                        <svg class="Chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 10 4-4 4 4"/></svg>
+                    </button>
+                    <ul class="DropdownList Glass" id="AssetDropdownList" role="listbox" hidden></ul>
+                </div>
+                <div class="SegmentPill" id="LayerSegment" role="group" aria-label="Pin colouring"></div>
+                <div class="SearchPill">
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+                    <input id="SearchInput" type="search" placeholder="Search assets" aria-label="Search assets">
+                </div>
+            </div>
+
+            <aside class="Glass DetailPanel" id="DetailPanel" aria-live="polite"></aside>
+            <div class="Legend Glass" id="Legend"></div>
+        </section>
+    </main>
+
+    <!-- Dataset editor -->
+    <aside class="Drawer Glass" id="EditorDrawer" aria-label="Edit dataset" hidden>
+        <header class="PanelHeader">
+            <h2>Dataset JSON</h2>
+            <span class="Spacer"></span>
+            <button class="GhostPill" id="ExportButton">Download</button>
+            <button class="GhostPill" id="ResetButton">Reset</button>
+            <button class="IconButton" id="CloseDrawer" aria-label="Close editor"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+        </header>
+        <p class="Hint">Edits apply live. Each asset needs <code>Id</code>, <code>Label</code>, <code>Category</code>, <code>Status</code> and an <code>Atlas</code> position in 0–1.</p>
+        <textarea id="DatasetText" spellcheck="false" aria-label="Dataset JSON"></textarea>
+        <p class="Hint" id="DatasetError" role="alert"></p>
+    </aside>
+
+    <div class="DropVeil" id="DropVeil" hidden><span>Drop a JSON dataset or a background image</span></div>
+
+    <script type="module" src="./AssetInfographic.js"></script>
+</body>
+</html>
