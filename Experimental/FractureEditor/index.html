@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fracture Editor · Frontier</title>
+<link rel="stylesheet" href="./FractureEditor.css">
+</head>
+<body>
+<div id="App" class="fx-app">
+
+  <!-- ============================================================ top bar -->
+  <header class="fx-top">
+    <div class="brand"><span class="brand-mark" data-icon="shatter" data-icon-size="16"></span><b>Fracture</b><small>PER-OBJECT GEOMETRY</small></div>
+    <nav class="crumb" aria-label="Selected object"><span data-icon="chevron" data-icon-size="12" class="muted"></span><span id="CrumbIcon"></span><span id="CrumbName">—</span><span id="CrumbState" class="pill"></span></nav>
+    <div class="top-spacer"></div>
+    <div id="ViewTabs" class="segmented" role="tablist" aria-label="View">
+      <button type="button" class="active" data-view="editor" data-icon="editor" data-icon-size="14">Editor</button>
+      <button type="button" data-view="card" data-icon="inspector" data-icon-size="14">Inspector card</button>
+    </div>
+    <div class="top-actions">
+      <button type="button" id="UndoBtn" class="icon-btn" title="Undo (Ctrl+Z)" aria-label="Undo" data-icon="undo"></button>
+      <button type="button" id="RedoBtn" class="icon-btn" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" data-icon="redo"></button>
+      <span id="SyncBadge" class="sync" title="Recipes are stored per object in localStorage (Frontier.Fracture.v2:…) and sync live with other open windows, including the Project Zero inspector."><span data-icon="sync" data-icon-size="12"></span><span>Synced</span></span>
+      <button type="button" id="KeysBtn" class="icon-btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" data-icon="keyboard"></button>
+    </div>
+  </header>
+
+  <div id="Work" class="fx-work">
+
+    <!-- ============================================================ LEFT: objects -->
+    <aside class="dock left" aria-label="Objects">
+      <div class="dock-heading"><h1>Objects</h1><small id="ObjectCaption">—</small></div>
+      <div class="stats">
+        <div class="stat-tile"><span class="disc live" data-icon="shatter" data-icon-size="12"></span><small>Fracturing</small><strong id="StatFracturing">0</strong></div>
+        <div class="stat-tile"><span class="disc warn" data-icon="bake" data-icon-size="12"></span><small>Need bake</small><strong id="StatNeedBake">0</strong></div>
+      </div>
+      <div class="list-tools">
+        <label class="search-wrap"><span data-icon="search" data-icon-size="14"></span><input id="ObjectSearch" type="search" placeholder="Search objects" aria-label="Search objects"></label>
+        <div id="ObjectFilter" class="segmented small" role="tablist" aria-label="Filter">
+          <button type="button" class="active" data-filter="all">All</button>
+          <button type="button" data-filter="on">On</button>
+          <button type="button" data-filter="bake">Needs bake</button>
+        </div>
+      </div>
+      <div id="ObjectList" class="object-list" role="listbox" aria-label="Scene objects"></div>
+      <div class="dock-foot"><button type="button" id="BakeAllBtn" class="wide" data-icon="bake" data-icon-size="14" disabled>Bake all</button></div>
+    </aside>
+
+    <!-- ============================================================ CENTER: section schematic -->
+    <main class="dock center" aria-label="Fracture section">
+      <div class="stage-head">
+        <div class="stage-title"><h2 id="StageTitle">—</h2><div id="StageMeta" class="chips"></div></div>
+        <div class="stage-tools">
+          <div id="ShadeMode" class="segmented small" role="tablist" aria-label="Shade pieces by">
+            <button type="button" class="active" data-shade="material" title="Material tint (1)">Material</button>
+            <button type="button" data-shade="size" title="Piece size (2)">Size</button>
+            <button type="button" data-shade="release" title="Release order from impact (3)">Release</button>
+          </div>
+          <label class="explode" title="Pull the pieces apart (preview only, not saved)"><span data-icon="explode" data-icon-size="14"></span><input id="Explode" type="range" min="0" max="1" step="0.01" value="0" aria-label="Explode preview"></label>
+          <button type="button" id="RerollBtn" class="icon-btn" title="New seed (R)" aria-label="New seed" data-icon="dice"></button>
+        </div>
+      </div>
+      <div id="StageWell" class="stage-well">
+        <svg id="Stage" viewBox="0 0 1000 640" role="img" aria-label="Fracture section schematic" preserveAspectRatio="xMidYMid meet"></svg>
+        <div id="StageEmpty" class="stage-empty" hidden></div>
+        <div id="StageHint" class="stage-hint">Section through the object centre · drag the amber point to move the impact</div>
+        <div id="BakeVeil" class="bake-veil" hidden><div class="bake-meter"><i id="BakeFill"></i></div><span id="BakeText">Baking…</span></div>
+      </div>
+      <div class="stage-foot">
+        <div class="readouts">
+          <div><b id="RPieces">0</b><small>pieces</small></div>
+          <div><b id="RSmallest">—</b><small>smallest</small></div>
+          <div><b id="RMedian">—</b><small>median</small></div>
+          <div><b id="RLargest">—</b><small>largest</small></div>
+          <div><b id="RMemory">—</b><small id="RMemoryLabel">stored</small></div>
+        </div>
+        <div class="hist-wrap"><div id="Histogram" class="histogram" aria-label="Piece size distribution"></div><div class="hist-axis"><small id="HistLo">—</small><small>piece size</small><small id="HistHi">—</small></div></div>
+      </div>
+    </main>
+
+    <!-- ============================================================ RIGHT: recipe -->
+    <aside class="dock right" aria-label="Recipe">
+      <div id="Recipe" class="recipe"></div>
+    </aside>
+
+    <!-- ============================================================ CARD VIEW (replaces center + right) -->
+    <section id="CardView" class="card-view" hidden aria-label="Inspector card preview">
+      <div class="card-intro"><h2>Inspector card</h2><p>The compact card as it sits in the Project Zero inspector. It edits the same recipe as the editor, live.</p></div>
+      <div class="faux-inspector">
+        <div class="faux-head"><span id="CardObjIcon"></span><b id="CardObjName">—</b><small>Details</small></div>
+        <section class="faux-card"><header><h3>Transform</h3></header><div id="CardTransform" class="rows"></div></section>
+        <div id="CardHost"></div>
+        <section class="faux-card dim"><header><h3>Material</h3><small>…</small></header></section>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div id="KeysOverlay" class="keys-overlay" hidden>
+  <div class="keys-card" role="dialog" aria-label="Keyboard shortcuts">
+    <header><h3>Shortcuts</h3><button type="button" id="KeysClose" class="icon-btn" aria-label="Close">×</button></header>
+    <dl>
+      <dt>Ctrl Z / Ctrl Shift Z</dt><dd>Undo / redo (per object)</dd>
+      <dt>↑ ↓</dt><dd>Previous / next object</dd>
+      <dt>E</dt><dd>Toggle fracture for the object</dd>
+      <dt>R</dt><dd>New seed</dd>
+      <dt>B</dt><dd>Bake (Baked mode)</dd>
+      <dt>1 2 3</dt><dd>Shade by material / size / release</dd>
+      <dt>V</dt><dd>Switch Editor / Inspector card</dd>
+      <dt>Arrow keys on the section</dt><dd>Nudge the impact point (Shift for ×10)</dd>
+    </dl>
+  </div>
+</div>
+<div id="Toast" class="toast" role="status" aria-live="polite"></div>
+<script type="module" src="./FractureEditor.js"></script>
+</body>
+</html>
