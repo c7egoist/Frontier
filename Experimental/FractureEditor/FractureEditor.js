@@ -1,9 +1,10 @@
-// Fracture Editor — UI only.  Per-object fracture recipes (material, break energy, seed, piece ceiling, minimum size,
-// impact point), storage mode (Dynamic / Baked + per-piece SDF) and bake freshness, over a schematic section preview.
+// Fracture Editor — per-object fracture recipes (material, break energy, seed, piece ceiling, minimum size, impact
+// point), storage mode (Dynamic / Baked + per-piece SDF) and bake freshness, around a 3D viewport of the pieces.
 // Recipes persist in the Project Zero format (`Frontier.Fracture.v2:<objectId>` → {Owner, Settings}) and sync live
 // with any other window through `storage` events.  `?object=<id>` opens a given object, as the old launcher did.
 import * as F from './FractureModel.js';
 import { icon } from './Icons.js';
+import { FractureViewport } from './Viewport3D.js';
 
 // ------------------------------------------------------------------ tiny DOM kit
 const $ = (id) => document.getElementById(id);
@@ -36,7 +37,6 @@ const rgb = (c) => `rgb(${c.map((v) => Math.round(Math.max(0, Math.min(255, v)))
 const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
 const RAMP = ['#306bf2', '#29c7c2', '#59d15c', '#f7cc40', '#f04d3d'].map(hex);
 function ramp(t) { t = Math.max(0, Math.min(1, t)) * (RAMP.length - 1); const i = Math.min(RAMP.length - 2, Math.floor(t)); return mix(RAMP[i], RAMP[i + 1], t - i); }
-const AMBER = hex('#ffb238');
 
 // ------------------------------------------------------------------ scene (demo objects standing in for the level)
 const SCENE = [
@@ -61,7 +61,7 @@ const objects = SCENE.map((o) => ({ ...o, owner: F.describe(o.subject, o.values)
 const byId = new Map(objects.map((o) => [o.owner.Id, o]));
 const settings = new Map();
 const history = new Map();
-const state = { selected: objects[0].owner.Id, view: 'editor', shade: 'material', explode: 0, filter: 'all', search: '', baking: null, dragBase: null };
+const state = { selected: objects[0].owner.Id, view: 'editor', shade: 'material', explode: 0, cutaway: false, filter: 'all', search: '', baking: null, dragBase: null, lastShape: null };
 
 function bakedRecord(owner, s, pieces) {
   return { Signature: F.signature(owner, s), Pieces: pieces, At: Date.now() - 1000 * 60 * 42, Sdf: null };
@@ -93,7 +93,7 @@ function persist(id) { F.writeStored(store, byId.get(id).owner, settings.get(id)
 function preview(patch) {
   if (!state.dragBase) state.dragBase = JSON.stringify(cur());
   settings.set(state.selected, F.normalize({ ...cur(), ...patch }));
-  refresh({ light: true });
+  if (!state.pending) { state.pending = true; requestAnimationFrame(() => { state.pending = false; refresh({ light: true }); }); }
 }
 
 function commit(patch, id = state.selected) {
@@ -126,6 +126,7 @@ function undoRedo(dir) {
 function select(id) {
   if (!byId.has(id) || id === state.selected) return;
   state.selected = id; state.dragBase = null; state.explode = 0; $('Explode').value = 0; paintRange($('Explode'));
+  if (viewport?.sim) { viewport.stopSim(); paintSimButton(); }
   const url = new URL(location.href); url.searchParams.set('object', id); history_replace(url);
   rebuildRecipe();
   refresh();
@@ -137,7 +138,7 @@ function bake(id = state.selected, { quiet = false } = {}) {
   const o = byId.get(id), s = settings.get(id);
   if (!s.Enabled || s.Mode !== 'baked' || (state.baking && state.baking.id === id)) return Promise.resolve(false);
   const st = F.bakeState(o.owner, s), sdfOnly = st === 'sdf-pending';
-  const sig = F.signature(o.owner, s), pieces = sdfOnly ? s.Baked.Pieces ?? F.pieceBudget(o.owner, s).pieces : F.shatter(o.owner, s).cells.length || F.pieceBudget(o.owner, s).pieces;
+  const sig = F.signature(o.owner, s), pieces = sdfOnly ? s.Baked.Pieces ?? F.pieceBudget(o.owner, s).pieces : (id === state.selected && state.result?.cells.length) || F.pieceBudget(o.owner, s).pieces;
   const res = s.SdfResolution, wantSdf = s.PieceSdf;
   const phases = [...(sdfOnly ? [] : [['Splitting pieces', 10], ['Sealing faces', 6]]), ...(wantSdf ? [[`Writing SDF · ${pieces} × ${res}³`, Math.round(6 + res / 16)]] : [])];
   const total = phases.reduce((a, p) => a + p[1], 0) || 1;
@@ -198,80 +199,56 @@ function renderList() {
   bakeAllBtn.lastChild.textContent = need ? `Bake ${need} object${need > 1 ? 's' : ''}` : 'All bakes up to date';
 }
 
-// ------------------------------------------------------------------ section schematic
-const VB = { w: 1000, h: 640, pad: 74 };
-function fitFor(owner, w = VB.w, h = VB.h, pad = VB.pad, lift = 18) {
-  const [sx, sy] = owner.Scale, k = Math.min((w - pad * 2) / sx, (h - pad * 2 - lift) / sy);
-  return { k, cx: w / 2, cy: h / 2 - lift / 2, to: ([x, y]) => [w / 2 + x * k, h / 2 - lift / 2 - y * k], from: ([px, py]) => [(px - w / 2) / k, -(py - (h / 2 - lift / 2)) / k] };
-}
-
-function shardFill(cell, i, n, result, s, mode, hist) {
-  const m = F.MATERIAL[s.Material];
-  if (mode === 'size') { const L = Math.log(hist.lo), H = Math.log(hist.hi); return rgb(ramp(H - L < 1e-9 ? 0.5 : 1 - (Math.log(cell.size) - L) / (H - L))); }
-  if (mode === 'release') return rgb(ramp(1 - i / Math.max(1, n - 1)));
-  const [sx, sy] = result.owner.Scale, base = hex(m.tone);
-  const lit = 0.66 + 0.26 * cell.shade + 0.1 * ((-cell.centroid[0] / sx) + (cell.centroid[1] / sy));
-  const heat = Math.max(0, 1 - cell.dist / (Math.hypot(sx, sy) * 0.22)) * 0.5;
-  return rgb(mix(base.map((v) => v * lit), AMBER, heat));
-}
-
-function insetPoly(poly, c, k) { return poly.map(([x, y]) => [c[0] + (x - c[0]) * k, c[1] + (y - c[1]) * k]); }
-
-function shardsMarkup(result, s, fit, { mode = 'material', explode = 0, gap = 2.2 } = {}) {
-  if (!result.shape) return '';
-  const n = result.cells.length, hist = F.histogram(result.cells), m = F.MATERIAL[s.Material];
-  const [ix, iy] = result.impact, R = Math.hypot(...result.owner.Scale.slice(0, 2)) / 2;
-  const opacity = m.id === 'glass' || m.id === 'tempered' ? 0.82 : 1;
-  const parts = [`<path class="ghost" d="M${result.shape.map((p) => fit.to(p).map((v) => v.toFixed(1)).join(' ')).join('L')}Z"/>`];
-  result.cells.forEach((cell, i) => {
-    let dx = 0, dy = 0;
-    if (explode > 0) {
-      const vx = cell.centroid[0] - ix, vy = cell.centroid[1] - iy, len = Math.hypot(vx, vy) || 1;
-      const push = explode * R * 0.3 * (0.35 + 0.65 * Math.exp(-cell.dist / R));
-      dx = (vx / len) * push; dy = (vy / len) * push;
-    }
-    const areaPx = cell.area * fit.k * fit.k, k = Math.max(0.5, 1 - gap / Math.sqrt(areaPx));
-    const pts = insetPoly(cell.poly, cell.centroid, k).map(([x, y]) => fit.to([x + dx, y + dy]).map((v) => v.toFixed(1)).join(',')).join(' ');
-    parts.push(`<polygon class="shard" points="${pts}" fill="${shardFill(cell, i, n, result, s, mode, hist)}" fill-opacity="${opacity}"/>`);
-  });
-  return parts.join('');
-}
+// ------------------------------------------------------------------ 3D viewport
+let viewport = null;
 
 function renderStage() {
-  const o = current(), s = cur(), svg = $('Stage'), well = $('StageWell'), empty = $('StageEmpty');
-  const result = F.shatter(o.owner, s);
-  state.result = result;
-  const fit = fitFor(o.owner);
-  state.fit = fit;
-  let body = `<defs><radialGradient id="ImpactGlow"><stop offset="0" stop-color="#ffb238" stop-opacity=".55"/><stop offset=".45" stop-color="#ffb238" stop-opacity=".16"/><stop offset="1" stop-color="#ffb238" stop-opacity="0"/></radialGradient></defs>`;
-  if (result.shape) {
-    body += `<g class="shards">${shardsMarkup(result, s, fit, { mode: state.shade, explode: state.explode })}</g>`;
-    const [px, py] = fit.to(result.impact), glow = 50 + 140 * Math.sqrt(s.Energy / F.LIMITS.Energy[1]);
-    const off = s.X !== result.impact[0] || s.Y !== result.impact[1];
-    body += `<g class="impact" data-role="impact" transform="translate(${px.toFixed(1)} ${py.toFixed(1)})"><circle r="${glow.toFixed(1)}" fill="url(#ImpactGlow)"/><circle r="17" fill="#ffb238" fill-opacity=".22"/><circle r="8" fill="#ffb238"/>`
-      + `<text x="16" y="-14" style="fill:#ffb238;font-size:12px">${off ? 'clamped · ' : ''}Z ${s.Z.toFixed(2)} m</text></g>`;
-    // Dimensions as type only, a filled pill for scale — no rule lines.
-    const [sx, sy] = o.owner.Scale, b = fit.to([0, -sy / 2]), r = fit.to([sx / 2, 0]);
-    body += `<text x="${b[0].toFixed(1)}" y="${(b[1] + 30).toFixed(1)}" text-anchor="middle">${esc(F.formatLength(sx))}</text>`;
-    body += `<text x="${(r[0] + 16).toFixed(1)}" y="${(r[1] + 4).toFixed(1)}">${esc(F.formatLength(sy))}</text>`;
-    let unit = 1; while (unit * fit.k > 220) unit /= 10; while (unit * fit.k < 30) unit *= 10;
-    body += `<rect class="scale-pill" x="28" y="${VB.h - 46}" width="${(unit * fit.k).toFixed(1)}" height="6" rx="3"/><text x="28" y="${VB.h - 56}">${esc(F.formatLength(unit))}</text>`;
+  const o = current(), s = cur(), empty = $('StageEmpty');
+  const result = s.Enabled ? F.shatter(o.owner, s) : F.intact(o.owner);
+  state.result = s.Enabled ? result : { ...result, cells: [], budget: F.pieceBudget(o.owner, s) };
+  const shapeKey = o.owner.Id + ':' + o.owner.Scale.join(',');
+  if (viewport) {
+    viewport.setTone(F.MATERIAL[s.Material].tone);
+    viewport.setResult(result, s, { reframe: state.lastShape !== shapeKey, fractured: s.Enabled });
   }
-  svg.innerHTML = body;
-  svg.setAttribute('tabindex', result.shape && s.Enabled ? '0' : '-1');
-  well.classList.toggle('disabled', !s.Enabled || !result.shape);
+  state.lastShape = shapeKey;
   empty.replaceChildren();
-  empty.hidden = s.Enabled && !!result.shape;
+  empty.hidden = s.Enabled;
   if (!s.Enabled) {
-    empty.append(el('span', { class: 'big-ico', html: icon(primIcon(o.owner.Primitive), 28) }), el('h3', {}, `Fracture is off for ${o.owner.Name}`),
-      el('p', {}, 'Turn it on to author how this object breaks. Nothing is generated or stored until you do.'),
+    empty.append(el('span', { class: 'big-ico', html: icon(primIcon(o.owner.Primitive), 20) }),
+      el('div', {}, el('h3', {}, `Fracture is off for ${o.owner.Name}`), el('p', {}, 'The object stays whole. Turn it on to author how it breaks.')),
       el('button', { type: 'button', class: 'primary', 'data-action': 'enable', onclick: () => commit({ Enabled: true }) }, ico('shatter', 14), 'Enable fracture'));
-  } else if (!result.shape) {
-    empty.append(el('span', { class: 'big-ico', html: icon(primIcon(o.owner.Primitive), 28) }), el('h3', {}, result.notice),
-      el('p', {}, `The recipe still applies — about ${result.budget.pieces} pieces with these settings. The section preview covers cubes, spheres, cylinders and cones.`));
   }
-  $('StageHint').hidden = !s.Enabled || !result.shape;
+  $('StageHint').hidden = !s.Enabled;
+  for (const id of ['CutawayBtn', 'SimBtn', 'Explode']) $(id).disabled = !s.Enabled;
   paintBakeVeil();
+}
+
+function paintSimButton() {
+  const on = !!viewport?.sim;
+  $('SimBtn').classList.toggle('on', on);
+  $('SimBtn').lastChild.textContent = on ? 'Reassemble' : 'Drop test';
+}
+
+function toggleSim() {
+  if (!viewport || !cur().Enabled) return;
+  if (viewport.sim) viewport.stopSim(); else viewport.startSim();
+  paintSimButton();
+}
+
+function toggleCutaway() {
+  if (!cur().Enabled) return;
+  state.cutaway = !state.cutaway;
+  viewport?.setCutaway(state.cutaway);
+  $('CutawayBtn').classList.toggle('on', state.cutaway);
+}
+
+function showPieceHud(cell, index) {
+  const hud = $('PieceHud');
+  if (!cell) { hud.hidden = true; return; }
+  hud.hidden = false;
+  hud.replaceChildren(el('b', {}, `Piece ${index + 1}`), el('span', {}, `${F.formatLength(cell.size)} across`), el('span', {}, `${(cell.volume * 1000).toFixed(cell.volume < 0.001 ? 3 : 1)} L`),
+    el('span', {}, `${cell.faces.filter((f) => f.kind === 'inner').length} crack faces`), el('span', {}, `release #${index + 1}`), cell.parts > 1 ? el('span', {}, `${cell.parts} convex parts`) : '');
 }
 
 function paintBakeVeil() {
@@ -281,12 +258,12 @@ function paintBakeVeil() {
 }
 
 function renderReadouts() {
-  const s = cur(), r = state.result, stats = F.pieceStats(r.cells);
-  const pieces = r.shape ? stats.count : r.budget.pieces;
-  $('RPieces').textContent = r.shape ? pieces : `~${pieces}`;
-  $('RSmallest').textContent = r.shape ? F.formatLength(stats.smallest) : '—';
-  $('RMedian').textContent = r.shape ? F.formatLength(stats.median) : '—';
-  $('RLargest').textContent = r.shape ? F.formatLength(stats.largest) : '—';
+  const s = cur(), r = state.result, stats = F.pieceStats(r.cells), live = s.Enabled && r.cells.length;
+  const pieces = live ? stats.count : r.budget.pieces;
+  $('RPieces').textContent = live ? pieces : '—';
+  $('RSmallest').textContent = live ? F.formatLength(stats.smallest) : '—';
+  $('RMedian').textContent = live ? F.formatLength(stats.median) : '—';
+  $('RLargest').textContent = live ? F.formatLength(stats.largest) : '—';
   const mem = F.storageEstimate(pieces, s);
   $('RMemory').textContent = s.Enabled ? F.formatBytes(s.Mode === 'baked' ? mem.total : mem.mesh) : '—';
   $('RMemoryLabel').textContent = s.Mode === 'baked' ? 'stored' : 'at impact';
@@ -307,7 +284,8 @@ function renderHeader() {
     el('span', { class: 'chip' }, ico(primIcon(o.owner.Primitive), 10), o.owner.Primitive),
     el('span', { class: 'chip' }, o.owner.Scale.map((v) => +v.toFixed(3)).join(' × '), ' m'),
     s.Enabled ? el('span', { class: 'chip' }, el('i', { class: 'swatch', style: { background: m.tone } }), m.name) : null,
-    s.Enabled ? el('span', { class: 'chip' }, `seed ${s.Seed}`) : null);
+    s.Enabled ? el('span', { class: 'chip' }, `seed ${s.Seed}`) : null,
+    state.result?.proxy ? el('span', { class: 'chip warnish', title: 'Concave and imported shapes fracture through a convex decomposition' }, state.result.proxy) : null);
   const h = history.get(state.selected);
   $('UndoBtn').disabled = !h.undo.length; $('RedoBtn').disabled = !h.redo.length;
   $('RerollBtn').disabled = !s.Enabled;
@@ -390,7 +368,7 @@ function rebuildRecipe() {
   // Impact
   const center = el('button', { type: 'button', class: 'mini', title: 'Centre the impact', onclick: () => commit({ X: 0, Y: 0, Z: 0 }) }, 'Centre');
   const vec = el('div', { class: 'vec3' }, ...['X', 'Y', 'Z'].map((a) => el('label', { class: `axis axis-${a.toLowerCase()}` }, el('i', {}, a), numberInput({ key: a, step: 0.01, label: `Impact ${a}`, cls: '' }))));
-  group.append(el('h4', { class: 'section-head' }, el('span', {}, 'IMPACT'), center), el('div', { class: 'panel' }, el('div', { class: 'vec-head' }, el('span', {}, 'Point'), el('small', {}, 'metres, object space')), vec, el('p', {}, 'Drag the amber point on the section, or focus the section and use the arrow keys.')));
+  group.append(el('h4', { class: 'section-head' }, el('span', {}, 'IMPACT'), center), el('div', { class: 'panel' }, el('div', { class: 'vec-head' }, el('span', {}, 'Point'), el('small', {}, 'metres, object space')), vec, el('p', {}, 'Click the surface in the viewport to place it, or drag the amber point. With the viewport focused: arrows move X / Y, Page Up / Down moves Z.')));
 
   // Storage
   const modeTiles = el('div', { class: 'mode-tiles', role: 'radiogroup', 'aria-label': 'Storage mode' },
@@ -409,7 +387,7 @@ function rebuildRecipe() {
     sdfSwitch.checked = s.PieceSdf;
     sdfBlock.querySelector('.sdf-res').hidden = !s.PieceSdf;
     for (const b of resSeg.children) b.classList.toggle('active', +b.dataset.res === s.SdfResolution);
-    const pieces = state.result ? (state.result.shape ? state.result.cells.length : state.result.budget.pieces) : F.pieceBudget(o.owner, s).pieces;
+    const pieces = state.result && state.result.cells.length ? state.result.cells.length : F.pieceBudget(o.owner, s).pieces;
     const mem = F.storageEstimate(pieces, s);
     memRows.replaceChildren(el('span', {}, `Pieces · ${pieces}`), el('b', {}, F.formatBytes(mem.mesh)), ...(s.PieceSdf ? [el('span', {}, `SDF · ${pieces} × ${s.SdfResolution}³ × 2 B`), el('b', {}, F.formatBytes(mem.sdf))] : []), el('span', {}, 'Total stored'), el('b', {}, F.formatBytes(mem.total)));
     if (baked) renderBakeCard(bakeHost, o, s);
@@ -472,19 +450,19 @@ function renderCard() {
     el('header', {}, el('div', { class: 'fx-card-title' }, el('span', { class: 'ico fx-card-mark', html: icon('shatter', 14) }), el('div', {}, el('h3', {}, 'Fracture'), el('small', {}, 'PER-OBJECT GEOMETRY'))), el('span', { class: `pill ${st}` }, STATE_LABEL[st])),
     el('label', { class: 'toggle-row' }, el('span', {}, 'Enable fracture'), sw));
   if (s.Enabled) {
-    const r = F.shatter(o.owner, s), preview = el('div', { class: 'card-preview' });
-    if (r.shape) {
-      const fit = fitFor(o.owner, 300, 112, 14, 0), [px, py] = fit.to(r.impact);
-      preview.innerHTML = `<svg viewBox="0 0 300 112" aria-label="Fracture preview"><defs><radialGradient id="CardGlow"><stop offset="0" stop-color="#ffb238" stop-opacity=".5"/><stop offset="1" stop-color="#ffb238" stop-opacity="0"/></radialGradient></defs>${shardsMarkup(r, s, fit, { gap: 1.1 })}<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="20" fill="url(#CardGlow)"/><circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="3.5" fill="#ffb238"/></svg>`;
-    } else preview.append(el('p', {}, r.notice));
+    const r = state.result, preview = el('div', { class: 'card-preview' });
+    const shot = viewport ? viewport.snapshot() : '';
+    if (shot) preview.append(el('img', { src: shot, alt: `${o.owner.Name} fracture preview` }));
+    else preview.append(el('p', {}, 'Preview'));
     const m = F.MATERIAL[s.Material];
     const modeSeg = el('div', { class: 'segmented fill small', role: 'radiogroup', 'aria-label': 'Storage mode' }, ...['dynamic', 'baked'].map((id) => el('button', { type: 'button', class: s.Mode === id ? 'active' : '', dataset: { mode: id }, onclick: () => commit({ Mode: id }) }, id === 'dynamic' ? 'Dynamic' : 'Baked')));
     const status = el('div', { class: 'card-status' }, el('span', { class: `disc ${st}`, html: icon(STATE_ICON[st], 11) }), el('span', {}, F.STATE_TEXT[st]));
     if (needsBake(st)) status.append(el('button', { type: 'button', class: 'primary amber', 'data-action': 'card-bake', disabled: !!(state.baking && state.baking.id === o.owner.Id), onclick: () => bake() }, st === 'sdf-pending' ? 'Bake SDF' : 'Bake'));
     card.append(preview,
-      el('div', { class: 'chips' }, el('span', { class: 'chip' }, el('i', { class: 'swatch', style: { background: m.tone } }), m.name), el('span', { class: 'chip' }, `${r.shape ? r.cells.length : '~' + r.budget.pieces} pieces`), el('span', { class: 'chip' }, F.formatEnergy(s.Energy)), s.Mode === 'baked' && s.PieceSdf ? el('span', { class: 'chip' }, `SDF ${s.SdfResolution}³`) : null),
+      el('div', { class: 'chips' }, el('span', { class: 'chip' }, el('i', { class: 'swatch', style: { background: m.tone } }), m.name), el('span', { class: 'chip' }, `${r.cells.length} pieces`), el('span', { class: 'chip' }, F.formatEnergy(s.Energy)), s.Mode === 'baked' && s.PieceSdf ? el('span', { class: 'chip' }, `SDF ${s.SdfResolution}³`) : null),
       modeSeg, status,
       el('button', { type: 'button', class: 'card-open', 'data-action': 'card-open', onclick: () => setView('editor') }, ico('open', 13), `Edit ${o.owner.Name} fracture`));
+    if (r.proxy) card.append(el('small', {}, r.proxy));
   } else {
     card.append(el('p', { style: { margin: 0, fontSize: '10px', color: '#6e6e6e' } }, 'Off — the object stays whole.'));
   }
@@ -494,6 +472,7 @@ function renderCard() {
 function setView(view) {
   state.view = view;
   $('Work').classList.toggle('card-mode', view === 'card');
+  viewport?.resize();
   $('CardView').hidden = view !== 'card';
   for (const b of $('ViewTabs').children) b.classList.toggle('active', b.dataset.view === view);
   refresh();
@@ -510,35 +489,31 @@ function refresh({ light = false } = {}) {
   if (state.view === 'card') renderCard();
 }
 
-// ------------------------------------------------------------------ stage interaction (impact drag)
-function stagePoint(ev) {
-  const svg = $('Stage'), r = svg.getBoundingClientRect(), s = Math.min(r.width / VB.w, r.height / VB.h) || 1;
-  const ox = r.left + (r.width - VB.w * s) / 2, oy = r.top + (r.height - VB.h * s) / 2;
-  return [(ev.clientX - ox) / s, (ev.clientY - oy) / s];
+// ------------------------------------------------------------------ viewport interaction
+function onImpact(point, final) {
+  const s = cur();
+  if (!s.Enabled) return;
+  if (!point) { if (final) commit({}); return; }
+  const patch = { X: +point[0].toFixed(3), Y: +point[1].toFixed(3), Z: +point[2].toFixed(3) };
+  if (final) commit(patch); else preview(patch);
 }
-function impactFromEvent(ev) {
-  const [x, y] = state.fit.from(stagePoint(ev)), [sx, sy] = current().owner.Scale;
-  return { X: +Math.max(-sx / 2, Math.min(sx / 2, x)).toFixed(3), Y: +Math.max(-sy / 2, Math.min(sy / 2, y)).toFixed(3) };
-}
-function wireStage() {
-  const svg = $('Stage');
-  let dragging = false;
-  svg.addEventListener('pointerdown', (ev) => {
-    if (!cur().Enabled || !state.result?.shape) return;
-    dragging = true; svg.classList.add('dragging');
-    try { svg.setPointerCapture(ev.pointerId); } catch { /* jsdom */ }
-    preview(impactFromEvent(ev));
-  });
-  svg.addEventListener('pointermove', (ev) => { if (dragging) preview(impactFromEvent(ev)); });
-  const end = (ev) => { if (!dragging) return; dragging = false; svg.classList.remove('dragging'); commit(impactFromEvent(ev)); };
-  svg.addEventListener('pointerup', end);
-  svg.addEventListener('pointercancel', () => { if (dragging) { dragging = false; svg.classList.remove('dragging'); commit({}); } });
-  svg.addEventListener('keydown', (ev) => {
-    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[ev.key];
+
+function wireViewport() {
+  const canvas = $('Viewport');
+  try {
+    viewport = new FractureViewport(canvas, { onImpact, onHover: showPieceHud });
+  } catch (e) {
+    console.warn('WebGL unavailable', e);
+    $('StageWell').append(el('div', { class: 'stage-empty' }, el('h3', {}, 'WebGL is not available'), el('p', {}, 'The recipe still works; the 3D view needs WebGL 2.')));
+    return;
+  }
+  canvas.addEventListener('keydown', (ev) => {
+    const d = { ArrowLeft: [-1, 0, 0], ArrowRight: [1, 0, 0], ArrowUp: [0, 1, 0], ArrowDown: [0, -1, 0], PageUp: [0, 0, 1], PageDown: [0, 0, -1] }[ev.key];
     if (!d || !cur().Enabled) return;
     ev.preventDefault(); ev.stopPropagation();
-    const [sx, sy] = current().owner.Scale, stepSize = (ev.shiftKey ? 0.1 : 0.01) * Math.max(sx, sy), s = cur();
-    commit({ X: +Math.max(-sx / 2, Math.min(sx / 2, s.X + d[0] * stepSize)).toFixed(3), Y: +Math.max(-sy / 2, Math.min(sy / 2, s.Y + d[1] * stepSize)).toFixed(3) });
+    const sc = current().owner.Scale, stepSize = (ev.shiftKey ? 0.1 : 0.01) * Math.max(...sc), s = cur();
+    const clampAxis = (v, i) => +Math.max(-sc[i] / 2, Math.min(sc[i] / 2, v)).toFixed(3);
+    commit({ X: clampAxis(s.X + d[0] * stepSize, 0), Y: clampAxis(s.Y + d[1] * stepSize, 1), Z: clampAxis(s.Z + d[2] * stepSize, 2) });
   });
 }
 
@@ -549,7 +524,10 @@ function wire() {
   for (const b of $('ShadeMode').children) b.addEventListener('click', () => setShade(b.dataset.shade));
   for (const b of $('ObjectFilter').children) b.addEventListener('click', () => { state.filter = b.dataset.filter; for (const x of $('ObjectFilter').children) x.classList.toggle('active', x === b); renderList(); });
   $('ObjectSearch').addEventListener('input', (e) => { state.search = e.target.value; renderList(); });
-  $('Explode').addEventListener('input', (e) => { state.explode = +e.target.value; paintRange(e.target); renderStage(); });
+  $('Explode').addEventListener('input', (e) => { state.explode = +e.target.value; paintRange(e.target); viewport?.setExplode(state.explode); });
+  $('CutawayBtn').addEventListener('click', toggleCutaway);
+  $('SimBtn').addEventListener('click', toggleSim);
+  $('FrameBtn').addEventListener('click', () => viewport?.frameObject(true));
   paintRange($('Explode'));
   $('RerollBtn').addEventListener('click', reroll);
   $('UndoBtn').addEventListener('click', () => undoRedo(-1));
@@ -558,7 +536,7 @@ function wire() {
   $('KeysBtn').addEventListener('click', () => { $('KeysOverlay').hidden = false; });
   $('KeysClose').addEventListener('click', () => { $('KeysOverlay').hidden = true; });
   $('KeysOverlay').addEventListener('click', (e) => { if (e.target === $('KeysOverlay')) $('KeysOverlay').hidden = true; });
-  wireStage();
+  wireViewport();
 
   document.addEventListener('keydown', (ev) => {
     const t = ev.target, typing = t && (t.tagName === 'INPUT' && !['range', 'checkbox'].includes(t.type) || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
@@ -573,8 +551,11 @@ function wire() {
     else if (k === 'e') commit({ Enabled: !cur().Enabled });
     else if (k === 'b') bake();
     else if (k === 'v') setView(state.view === 'editor' ? 'card' : 'editor');
+    else if (k === 'c') toggleCutaway();
+    else if (k === 'f') viewport?.frameObject(true);
+    else if (ev.key === ' ') { ev.preventDefault(); toggleSim(); }
     else if (k === '1' || k === '2' || k === '3') setShade(['material', 'size', 'release'][+k - 1]);
-    else if ((ev.key === 'ArrowDown' || ev.key === 'ArrowUp') && (t === document.body || t.classList?.contains('obj-row'))) {
+    else if ((ev.key === 'ArrowDown' || ev.key === 'ArrowUp') && (t === document.body || t.classList?.contains('obj-row') || t.tagName === 'BUTTON')) {
       const visible = [...$('ObjectList').querySelectorAll('.obj-row')].map((r) => r.dataset.id), i = visible.indexOf(state.selected);
       const next = visible[Math.max(0, Math.min(visible.length - 1, (i < 0 ? 0 : i) + (ev.key === 'ArrowDown' ? 1 : -1)))];
       if (next) { ev.preventDefault(); select(next); $('ObjectList').querySelector(`[data-id="${next}"]`)?.focus(); }
@@ -598,10 +579,10 @@ function wire() {
 function setShade(mode) {
   state.shade = mode;
   for (const b of $('ShadeMode').children) b.classList.toggle('active', b.dataset.shade === mode);
-  renderStage(); renderReadouts();
+  viewport?.setShade(mode); renderReadouts();
 }
 
 wire();
 rebuildRecipe();
 refresh();
-window.FractureEditor = { state, settings, objects, select, bake, bakeAll, commit, setView };
+window.FractureEditor = { state, settings, objects, select, bake, bakeAll, commit, setView, get viewport() { return viewport; } };

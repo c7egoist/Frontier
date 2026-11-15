@@ -47,8 +47,8 @@
       <div class="dock-foot"><button type="button" id="BakeAllBtn" class="wide" data-icon="bake" data-icon-size="14" disabled>Bake all</button></div>
     </aside>
 
-    <!-- ============================================================ CENTER: section schematic -->
-    <main class="dock center" aria-label="Fracture section">
+    <!-- ============================================================ CENTER: 3D viewport -->
+    <main class="dock center" aria-label="3D fracture viewport">
       <div class="stage-head">
         <div class="stage-title"><h2 id="StageTitle">—</h2><div id="StageMeta" class="chips"></div></div>
         <div class="stage-tools">
@@ -58,13 +58,17 @@
             <button type="button" data-shade="release" title="Release order from impact (3)">Release</button>
           </div>
           <label class="explode" title="Pull the pieces apart (preview only, not saved)"><span data-icon="explode" data-icon-size="14"></span><input id="Explode" type="range" min="0" max="1" step="0.01" value="0" aria-label="Explode preview"></label>
+          <button type="button" id="CutawayBtn" class="tool-btn" title="Peel away the pieces between the camera and the impact (C)" data-icon="layers" data-icon-size="14">Cutaway</button>
+          <button type="button" id="SimBtn" class="tool-btn" title="Drop test: break at the impact and let the pieces fall (Space)" data-icon="bolt" data-icon-size="14">Drop test</button>
+          <button type="button" id="FrameBtn" class="icon-btn" title="Frame the object (F)" aria-label="Frame the object" data-icon="target"></button>
           <button type="button" id="RerollBtn" class="icon-btn" title="New seed (R)" aria-label="New seed" data-icon="dice"></button>
         </div>
       </div>
       <div id="StageWell" class="stage-well">
-        <svg id="Stage" viewBox="0 0 1000 640" role="img" aria-label="Fracture section schematic" preserveAspectRatio="xMidYMid meet"></svg>
+        <canvas id="Viewport" tabindex="0" aria-label="3D fracture viewport"></canvas>
+        <div id="PieceHud" class="piece-hud" hidden></div>
         <div id="StageEmpty" class="stage-empty" hidden></div>
-        <div id="StageHint" class="stage-hint">Section through the object centre · drag the amber point to move the impact</div>
+        <div id="StageHint" class="stage-hint">Click the surface to place the impact · drag the amber point · drag to orbit · right-drag to pan · wheel to glide</div>
         <div id="BakeVeil" class="bake-veil" hidden><div class="bake-meter"><i id="BakeFill"></i></div><span id="BakeText">Baking…</span></div>
       </div>
       <div class="stage-foot">
@@ -86,7 +90,7 @@
 
     <!-- ============================================================ CARD VIEW (replaces center + right) -->
     <section id="CardView" class="card-view" hidden aria-label="Inspector card preview">
-      <div class="card-intro"><h2>Inspector card</h2><p>The compact card as it sits in the Project Zero inspector. It edits the same recipe as the editor, live.</p></div>
+      <div class="card-intro"><h2>Inspector card</h2><p>The compact card as it sits in the Project Zero inspector, editing the same recipe live.</p></div>
       <div class="faux-inspector">
         <div class="faux-head"><span id="CardObjIcon"></span><b id="CardObjName">—</b><small>Details</small></div>
         <section class="faux-card"><header><h3>Transform</h3></header><div id="CardTransform" class="rows"></div></section>
@@ -108,7 +112,11 @@
       <dt>B</dt><dd>Bake (Baked mode)</dd>
       <dt>1 2 3</dt><dd>Shade by material / size / release</dd>
       <dt>V</dt><dd>Switch Editor / Inspector card</dd>
-      <dt>Arrow keys on the section</dt><dd>Nudge the impact point (Shift for ×10)</dd>
+      <dt>Click / drag on the object</dt><dd>Place / drag the impact point</dd>
+      <dt>Arrows, Page Up / Down</dt><dd>Nudge the impact X / Y, Z (viewport focused, Shift ×10)</dd>
+      <dt>C</dt><dd>Cutaway</dd>
+      <dt>Space</dt><dd>Drop test / reassemble</dd>
+      <dt>F</dt><dd>Frame the object</dd>
     </dl>
   </div>
 </div>

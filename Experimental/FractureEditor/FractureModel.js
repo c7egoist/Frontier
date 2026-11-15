@@ -175,70 +175,180 @@ export const ENERGY_PRESETS = [
   { id: 'blast', label: 'Blast', joules: 32000 },
 ];
 
-// ------------------------------------------------------------------ section outline (object local metres, y up)
-export function outline(owner) {
-  const [sx, sy] = owner.Scale, hx = sx / 2, hy = sy / 2;
+// ------------------------------------------------------------------ 3D solids (object local metres, y up)
+// Every shape is a set of convex polyhedra.  A convex polyhedron is { faces: [{ pts: [[x,y,z]…] (CCW seen from
+// outside), kind }] } where kind is 'outer' (the object's surface), 'inner' (a fresh crack) or 'seam' (a cut between
+// the convex parts of a concave shape — it becomes a crack face when two different pieces meet there).
+// Primitives are built in a unit box (±0.5) and scaled by the object's Scale, which keeps them convex.
+
+const EPS = 1e-9;
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+
+function boxPoly(hx = 0.5, hy = 0.5, hz = 0.5, y0 = -hy, y1 = hy) {
+  const v = (x, y, z) => [x * hx, y, z * hz];
+  const f = (kind, ...pts) => ({ pts, kind });
+  return { faces: [
+    f('outer', v(1, y0, -1), v(1, y1, -1), v(1, y1, 1), v(1, y0, 1)),
+    f('outer', v(-1, y0, 1), v(-1, y1, 1), v(-1, y1, -1), v(-1, y0, -1)),
+    f('outer', v(-1, y1, -1), v(-1, y1, 1), v(1, y1, 1), v(1, y1, -1)),
+    f('outer', v(-1, y0, 1), v(-1, y0, -1), v(1, y0, -1), v(1, y0, 1)),
+    f('outer', v(-1, y0, 1), v(1, y0, 1), v(1, y1, 1), v(-1, y1, 1)),
+    f('outer', v(1, y0, -1), v(-1, y0, -1), v(-1, y1, -1), v(1, y1, -1)),
+  ] };
+}
+
+function newell(pts) {
+  let n = [0, 0, 0];
+  for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; n = [n[0] + (a[1] - b[1]) * (a[2] + b[2]), n[1] + (a[2] - b[2]) * (a[0] + b[0]), n[2] + (a[0] - b[0]) * (a[1] + b[1])]; }
+  return n;
+}
+
+// Keep the part of `poly` where n·p <= d; the cut is capped with a face of `kind`.  Returns null when nothing is left.
+export function clipPoly(poly, n, d, kind = 'inner') {
+  const faces = [], cut = [];
+  let any = false;
+  for (const face of poly.faces) {
+    const pts = face.pts, out = [];
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i], q = pts[(i + 1) % pts.length];
+      const fp = dot(n, p) - d, fq = dot(n, q) - d;
+      if (fp <= EPS) { out.push(p); if (fp >= -EPS) cut.push(p); }
+      if ((fp < -EPS && fq > EPS) || (fp > EPS && fq < -EPS)) {
+        const t = fp / (fp - fq), x = [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t];
+        out.push(x); cut.push(x);
+      }
+      if (fp > EPS) any = true;
+    }
+    if (out.length >= 3) faces.push({ pts: out, kind: face.kind });
+  }
+  if (!faces.length) return null;
+  if (!any) return poly;
+  // Cap: unique cut points ordered around their centre, wound so the normal faces +n.
+  const uniq = [];
+  for (const p of cut) if (!uniq.some((q) => Math.abs(q[0] - p[0]) + Math.abs(q[1] - p[1]) + Math.abs(q[2] - p[2]) < 1e-8)) uniq.push(p);
+  if (uniq.length >= 3) {
+    const c = uniq.reduce((s, p) => [s[0] + p[0] / uniq.length, s[1] + p[1] / uniq.length, s[2] + p[2] / uniq.length], [0, 0, 0]);
+    const u = norm(Math.abs(n[0]) < 0.9 ? cross(n, [1, 0, 0]) : cross(n, [0, 1, 0])), v = cross(n, u);
+    uniq.sort((a, b) => { const da = sub(a, c), db = sub(b, c); return Math.atan2(dot(da, v), dot(da, u)) - Math.atan2(dot(db, v), dot(db, u)); });
+    if (dot(newell(uniq), n) < 0) uniq.reverse();
+    faces.push({ pts: uniq, kind });
+  }
+  return { faces };
+}
+
+export function polyVolume(poly) {
+  let v = 0;
+  for (const f of poly.faces) for (let i = 1; i + 1 < f.pts.length; i++) v += dot(f.pts[0], cross(f.pts[i], f.pts[i + 1]));
+  return v / 6;
+}
+
+function polyCentroid(poly) {
+  let v = 0, c = [0, 0, 0];
+  for (const f of poly.faces) for (let i = 1; i + 1 < f.pts.length; i++) {
+    const a = f.pts[0], b = f.pts[i], d = f.pts[i + 1], w = dot(a, cross(b, d));
+    v += w; c = [c[0] + w * (a[0] + b[0] + d[0]), c[1] + w * (a[1] + b[1] + d[1]), c[2] + w * (a[2] + b[2] + d[2])];
+  }
+  return Math.abs(v) < 1e-15 ? poly.faces[0].pts[0] : [c[0] / (4 * v), c[1] / (4 * v), c[2] / (4 * v)];
+}
+
+const mapPoly = (poly, fn) => ({ faces: poly.faces.map((f) => ({ pts: f.pts.map(fn), kind: f.kind })) });
+
+// Frustum around y: radius r0 at y0, r1 at y1 (r1 = 0 gives a cone, r0 = r1 a cylinder), `sides` tangent planes.
+function frustum(y0, y1, r0, r1, sides = 28, hz = 0.5) {
+  let p = boxPoly(Math.max(r0, r1), 0.5, Math.max(r0, r1) * (hz / 0.5), y0, y1);
+  for (let i = 0; i < sides; i++) {
+    const a = (i / sides) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+    const p0 = [r0 * c, y0, r0 * s], p1 = [r1 * c, y1, r1 * s];
+    let n = norm(cross(sub(p1, p0), [-s, 0, c]));
+    if (dot(n, [c, 0, s]) < 0) n = n.map((x) => -x);
+    p = clipPoly(p, n, dot(n, p0), 'outer');
+  }
+  return p;
+}
+
+function ellipsoid(cx, cy, cz, rx, ry, rz, count = 110) {
+  let p = boxPoly(rx, ry, rz);
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < count; i++) {
+    const y = 1 - (2 * (i + 0.5)) / count, r = Math.sqrt(1 - y * y), a = i * golden;
+    const u = [Math.cos(a) * r, y, Math.sin(a) * r];
+    const n = norm([u[0] / rx, u[1] / ry, u[2] / rz]);
+    p = clipPoly(p, n, dot(n, [u[0] * rx, u[1] * ry, u[2] * rz]), 'outer');
+  }
+  return mapPoly(p, (q) => [q[0] + cx, q[1] + cy, q[2] + cz]);
+}
+
+// Torus around z (a standing ring) as `segments` convex wedges with an octagonal tube.
+function torusParts(segments = 16, tube = 0.12, sides = 8) {
+  const R = 0.5 - tube, parts = [];
+  const P = (theta, phi) => { const rho = R + tube * Math.cos(phi); return [rho * Math.cos(theta), rho * Math.sin(theta), 0.5 * Math.sin(phi)]; };
+  for (let k = 0; k < segments; k++) {
+    const t0 = (k / segments) * Math.PI * 2, t1 = ((k + 1) / segments) * Math.PI * 2, tm = (t0 + t1) / 2;
+    const centre = [R * Math.cos(tm), R * Math.sin(tm), 0];
+    let p = boxPoly(0.5, 0.5, 0.5);
+    let n = [Math.sin(t0), -Math.cos(t0), 0]; p = clipPoly(p, n, 0, 'seam');
+    n = [-Math.sin(t1), Math.cos(t1), 0]; p = clipPoly(p, n, 0, 'seam');
+    for (let i = 0; i < sides; i++) {
+      const f0 = (i / sides) * Math.PI * 2, f1 = ((i + 1) / sides) * Math.PI * 2;
+      const a = P(t0, f0), b = P(t0, f1), c = P(t1, f0);
+      let m = norm(cross(sub(b, a), sub(c, a)));
+      if (dot(m, sub(a, centre)) < 0) m = m.map((x) => -x);
+      p = clipPoly(p, m, dot(m, a), 'outer');
+    }
+    parts.push(p);
+  }
+  return parts;
+}
+
+// Stand-in for an imported mesh until source decomposition lands: plinth, tapered body, head.
+function statueParts() {
+  return [boxPoly(0.5, 0.5, 0.5, -0.5, -0.36), frustum(-0.36, 0.27, 0.3, 0.2, 20), ellipsoid(0, 0.385, 0, 0.22, 0.115, 0.22, 70)];
+}
+
+// The object's solid: { parts, compound, proxy } in local metres.
+export function solid(owner) {
+  const [sx, sy, sz] = owner.Scale;
+  let parts, proxy = null;
   switch (owner.Primitive) {
-    case 'cube': case 'cylinder': return [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]];
-    case 'cone': return [[-hx, -hy], [hx, -hy], [0, hy]];
-    case 'sphere': return Array.from({ length: 56 }, (_, i) => { const a = (i / 56) * Math.PI * 2; return [Math.cos(a) * hx, Math.sin(a) * hy]; });
-    default: return null;
+    case 'cube': parts = [boxPoly()]; break;
+    case 'cylinder': parts = [frustum(-0.5, 0.5, 0.5, 0.5)]; break;
+    case 'cone': parts = [frustum(-0.5, 0.5, 0.5, 0)]; break;
+    case 'sphere': parts = [ellipsoid(0, 0, 0, 0.5, 0.5, 0.5)]; break;
+    case 'torus': parts = torusParts(); proxy = 'Concave: 16 convex wedges'; break;
+    default: parts = statueParts(); proxy = 'Proxy hull: 3 convex parts (source mesh pending)'; break;
   }
+  parts = parts.filter(Boolean).map((p) => mapPoly(p, (q) => [q[0] * sx, q[1] * sy, q[2] * sz]));
+  for (const p of parts) p.planes = p.faces.map((f) => { const n = norm(newell(f.pts)); return [n, dot(n, f.pts[0])]; });
+  return { parts, compound: parts.length > 1, proxy, volume: parts.reduce((s, p) => s + polyVolume(p), 0) };
 }
 
-export function polygonArea(p) {
-  let a = 0;
-  for (let i = 0, j = p.length - 1; i < p.length; j = i++) a += (p[j][0] + p[i][0]) * (p[j][1] - p[i][1]);
-  return Math.abs(a) / 2;
-}
-
-function centroid(p) {
-  let a = 0, cx = 0, cy = 0;
-  for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
-    const f = p[j][0] * p[i][1] - p[i][0] * p[j][1];
-    a += f; cx += (p[j][0] + p[i][0]) * f; cy += (p[j][1] + p[i][1]) * f;
-  }
-  if (Math.abs(a) < 1e-12) return p.reduce((s, q) => [s[0] + q[0] / p.length, s[1] + q[1] / p.length], [0, 0]);
-  return [cx / (3 * a), cy / (3 * a)];
-}
-
-function inside(p, x, y) {
-  let c = false;
-  for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
-    if ((p[i][1] > y) !== (p[j][1] > y) && x < ((p[j][0] - p[i][0]) * (y - p[i][1])) / (p[j][1] - p[i][1]) + p[i][0]) c = !c;
-  }
-  return c;
-}
-
-// Keep the part of `poly` on the side of the bisector closer to a than b.
-function clipBisector(poly, a, b) {
-  const nx = b[0] - a[0], ny = b[1] - a[1];
-  const d = (nx * (a[0] + b[0])) / 2 + (ny * (a[1] + b[1])) / 2;
-  const out = [];
-  for (let i = 0; i < poly.length; i++) {
-    const p = poly[i], q = poly[(i + 1) % poly.length];
-    const fp = p[0] * nx + p[1] * ny - d, fq = q[0] * nx + q[1] * ny - d;
-    if (fp <= 0) out.push(p);
-    if ((fp < 0 && fq > 0) || (fp > 0 && fq < 0)) { const t = fp / (fp - fq); out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]); }
-  }
-  return out;
-}
+const insidePart = (part, p) => part.planes.every(([n, d]) => dot(n, p) <= d + 1e-9);
+const insideSolid = (s, p) => s.parts.some((part) => insidePart(part, p));
 
 export function rng(seed) {
   let a = seed >>> 0 || 1;
   return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 
+const solidCache = new Map();
+function cachedSolid(owner) {
+  const key = owner.Primitive + ':' + owner.Scale.join(',');
+  if (!solidCache.has(key)) { if (solidCache.size > 32) solidCache.clear(); solidCache.set(key, solid(owner)); }
+  return solidCache.get(key);
+}
+
 // How many pieces the recipe asks for and which limit wins (energy, ceiling or minimum size).
 export function pieceBudget(owner, settings) {
   const s = normalize(settings), m = MATERIAL[s.Material];
-  const shape = outline(owner);
-  const area = shape ? polygonArea(shape) : owner.Scale[0] * owner.Scale[1];
+  const volume = cachedSolid(owner).volume;
   const byEnergy = Math.max(2, Math.round(m.yield * 24 * Math.sqrt(s.Energy / 2500)));
-  const bySize = Math.max(2, Math.floor(area / (s.MinimumSize * 2.2) ** 2));
+  const bySize = Math.max(2, Math.floor(volume / (s.MinimumSize * 2.2) ** 3));
   const pieces = Math.max(2, Math.min(s.Ceiling, bySize, byEnergy));
   const limiter = pieces === byEnergy && byEnergy <= Math.min(s.Ceiling, bySize) ? 'energy' : pieces === s.Ceiling && s.Ceiling <= bySize ? 'ceiling' : 'size';
-  return { pieces, byEnergy, bySize, ceiling: s.Ceiling, limiter, area };
+  return { pieces, byEnergy, bySize, ceiling: s.Ceiling, limiter, volume };
 }
 
 // Memory estimate for a baked result (mesh pieces ~ 34 verts × 32 B + indices) and per-piece SDF (R16F voxels).
@@ -249,65 +359,86 @@ export function storageEstimate(pieces, settings) {
   return { mesh, sdf, total: mesh + (s.Mode === 'baked' ? sdf : 0) };
 }
 
-// Deterministic schematic shatter.  Returns null cells with a notice for shapes the preview can't section.
+// Deterministic 3D Voronoi shatter of the solid.  Pieces: { faces, volume, size (∛volume), centroid, dist, shade,
+// radius, parts }.  Sorted by distance from the impact (release order).
 export function shatter(owner, settings) {
   const s = normalize(settings), m = MATERIAL[s.Material];
-  const shape = outline(owner);
-  const budget = pieceBudget(owner, s);
-  if (!shape) {
-    return { owner, shape: null, cells: [], budget, impact: [s.X, s.Y], notice: owner.Primitive === 'torus' ? 'Concave preview needs decomposition.' : 'Source geometry preview is pending.' };
-  }
-  const [sx, sy] = owner.Scale, hx = sx / 2, hy = sy / 2;
-  const ix = Math.min(hx, Math.max(-hx, s.X)), iy = Math.min(hy, Math.max(-hy, s.Y));
-  const R = Math.hypot(sx, sy) / 2;
+  const sol = cachedSolid(owner), budget = pieceBudget(owner, s);
+  const [sx, sy, sz] = owner.Scale, hx = sx / 2, hy = sy / 2, hz = sz / 2;
+  const clampv = (v, h) => Math.min(h, Math.max(-h, v));
+  const impact = [clampv(s.X, hx), clampv(s.Y, hy), clampv(s.Z, hz)];
+  const R = Math.hypot(sx, sy, sz) / 2;
   const rand = rng(s.Seed * 2654435761 + s.Material.length * 97);
   const n = budget.pieces, sites = [];
-  const tryPush = (x, y) => { if (inside(shape, x, y)) { sites.push([x, y]); return true; } return false; };
-  // Energy widens the spread of the crack cluster around the impact.
+  const tryPush = (p) => { if (insideSolid(sol, p)) { sites.push(p); return true; } return false; };
   const spread = R * (0.25 + 0.6 * Math.min(1, Math.sqrt(s.Energy / 20000)));
+  // Thin axis: glass spokes and grids lie in the plane of the two larger dimensions.
+  const dims = [sx, sy, sz], thin = dims.indexOf(Math.min(...dims));
+  const inPlane = (a, b, c) => { const p = [0, 0, 0], axes = [0, 1, 2].filter((i) => i !== thin); p[axes[0]] = a; p[axes[1]] = b; p[thin] = c; return p; };
+  const randomIn = () => [-hx + rand() * sx, -hy + rand() * sy, -hz + rand() * sz];
+  const randDir = () => { const z = rand() * 2 - 1, a = rand() * Math.PI * 2, r = Math.sqrt(1 - z * z); return [r * Math.cos(a), r * Math.sin(a), z]; };
   let guard = 0;
   if (m.pattern === 'uniform') {
-    const cols = Math.max(1, Math.round(Math.sqrt((n * sx) / sy))), rows = Math.max(1, Math.ceil(n / cols));
-    for (let r = 0; r < rows && sites.length < n; r++) for (let c = 0; c < cols && sites.length < n; c++) {
-      const x = -hx + ((c + 0.5 + (rand() - 0.5) * 0.7) / cols) * sx, y = -hy + ((r + 0.5 + (rand() - 0.5) * 0.7) / rows) * sy;
-      if (!tryPush(x, y)) tryPush(x * 0.8, y * 0.8);
+    const c = Math.cbrt(n / (sx * sy * sz));
+    const cnt = dims.map((d) => Math.max(1, Math.round(d * c)));
+    while (cnt[0] * cnt[1] * cnt[2] < n) { const i = dims.map((d, k) => d / cnt[k]).reduce((bi, v, k, arr) => (v > arr[bi] ? k : bi), 0); cnt[i]++; }
+    const cells = [];
+    for (let i = 0; i < cnt[0]; i++) for (let j = 0; j < cnt[1]; j++) for (let k = 0; k < cnt[2]; k++) cells.push([i, j, k]);
+    for (let i = cells.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [cells[i], cells[j]] = [cells[j], cells[i]]; }
+    for (const [i, j, k] of cells) {
+      if (sites.length >= n) break;
+      const p = [-hx + ((i + 0.5 + (rand() - 0.5) * 0.7) / cnt[0]) * sx, -hy + ((j + 0.5 + (rand() - 0.5) * 0.7) / cnt[1]) * sy, -hz + ((k + 0.5 + (rand() - 0.5) * 0.7) / cnt[2]) * sz];
+      if (!tryPush(p)) tryPush(p.map((v) => v * 0.7));
     }
   } else if (m.pattern === 'radial') {
     const spokes = Math.max(5, Math.round(Math.sqrt(n) * 2.2));
-    while (sites.length < n && guard++ < n * 60) {
+    while (sites.length < n && guard++ < n * 80) {
       const k = Math.floor(rand() * spokes), a = ((k + 0.5 + (rand() - 0.5) * 0.35) / spokes) * Math.PI * 2;
-      // Shards run along spokes: a dense core at the hit, then long wedges out to the edge.
       const r = rand() < 0.45 ? spread * 0.5 * rand() ** 1.4 : R * 1.6 * rand() ** 1.15;
-      tryPush(ix + Math.cos(a) * r, iy + Math.sin(a) * r);
+      const off = inPlane(Math.cos(a) * r, Math.sin(a) * r, 0), p = [impact[0] + off[0], impact[1] + off[1], impact[2] + off[2]];
+      p[thin] = (rand() - 0.5) * dims[thin] * 0.9;
+      tryPush(p);
     }
   }
-  while (sites.length < n && guard++ < n * 200) {
-    if (rand() < m.focus) { const a = rand() * Math.PI * 2, r = spread * rand() ** 1.5; tryPush(ix + Math.cos(a) * r, iy + Math.sin(a) * r * (m.pattern === 'grain' ? m.grain * 0.6 : 1)); }
-    else tryPush(-hx + rand() * sx, -hy + rand() * sy);
+  while (sites.length < n && guard++ < n * 300) {
+    if (rand() < m.focus) { const d = randDir(), r = spread * rand() ** 1.5; tryPush([impact[0] + d[0] * r, impact[1] + d[1] * r * (m.pattern === 'grain' ? m.grain * 0.6 : 1), impact[2] + d[2] * r]); }
+    else tryPush(randomIn());
   }
   // Grain: solve in a space squashed along y so cells come out long and thin.
-  const g = m.grain;
-  const squash = (p) => [p[0], p[1] / g], unsquash = (p) => [p[0], p[1] * g];
-  const space = shape.map(squash), local = sites.map(squash);
+  const g = m.grain, squash = (p) => [p[0], p[1] / g, p[2]], unsquash = (p) => [p[0], p[1] * g, p[2]];
+  const parts = g === 1 ? sol.parts : sol.parts.map((p) => mapPoly(p, squash));
+  const local = g === 1 ? sites : sites.map(squash);
   const cells = [];
   for (let i = 0; i < local.length; i++) {
-    const order = local.map((p, j) => [j, (p[0] - local[i][0]) ** 2 + (p[1] - local[i][1]) ** 2]).filter(([j]) => j !== i).sort((a, b) => a[1] - b[1]);
-    let poly = space;
-    for (const [j, d2] of order) {
-      let far = 0;
-      for (const q of poly) far = Math.max(far, (q[0] - local[i][0]) ** 2 + (q[1] - local[i][1]) ** 2);
-      if (d2 > 4 * far) break;
-      poly = clipBisector(poly, local[i], local[j]);
-      if (poly.length < 3) break;
+    const si = local[i];
+    const order = [];
+    for (let j = 0; j < local.length; j++) if (j !== i) order.push([j, (local[j][0] - si[0]) ** 2 + (local[j][1] - si[1]) ** 2 + (local[j][2] - si[2]) ** 2]);
+    order.sort((a, b) => a[1] - b[1]);
+    const pieceParts = [];
+    for (const part of parts) {
+      let poly = part;
+      for (const [j, d2] of order) {
+        let far = 0;
+        for (const f of poly.faces) for (const q of f.pts) far = Math.max(far, (q[0] - si[0]) ** 2 + (q[1] - si[1]) ** 2 + (q[2] - si[2]) ** 2);
+        if (d2 > 4 * far) break;
+        const sj = local[j], nrm = sub(sj, si), mid = [(si[0] + sj[0]) / 2, (si[1] + sj[1]) / 2, (si[2] + sj[2]) / 2];
+        poly = clipPoly(poly, nrm, dot(nrm, mid), 'inner');
+        if (!poly) break;
+      }
+      if (poly) pieceParts.push(g === 1 ? poly : mapPoly(poly, unsquash));
     }
-    if (poly.length < 3) continue;
-    const p = poly.map(unsquash), area = polygonArea(p);
-    if (area <= 1e-12) continue;
-    const c = centroid(p);
-    cells.push({ poly: p, area, size: Math.sqrt(area), centroid: c, dist: Math.hypot(c[0] - ix, c[1] - iy), shade: rand() });
+    if (!pieceParts.length) continue;
+    let volume = 0, c = [0, 0, 0];
+    for (const p of pieceParts) { const v = polyVolume(p), pc = polyCentroid(p); volume += v; c = [c[0] + pc[0] * v, c[1] + pc[1] * v, c[2] + pc[2] * v]; }
+    if (volume <= 1e-12) continue;
+    c = c.map((x) => x / volume);
+    const faces = pieceParts.flatMap((p) => p.faces.map((f) => ({ pts: f.pts, kind: f.kind === 'seam' ? 'inner' : f.kind })));
+    let radius = 0;
+    for (const f of faces) for (const q of f.pts) radius = Math.max(radius, Math.hypot(...sub(q, c)));
+    cells.push({ faces, volume, size: Math.cbrt(volume), centroid: c, dist: Math.hypot(...sub(c, impact)), shade: rand(), radius, parts: pieceParts.length });
   }
   cells.sort((a, b) => a.dist - b.dist);
-  return { owner, shape, cells, budget, impact: [ix, iy], notice: null };
+  return { owner, solid: sol, cells, budget, impact, proxy: sol.proxy };
 }
 
 export function pieceStats(cells) {
@@ -316,7 +447,7 @@ export function pieceStats(cells) {
   return { count: sizes.length, smallest: sizes[0], largest: sizes[sizes.length - 1], median: sizes[sizes.length >> 1] };
 }
 
-// Size histogram (log-spaced) for the strip under the stage.
+// Size histogram (log-spaced) for the strip under the viewport.
 export function histogram(cells, bins = 12) {
   const out = new Array(bins).fill(0);
   if (!cells.length) return { bins: out, lo: 0, hi: 0 };
@@ -324,4 +455,11 @@ export function histogram(cells, bins = 12) {
   const L = Math.log(lo), H = Math.log(hi);
   for (const v of sizes) out[H - L < 1e-9 ? 0 : Math.min(bins - 1, Math.floor(((Math.log(v) - L) / (H - L)) * bins))]++;
   return { bins: out, lo, hi };
+}
+
+// Whole-object pieces (fracture off): the solid's parts as one piece.
+export function intact(owner) {
+  const sol = cachedSolid(owner);
+  const faces = sol.parts.flatMap((p) => p.faces.filter((f) => f.kind !== 'seam').map((f) => ({ pts: f.pts, kind: 'outer' })));
+  return { owner, solid: sol, cells: [{ faces, volume: sol.volume, size: Math.cbrt(sol.volume), centroid: [0, 0, 0], dist: 0, shade: 0.5, radius: Math.hypot(...owner.Scale) / 2, parts: sol.parts.length }], budget: null, impact: [0, 0, 0], proxy: sol.proxy };
 }
