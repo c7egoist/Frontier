@@ -162,9 +162,11 @@ button.document-tab:hover { background: #2e2e34; color: #ddd; }
 .legend .ramp { width: 150px; height: 8px; border-radius: 8px; }
 .legend .ramp.clusters { background: linear-gradient(90deg, #e05d5d, #e0b15d, #8fe05d, #5de0b0, #5d9be0, #a05de0, #e05db8); }
 .legend-keys { display: flex; gap: 10px; }
-.legend-keys .k::before { content: ''; display: inline-block; width: 10px; height: 2px; margin-right: 5px; vertical-align: 3px; }
-.legend-keys .green::before { background: var(--green); }
-.legend-keys .amber::before { background: var(--amber); }
+.legend-keys .k::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+.legend-keys .green::before { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.legend-keys .amber::before { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+.legend .ramp.density { background: linear-gradient(90deg, #306bf2, #29c7c2, #59d15c, #f7cc40, #f04d3d); }
+.legend .ramp-labels { width: 150px; display: flex; justify-content: space-between; font-size: 9px; color: #8a8a8a; }
 .strip { flex: none; height: 36px; display: flex; align-items: center; padding: 0 230px 0 14px; font-size: 8px; letter-spacing: 1.1px; color: #6a6a6a; white-space: nowrap; overflow: hidden; }
 .drawer-handle { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 200px; height: 30px; min-height: 30px; padding: 0; border: 0; border-radius: 0; background: transparent; color: #a5a5a5; font-size: 11px; z-index: 12; }
 .drawer-handle:hover { background: transparent; color: #eee; }
@@ -428,3 +430,20 @@ kbd { font: 400 10px ui-monospace, SFMono-Regular, Menlo, monospace; background:
   .compile-body { grid-template-columns: 1fr; overflow-y: auto; }
   .scene-title, .state-tag { display: none; }
 }
+
+/* Camera HUD: orientation dial + lens / turntable chips, bottom right of a viewport */
+.cam-hud { position: absolute; right: 12px; bottom: 40px; z-index: 5; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; user-select: none; }
+.compile-well .cam-hud { bottom: 12px; }
+.cam-dial { width: 84px; height: 84px; overflow: visible; }
+.cam-dial .dial-ring { fill: #12121299; stroke: #2a2a2a; stroke-width: 1; }
+.cam-dial .dial-horizon { fill: none; stroke: #ffffff22; stroke-width: 1.2; stroke-linecap: round; }
+.cam-dial .dial-bead { cursor: pointer; transition: opacity 0.15s; }
+.cam-dial .dial-bead circle { stroke-width: 1.5; filter: drop-shadow(0 0 3px #0008); }
+.cam-dial .dial-bead.neg circle { stroke-width: 1.2; fill: #121212; }
+.cam-dial .dial-bead:hover circle { filter: drop-shadow(0 0 6px currentColor) brightness(1.3); }
+.cam-dial .dial-bead text { font: 600 8px 'DM Sans', sans-serif; fill: #0b0b0d; text-anchor: middle; pointer-events: none; }
+.cam-chips { display: flex; gap: 4px; }
+.cam-chip { height: 22px; min-height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid #2a2a2a; background: #121212d9; color: #bdbdbd; font: 400 10px ui-monospace, SFMono-Regular, Menlo, monospace; backdrop-filter: blur(6px); }
+.cam-chip:hover { color: #fff; border-color: #3a3a3a; background: #1a1a1ad9; }
+.cam-chip.on { color: #0b0b0d; background: #e8e8e8; border-color: #e8e8e8; }
+.cam-chip[hidden] { display: none; }

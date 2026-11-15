@@ -1,7 +1,8 @@
 // three.js layer shared by Geometry Compile and the Component Viewer: viewport stage, render geometry built from a
 // compiled asset (full detail, LOD level or UV checker), material slots, collision gizmos and the offscreen icon baker.
 import * as THREE from './Vendor/three.esm.min.js';
-import { OrbitControls } from './Vendor/orbit-controls.esm.min.js';
+import { CameraRig } from './Camera.js';
+import { clock, fieldShell, dotFloor, densityColors } from './Visuals.js';
 
 export { THREE };
 
@@ -196,6 +197,18 @@ export function checkerTexture() {
   return checker;
 }
 
+// A geometry with per-triangle density colours (cached per source geometry key).
+function densityGeometry(key, base) {
+  return cached(`${key}:density`, () => {
+    const geo = base.clone();
+    geo.clearGroups();
+    geo.setAttribute('color', new THREE.BufferAttribute(densityColors(geo.attributes.position.array), 3));
+    return geo;
+  });
+}
+
+const densityMaterial = () => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0, side: THREE.DoubleSide, flatShading: true });
+
 // Materials for one mesh in a given view channel. overrides: { [family]: '#hex' } colour overrides from the component.
 export function channelMaterials(asset, channel, overrides = {}) {
   const slots = assetSlots(asset);
@@ -223,7 +236,10 @@ export function meshObject(asset, { channel = 'lit', lod = -1, overrides = {}, c
   if (useLod) {
     const level = channel === 'lod' && lod < 0 ? 0 : lod;
     if (channel === 'lod') mesh = new THREE.Mesh(lodGeometry(asset, level), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, side: THREE.DoubleSide, flatShading: true }));
+    else if (channel === 'density') mesh = new THREE.Mesh(densityGeometry(`${asset.id}:${asset.revision}:lodmat${level}`, lodMaterialGeometry(asset, level)), densityMaterial());
     else mesh = new THREE.Mesh(lodMaterialGeometry(asset, level), channelMaterials(asset, channel, overrides));
+  } else if (channel === 'density') {
+    mesh = new THREE.Mesh(densityGeometry(`${asset.id}:${asset.revision}:full`, renderGeometry(asset)), densityMaterial());
   } else {
     mesh = new THREE.Mesh(renderGeometry(asset), channelMaterials(asset, channel, overrides));
   }
@@ -231,37 +247,15 @@ export function meshObject(asset, { channel = 'lit', lod = -1, overrides = {}, c
   mesh.receiveShadow = true;
   group.add(mesh);
   group.userData.mesh = mesh;
-  if (channel === 'wire') {
-    const wire = new THREE.Mesh(mesh.geometry, new THREE.MeshBasicMaterial({ color: '#7fb4ff', wireframe: true, transparent: true, opacity: 0.28, depthTest: true }));
-    wire.raycast = () => {};
-    group.add(wire);
-  }
   if (channel === 'collision' && asset.out.collision) group.add(collisionObject(asset.out.collision));
   return group;
 }
 
 const COLLISION_GREEN = '#46d267';
 
+// Collision volume as a field shell (fresnel rim, soft face borders, scan bands; voxel dust for SDF colliders).
 export function collisionObject(shape, color = COLLISION_GREEN) {
-  const group = new THREE.Group();
-  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 });
-  if (!shape || shape.type === 'none') return group;
-  let lines;
-  if (shape.type === 'box' || shape.type === 'sdf') {
-    lines = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(shape.half[0] * 2, shape.half[1] * 2, shape.half[2] * 2)), shape.type === 'sdf' ? new THREE.LineDashedMaterial({ color: '#6aa7c7', dashSize: 0.06, gapSize: 0.04 }) : mat);
-    if (shape.type === 'sdf') lines.computeLineDistances();
-  } else if (shape.type === 'sphere') {
-    lines = new THREE.Group();
-    const circle = new THREE.BufferGeometry().setFromPoints(Array.from({ length: 65 }, (_, i) => { const a = (i / 64) * Math.PI * 2; return new THREE.Vector3(Math.cos(a) * shape.radius, Math.sin(a) * shape.radius, 0); }));
-    for (const r of [[0, 0, 0], [Math.PI / 2, 0, 0], [0, Math.PI / 2, 0]]) { const l = new THREE.Line(circle, mat); l.rotation.set(...r); lines.add(l); }
-  } else if (shape.type === 'capsule') {
-    lines = new THREE.LineSegments(new THREE.WireframeGeometry(new THREE.CapsuleGeometry(shape.radius, shape.halfHeight * 2, 3, 12)), mat);
-    if (shape.axis === 0) lines.rotation.z = Math.PI / 2;
-    if (shape.axis === 2) lines.rotation.x = Math.PI / 2;
-  }
-  if (lines) { lines.position.set(...shape.centre); group.add(lines); }
-  group.traverse((o) => { o.raycast = () => {}; });
-  return group;
+  return fieldShell(shape, shape && shape.type === 'sdf' ? '#6aa7c7' : color);
 }
 
 // --------------------------------------------------------------------------------------------------------- stage
@@ -278,11 +272,9 @@ export class Stage {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(background);
     this.camera = new THREE.PerspectiveCamera(40, 1, 0.01, 500);
-    this.camera.position.set(4, 2.6, 5);
-    this.controls = new OrbitControls(this.camera, canvas);
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.12;
-    this.controls.screenSpacePanning = true;
+    this.raycaster = new THREE.Raycaster();
+    this.rig = new CameraRig(this.camera, canvas, { pick: (x, y) => { const hit = this.surfaceAt(x, y); return hit ? hit.point : null; } });
+    this.framed = false;
     this.scene.add(new THREE.HemisphereLight('#dfe8ff', '#202024', 1.5));
     this.sun = new THREE.DirectionalLight('#ffffff', 2.4);
     this.sun.position.set(5, 9, 4);
@@ -293,9 +285,7 @@ export class Stage {
     const fill = new THREE.DirectionalLight('#9fc4ff', 0.6);
     fill.position.set(-6, 3, -5);
     this.scene.add(fill);
-    this.grid = new THREE.GridHelper(40, 80, '#3a3a40', '#1f1f24');
-    this.grid.material.transparent = true;
-    this.grid.material.opacity = 0.8;
+    this.grid = dotFloor();
     this.grid.visible = grid;
     this.scene.add(this.grid);
     this.ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.ShadowMaterial({ opacity: 0.35 }));
@@ -307,7 +297,6 @@ export class Stage {
     this.overlay = new THREE.Group();
     this.scene.add(this.content, this.overlay);
     this.frameCallbacks = new Set();
-    this.raycaster = new THREE.Raycaster();
     this.lastTime = performance.now();
     this.stats = { fps: 0, ms: 0 };
     let frames = 0, last = performance.now();
@@ -318,8 +307,12 @@ export class Stage {
       const t0 = performance.now();
       const dt = Math.min(0.05, (t0 - this.lastTime) / 1000);
       this.lastTime = t0;
-      this.controls.update();
+      clock.value += dt;
       for (const cb of this.frameCallbacks) cb(dt);
+      this.rig.update(dt);
+      const floor = this.grid.material.uniforms;
+      floor.uFocus.value.copy(this.rig.target);
+      floor.uRadius.value = Math.max(6, this.rig.distance * 2.6);
       this.renderer.render(this.scene, this.camera);
       frames++;
       const now = performance.now();
@@ -346,29 +339,32 @@ export class Stage {
     if (object) this.overlay.add(object);
   }
 
-  // Fits the camera to a box (THREE.Box3) at the given view angle.
-  frame(box, { yaw = 38, pitch = 22, keepAngle = false } = {}) {
+  // Flies the camera to fit a box (THREE.Box3); the first framing is a cut, later ones are eased flights.
+  frame(box, { yaw = 38, pitch = 22, keepAngle = false, animate = true } = {}) {
     if (!box || box.isEmpty()) return;
+    this.rig.frame(box, { yaw, pitch, keepAngle, animate: animate && this.framed });
+    this.framed = true;
     const sphere = box.getBoundingSphere(new THREE.Sphere());
     const r = Math.max(sphere.radius, 0.05);
-    const dist = r / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 1.12;
-    let dir;
-    if (keepAngle) dir = this.camera.position.clone().sub(this.controls.target).normalize();
-    else {
-      const y = THREE.MathUtils.degToRad(yaw), p = THREE.MathUtils.degToRad(pitch);
-      dir = new THREE.Vector3(Math.sin(y) * Math.cos(p), Math.sin(p), Math.cos(y) * Math.cos(p));
-    }
-    this.controls.target.copy(sphere.center);
-    this.camera.position.copy(sphere.center).addScaledVector(dir, dist);
-    this.camera.near = Math.max(0.005, dist / 200);
-    this.camera.far = dist * 50 + 50;
-    this.camera.updateProjectionMatrix();
     this.sun.position.copy(sphere.center).add(new THREE.Vector3(r * 2.5 + 2, r * 4 + 4, r * 2 + 2));
     this.sun.target.position.copy(sphere.center);
     const cam = this.sun.shadow.camera;
     const s = r * 1.8 + 0.5;
     cam.left = -s; cam.right = s; cam.top = s; cam.bottom = -s; cam.near = 0.1; cam.far = r * 12 + 20;
     cam.updateProjectionMatrix();
+  }
+
+  // First real surface under the cursor (debug visuals and pick helpers are not surfaces).
+  surfaceAt(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    for (const hit of this.raycaster.intersectObject(this.content, true)) {
+      const m = Array.isArray(hit.object.material) ? hit.object.material[0] : hit.object.material;
+      if (hit.object.userData.debug || (m && m.visible === false)) continue;
+      return hit;
+    }
+    return null;
   }
 
   pick(clientX, clientY, roots = [this.content]) {

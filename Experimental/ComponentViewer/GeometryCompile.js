@@ -9,6 +9,8 @@ import { identityTransform } from './Engine/GeometryTransform.js';
 import { formatObj, formatUvSvg } from './Engine/ObjExport.js';
 import { collisionVolume } from './Engine/MeshAnalysis.js';
 import { THREE, Stage, meshObject, collisionObject, boxOf, assetSlots } from './Render.js';
+import { fieldShell, beadTrail, anchorMark, densityColors } from './Visuals.js';
+import { createCameraHud } from './Camera.js';
 
 const AUTO = new Set(['source', 'geometry', 'collision', 'meta', 'icon']);
 const STATE_LABEL = { done: 'BAKED', stale: 'STALE', running: 'RUNNING', off: 'SKIPPED', error: 'FAILED' };
@@ -28,6 +30,7 @@ export function createGeometryCompile({ ctx, onFinish }) {
     if (!stage) {
       stage = new Stage($('CompileViewport'), { background: '#0b0b0d' });
       stage.frameCallbacks.add(updateReadout);
+      createCameraHud(stage.rig, document.querySelector('.compile-well'));
       bindCanvas2d();
     }
     $('CompileLog').innerHTML = '';
@@ -378,7 +381,7 @@ export function createGeometryCompile({ ctx, onFinish }) {
       const set = asset.settings.icon;
       const useView = el('button', { type: 'button', class: 'tool wide' }, iconEl('camera', 14), 'Use current preview angle');
       useView.addEventListener('click', () => {
-        const d = stage.camera.position.clone().sub(stage.controls.target).normalize();
+        const d = stage.camera.position.clone().sub(stage.rig.target).normalize();
         set.yaw = Math.round(THREE.MathUtils.radToDeg(Math.atan2(d.x, d.z)));
         set.pitch = Math.round(THREE.MathUtils.radToDeg(Math.asin(d.y)));
         changed('icon');
@@ -460,7 +463,7 @@ export function createGeometryCompile({ ctx, onFinish }) {
       mode2d = true;
     }
     if (selected === 'source') {
-      modes.append(segmented({ options: [{ id: 'shaded', label: 'Shaded' }, { id: 'wire', label: 'Wire' }], value: view.source, onChange: (v) => { view.source = v; renderPreview(); } }));
+      modes.append(segmented({ options: [{ id: 'shaded', label: 'Shaded' }, { id: 'density', label: 'Density' }], value: view.source, onChange: (v) => { view.source = v; renderPreview(); } }));
     }
     if (selected === 'meta') { card.hidden = false; renderCard(); }
 
@@ -478,17 +481,15 @@ export function createGeometryCompile({ ctx, onFinish }) {
     // 3D previews
     let object = null, overlay = null;
     if (selected === 'source') {
-      object = sourceObject(view.source === 'wire');
+      object = sourceObject(view.source === 'density');
       overlay = openEdges();
     } else if (selected === 'geometry') {
       object = meshObject(asset, { channel: 'lit' });
-      overlay = new THREE.AxesHelper(Math.max(0.25, g.bounds.radius * 0.6));
-      overlay.material.depthTest = false;
-      overlay.renderOrder = 10;
+      overlay = anchorMark(Math.max(0.06, g.bounds.radius * 0.12)); // the pivot the Geometry step placed
     } else if (selected === 'uv') {
       object = meshObject(asset, { channel: 'uv' });
     } else if (selected === 'lod') {
-      object = asset.out.lod ? meshObject(asset, { channel: view.lod === 'clusters' ? 'lod' : 'lit', lod: view.lodLevel }) : meshObject(asset, { channel: 'wire' });
+      object = asset.out.lod ? meshObject(asset, { channel: view.lod === 'clusters' ? 'lod' : 'lit', lod: view.lodLevel }) : meshObject(asset, { channel: 'density' });
     } else if (selected === 'collision') {
       object = meshObject(asset, { channel: 'collision' });
     } else if (selected === 'icon') {
@@ -499,7 +500,7 @@ export function createGeometryCompile({ ctx, onFinish }) {
     stage.setOverlay(overlay);
   }
 
-  function sourceObject(wire) {
+  function sourceObject(density) {
     const src = asset.out.source;
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(src.positions, 3));
@@ -508,13 +509,17 @@ export function createGeometryCompile({ ctx, onFinish }) {
     // Show the source where the Geometry step will put it (same pivot), so switching steps does not jump.
     const g = asset.out.geometry;
     const group = new THREE.Group();
-    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: '#9aa3b2', roughness: 0.6, side: THREE.DoubleSide, flatShading: false }));
+    const shown = density ? geo.toNonIndexed() : geo;
+    if (density) { shown.setAttribute('color', new THREE.BufferAttribute(densityColors(shown.attributes.position.array), 3)); shown.computeVertexNormals(); }
+    const mesh = new THREE.Mesh(shown, density
+      ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, side: THREE.DoubleSide, flatShading: true })
+      : new THREE.MeshStandardMaterial({ color: '#9aa3b2', roughness: 0.6, side: THREE.DoubleSide, flatShading: false }));
     mesh.castShadow = true;
     group.add(mesh);
-    if (wire) group.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: '#7fb4ff', wireframe: true, transparent: true, opacity: 0.35 })));
     if (g) { const b = src.bounds; group.position.set(g.bounds.centre[0] - b.centre[0], g.bounds.lo[1] - b.lo[1], g.bounds.centre[2] - b.centre[2]); }
-    const box = new THREE.Box3Helper(new THREE.Box3(new THREE.Vector3(...src.bounds.lo), new THREE.Vector3(...src.bounds.hi)), '#3d4350');
-    group.add(box);
+    // Source bounds as a faint field: soft borders pooled at the faces, no edge lines.
+    const lo = src.bounds.lo, hi = src.bounds.hi;
+    group.add(fieldShell({ type: 'box', centre: lo.map((v, i) => (v + hi[i]) / 2), half: lo.map((v, i) => Math.max(1e-3, (hi[i] - v) / 2)) }, '#7d8aa3', { base: 0, rim: 0.06, scan: 0, border: 0.16 }));
     return group;
   }
 
@@ -532,10 +537,8 @@ export function createGeometryCompile({ ctx, onFinish }) {
       const a = Math.floor(key / n), b = key % n;
       pts.push(src.positions[a * 3], src.positions[a * 3 + 1], src.positions[a * 3 + 2], src.positions[b * 3], src.positions[b * 3 + 1], src.positions[b * 3 + 2]);
     }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    const lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: '#ffb238', depthTest: false, transparent: true }));
-    lines.renderOrder = 20;
+    // Open borders as a trail of glowing amber beads, spaced to the object's size.
+    const lines = beadTrail(pts, '#ffb238', { spacing: Math.max(0.004, src.bounds.radius * 0.012), size: Math.max(0.01, src.bounds.radius * 0.02) });
     const g = asset.out.geometry;
     if (g) { const b = src.bounds; lines.position.set(g.bounds.centre[0] - b.centre[0], g.bounds.lo[1] - b.lo[1], g.bounds.centre[2] - b.centre[2]); }
     return lines;

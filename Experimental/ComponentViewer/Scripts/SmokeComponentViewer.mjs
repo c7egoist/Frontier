@@ -145,6 +145,25 @@ await step('select tree rows & details', async () => {
   for (const r of rows) { click(r); await sleep(5); }
   console.log('   details sections:', $('Details').querySelectorAll('.detail-section').length, '| head:', ($('Details').querySelector('.name-input') || {}).value);
 });
+await step('camera rig + HUD', async () => {
+  const cv = $('Viewport'), hud = $('ViewportWell').querySelector('.cam-hud');
+  if (!hud) throw new Error('camera HUD missing');
+  const lens = hud.querySelector('.cam-chip.lens'), before = lens.textContent;
+  const ev = (type, x, y, extra = {}) => cv.dispatchEvent(new w.MouseEvent(type, { bubbles: true, clientX: x, clientY: y, ...extra }));
+  ev('pointerdown', 200, 200); ev('pointermove', 260, 230); ev('pointermove', 300, 240); ev('pointerup', 300, 240);
+  ev('pointerdown', 200, 200, { button: 2 }); key('w'); ev('pointermove', 210, 205); ev('pointerup', 210, 205, { button: 2 });
+  cv.dispatchEvent(new w.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -120, clientX: 200, clientY: 200 }));
+  cv.dispatchEvent(new w.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 120, altKey: true }));
+  click(lens); await sleep(1100);
+  click(hud.querySelectorAll('.dial-bead')[2]); key('t'); await sleep(200); key('t');
+  const camRow = [...$('ComponentTree').querySelectorAll('.comp-row')].find((r) => /Camera/i.test(r.textContent));
+  let through = '';
+  if (camRow) { click(camRow); await sleep(20); key('c'); await sleep(1300); through = lens.textContent; }
+  key('f'); await sleep(900);
+  console.log('   lens:', before, '→', lens.textContent, '| beads:', hud.querySelectorAll('.dial-bead').length, '| camera row:', !!camRow, '| look chip hidden:', hud.querySelector('.cam-chip:nth-child(3)').hidden, '| through ChaseCamera:', through);
+  if (through !== '20 mm') throw new Error('look-through did not take the Camera component lens (62° → 20 mm)');
+  key('Escape');
+});
 await step('channels 1-7', async () => { for (const k of '1234567') { key(k); await sleep(20); } key('1'); console.log('   legend:', $('Legend').textContent.slice(0, 60)); });
 await step('drawer compiled + curves', async () => {
   click($('DrawerHandle')); await sleep(20);

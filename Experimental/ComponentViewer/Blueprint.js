@@ -5,7 +5,7 @@
 // numbers (sockets, mass, CoM, aero, torque curve, gearing) from Frontier-OLD's VehicleProvingGrounds sheets.
 
 export const COMPONENT_CLASSES = {
-  SceneRoot: { label: 'Scene Root', icon: 'root', scene: true, group: 'Common', props: [] },
+  Origin: { label: 'Origin', icon: 'root', scene: true, group: 'Common', props: [] }, // the class's own frame: every scene component hangs from it
   Scene: { label: 'Scene', icon: 'pivot', scene: true, group: 'Common', props: [] },
   StaticMesh: {
     label: 'Static Mesh', icon: 'cube', scene: true, group: 'Common', props: [
@@ -147,7 +147,7 @@ export function createComponent(type, name, overrides = {}) {
 }
 
 export function createBlueprint(name, parentClass = 'Actor') {
-  const root = createComponent('SceneRoot', 'DefaultSceneRoot');
+  const root = createComponent('Origin', 'Origin');
   return { id: `BP${nextBlueprint++}`, name, parentClass, components: [root], rootId: root.id, dirty: false, compiledRevision: 0, revision: 0 };
 }
 

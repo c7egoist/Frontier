@@ -266,4 +266,39 @@ await test('Torque curve interpolation hits authored samples; drive preview acce
   assert.equal(VEHICLE_SHEET.axleMount.length, 4);
 });
 
+await test('Glide camera: framing fits the bounds, flights take the short way round and settle, dolly zoom keeps the subject size', async () => {
+  globalThis.addEventListener ??= () => {};
+  const THREE = await import('../Vendor/three.esm.min.js');
+  const { CameraRig } = await import('../Camera.js');
+  const dom = { addEventListener() {}, clientHeight: 600, setPointerCapture() {} };
+  const camera = new THREE.PerspectiveCamera(40, 16 / 9, 0.1, 100);
+  const rig = new CameraRig(camera, dom);
+  const box = new THREE.Box3(new THREE.Vector3(-2, 0, -1), new THREE.Vector3(2, 1.5, 1));
+  rig.frame(box, { yaw: 170, pitch: 20, animate: false });
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  const half = THREE.MathUtils.degToRad(camera.fov) / 2;
+  assert.ok(Math.abs(Math.sin(half) * rig.distance / 1.12 - sphere.radius) < 1e-6, 'bounding sphere fits the vertical fov with 12% margin');
+  assert.ok(camera.position.distanceTo(sphere.center) - rig.distance < 1e-6);
+  rig.flyTo({ yaw: THREE.MathUtils.degToRad(-170) }, { duration: 0.5 });
+  let maxStep = 0, last = rig.yaw;
+  for (let i = 0; i < 40; i++) { rig.update(1 / 60); maxStep = Math.max(maxStep, Math.abs(rig.yaw - last)); last = rig.yaw; }
+  assert.ok(Math.abs(rig.yaw - THREE.MathUtils.degToRad(190)) < 1e-6, 'went 20° through 180°, not 340° back');
+  assert.ok(maxStep < THREE.MathUtils.degToRad(2), 'eased: no frame jumps more than 2°');
+  const size = () => rig.goal.distance * Math.tan(THREE.MathUtils.degToRad(2 * Math.atan(12 / rig.goal.focal) * 180 / Math.PI) / 2);
+  const s0 = size();
+  rig.dollyZoom(85); assert.ok(Math.abs(size() - s0) < 1e-9, 'subject height at the pivot unchanged at 85 mm');
+  rig.dollyZoom(14); assert.ok(Math.abs(size() - s0) < 1e-9, 'and at 14 mm');
+  for (let i = 0; i < 240; i++) rig.update(1 / 60);
+  assert.ok(Math.abs(rig.focal - 14) < 1e-3 && Math.abs(camera.fov - 2 * Math.atan(12 / 14) * 180 / Math.PI) < 0.01, 'springs settle on the goal lens');
+});
+
+await test('Density view: smaller triangles map to the hot end of the ramp', async () => {
+  const { densityColors } = await import('../Visuals.js');
+  const tri = (s, x) => [x, 0, 0, x + s, 0, 0, x, s, 0];
+  const colors = densityColors(new Float32Array([...tri(0.01, 0), ...tri(0.1, 1), ...tri(1, 2)]));
+  const red = (t) => colors[t * 9], blue = (t) => colors[t * 9 + 2];
+  assert.ok(red(0) > blue(0) && blue(2) > red(2), 'dense is red, sparse is blue');
+  assert.ok(red(0) > red(1) && red(1) > red(2));
+});
+
 console.log(`\n${passed} checks passed`);

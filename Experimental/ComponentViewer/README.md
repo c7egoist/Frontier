@@ -54,10 +54,10 @@ to it.
 
 **Component Viewer** (the Blueprint editor):
 
-- *Components*: the scene hierarchy under DefaultSceneRoot. Drag a row onto another to re-parent it. Each row has a
+- *Components*: the scene hierarchy under the class's **Origin** (its own frame; renamed from the old default root). Drag a row onto another to re-parent it. Each row has a
   visibility toggle and a warning marker. Actor components (Vehicle Movement, Rotating Movement) sit in their own
   section. **Add** lists the component classes plus every compiled mesh in Content.
-- *Viewport*: 7 inspection channels, keys 1–7: Lit, Unlit, Wireframe, Normals, UV checker, Cluster LOD and Collision.
+- *Viewport*: 7 inspection channels, keys 1–7: Lit, Unlit, Density, Normals, UV checker, Cluster LOD and Collision.
   Click a component to select it, or drop a Content asset onto the viewport to add it. **Construction Script** shows a
   generated node graph you can pan, zoom and drag.
 - *Details*: built from each class's property specs (transform, mesh and material slots, LOD, lights, camera,
@@ -67,8 +67,39 @@ to it.
   editable with linear, smooth, ease or step interpolation.
 - *Simulate* (Space): Vehicle Lab's drive preview, with speed, rpm, acceleration, torque, gear, throttle and brake.
   It spins the Vehicle Movement wheels and Rotating Movement components.
-- **Compile** (Ctrl+S) validates the class and bakes its icon. The other keys are Del, Ctrl+D, F, G and Esc; press ? for
-  the full list.
+- **Compile** (Ctrl+S) validates the class and bakes its icon. The other keys are Del, Ctrl+D, F, G, T, C and Esc; press
+  ? for the full list.
+
+**Glide camera** (`Camera.js`, both viewports). State is a pivot plus yaw, pitch, distance and focal length; input
+writes goals and the live values ease toward them, so nothing ever cuts.
+
+- Drag orbits with inertia around the *surface you grabbed*: on press the pivot slides along the view axis to the depth
+  under the cursor, so the view never jumps but always turns around what you touched.
+- Wheel glides toward the point under the cursor. Right / middle / Shift drag pans. Hold right and use WASD + QE to
+  drift (Shift for speed).
+- Alt + wheel, or the lens chip (14 / 24 / 35 / 50 / 85 / 135 mm), is a dolly zoom: distance scales with focal length,
+  so the subject keeps its size while the perspective flattens or deepens.
+- F, double-click, step changes and new imports are eased flights (position, pivot and lens, log-space distance).
+- The dial (bottom right) shows the axes as depth-sorted beads with a horizon arc; click a bead to fly to that side.
+  ↻ is a turntable that pauses while you touch the view. With a Camera component selected, **Look through** (C) flies
+  into its pose and lens.
+- While simulating, speed opens the lens slightly and high rpm adds a faint engine shimmer.
+
+**Debug visuals** (`Visuals.js`): no line helpers anywhere. Volumes are surfaces, light is light.
+
+| Thing | Drawn as |
+|---|---|
+| Collision (compiled green, components amber) | Field shell: fresnel rim, soft face borders, rising scan bands |
+| SDF collider | Shell with one soft dot per voxel cell on each face |
+| Spot light, camera view | Additive light-volume beam (round / 16:9 four-sided) fading along its axis |
+| Point light | Glow core; influence radius as a faint additive field while selected |
+| Selection | Breathing amber fresnel halo on the selected surfaces + a footprint of light pooled on the floor, with a ripple |
+| Origin / Scene pivots, Geometry-step pivot | Shaded anchor: ring, core and three axis beads |
+| Arrow | Shaded shaft and cone |
+| Floor | Dots (metres, quarters) fading out around the pivot; axis dots tinted red X / blue Z |
+| Open borders (Source step) | Trail of glowing amber beads |
+| Triangle density (replaces wireframe) | Heat ramp per triangle from its area against the median: blue sparse … red dense |
+| Mesh with no asset | Pulsing red field box |
 
 The starting class is **BP_ControlVehicle**, the Vehicle Lab car. Its body, tyre and rim `.facet` files are compiled
 through the same pipeline. It has four wheels, each with a rim child, headlights, a chase camera, a bumper trigger and
@@ -84,10 +115,12 @@ Vehicle Movement, using the Vehicle Lab sheet values: 1300 kg, a 520 N·m peak a
 | `ComponentViewer.js` | Blueprint editor UI |
 | `Blueprint.js` | Component classes, property specs, tree operations, validation, torque curve, drive step (no DOM) |
 | `Render.js` | three.js stage, mesh channels, icon renderer |
+| `Camera.js` | Glide camera rig and its HUD (dial, lens, turntable) |
+| `Visuals.js` | Shader debug visuals: field shells, beams, glows, halo, footprint, dot floor, density |
 | `Ui.js`, `Icons.js`, `ComponentViewer.css` | Project Zero controls, icons and styles |
 | `Engine/` | Readers, mesh analysis, workers; SDF, UV, cluster LOD, simplification, transform and OBJ export from Frontier-1 |
 | `Models/` | ControlVehicle Body / Tyre / Rim (FCT1) from Vehicle Lab |
-| `Vendor/`, `Fonts/` | three.js r187 + OrbitControls; DM Sans (OFL) |
+| `Vendor/`, `Fonts/` | three.js r187; DM Sans (OFL) |
 
 ## Checks
 

@@ -10,16 +10,18 @@ import {
 } from './Blueprint.js';
 import { STEPS, isCompiled, fmt, formatMs } from './CompileSteps.js';
 import { THREE, Stage, meshObject, collisionObject, assetSlots } from './Render.js';
+import { fieldShell, beam, glowSprite, solidArrow, anchorMark, addHalo, footprint } from './Visuals.js';
+import { createCameraHud } from './Camera.js';
 import { IMPORT_FORMATS } from './Engine/ImportFormats.js';
 
 const CHANNELS = [
-  { id: 'lit', label: 'Lit', key: '1' }, { id: 'unlit', label: 'Unlit', key: '2' }, { id: 'wire', label: 'Wire', key: '3' },
+  { id: 'lit', label: 'Lit', key: '1' }, { id: 'unlit', label: 'Unlit', key: '2' }, { id: 'density', label: 'Density', key: '3' },
   { id: 'normals', label: 'Normals', key: '4' }, { id: 'uv', label: 'UV checker', key: '5' }, { id: 'lod', label: 'LOD clusters', key: '6' },
   { id: 'collision', label: 'Collision', key: '7' },
 ];
 const CHANNEL_NOTE = {
-  lit: 'Lit · material slots', unlit: 'Unlit · base colour', wire: 'Wireframe over lit', normals: 'Corner normals (compiled)',
-  uv: 'UV checker · compiled charts', lod: 'Cluster colours · forced LOD or LOD 0', collision: 'Compiled collision (green) · collision components (amber)',
+  lit: 'Lit · material slots', unlit: 'Unlit · base colour', density: 'Triangle density · red dense, blue sparse', normals: 'Corner normals (compiled)',
+  uv: 'UV checker · compiled charts', lod: 'Cluster colours · forced LOD or LOD 0', collision: 'Compiled collision field (green) · collision components (amber)',
 };
 const DEG = Math.PI / 180;
 const AMBER = '#ffb238';
@@ -29,7 +31,7 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
   stage.raycaster.params.Line.threshold = 0.05;
   const blueprints = [];
   let bp = null, selectedId = null, channel = 'lit', centreMode = 'viewport', simulate = false, drawerTab = 'compiled', leftTab = 'components';
-  let objects = new Map(), selectionBox = null, drive = createDriveState();
+  let objects = new Map(), selection = null, drive = createDriveState();
   const graphState = new Map(); // bp.id → { nodes positions, pan }
 
   // ------------------------------------------------------------------------------------------------ blueprints
@@ -53,12 +55,16 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
 
   const selected = () => (bp ? findComponent(bp, selectedId) : null);
 
+  const SELECT_DRAWN = new Set(['PointLight', 'SpotLight', 'Camera']); // visuals that change with selection
   function select(id) {
+    const before = selected();
     selectedId = id;
+    const after = selected();
     renderTree();
     renderDetails();
     renderDrawer();
-    updateSelectionBox();
+    if ((before && SELECT_DRAWN.has(before.type)) || (after && SELECT_DRAWN.has(after.type))) rebuildScene();
+    else updateSelection();
     if (centreMode === 'graph') renderGraph();
   }
 
@@ -83,8 +89,8 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
       (parent || root).add(node);
     });
     stage.setContent(root);
-    selectionBox = null;
-    updateSelectionBox();
+    selection = null;
+    updateSelection();
   }
 
   function buildComponent(c) {
@@ -105,14 +111,16 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
         if (asset && asset.out.geometry) {
           const ch = channel === 'collision' && p.collisionPreset === 'NoCollision' ? 'lit' : channel;
           node.add(meshObject(asset, { channel: ch, lod: p.lod, overrides: p.slots, castShadow: p.castShadow }));
-        } else gizmo(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(0.3, 0.3, 0.3)), new THREE.LineBasicMaterial({ color: '#ff6b5e' })), 0.2);
+        } else gizmo(fieldShell({ type: 'box', centre: [0, 0, 0], half: [0.15, 0.15, 0.15] }, '#ff6b5e', { pulse: 1, scan: 0 }), 0.2); // no mesh assigned
         break;
       }
       case 'PointLight': {
         const light = new THREE.PointLight(p.color, p.intensity, p.range, 2);
         node.add(light);
-        gizmo(new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), new THREE.MeshBasicMaterial({ color: p.color })));
-        if (c.id === selectedId) gizmo(rangeRings(p.range, p.color));
+        gizmo(new THREE.Mesh(new THREE.SphereGeometry(0.045, 16, 12), new THREE.MeshBasicMaterial({ color: p.color })));
+        gizmo(glowSprite(p.color, 0.55));
+        // Influence: a faint additive field the size of the attenuation radius, shown while selected.
+        if (c.id === selectedId) gizmo(fieldShell({ type: 'sphere', centre: [0, 0, 0], radius: p.range }, p.color, { base: 0.015, rim: 0.22, scan: 0.06, additive: true }));
         break;
       }
       case 'SpotLight': {
@@ -120,11 +128,9 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
         light.target.position.set(1, 0, 0);
         node.add(light, light.target);
         const len = Math.min(p.range, 2.5), r = Math.tan(p.angle * DEG) * len;
-        const cone = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.ConeGeometry(r, len, 16, 1, true)), new THREE.LineBasicMaterial({ color: p.color, transparent: true, opacity: 0.55 }));
-        cone.rotation.z = Math.PI / 2;
-        cone.position.x = len / 2;
-        gizmo(cone);
-        gizmo(new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), new THREE.MeshBasicMaterial({ color: p.color })));
+        gizmo(beam({ length: len, radius: r, color: p.color, strength: c.id === selectedId ? 0.45 : 0.28 }));
+        gizmo(new THREE.Mesh(new THREE.SphereGeometry(0.04, 14, 10), new THREE.MeshBasicMaterial({ color: p.color })));
+        gizmo(glowSprite(p.color, 0.45));
         break;
       }
       case 'Camera': {
@@ -137,43 +143,23 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
         lens.position.x = 0.18;
         gizmo(body, 0.2);
         node.add(lens);
-        node.add(frustumLines(p.fov));
+        node.add(frustumBeam(p.fov, c.id === selectedId));
         break;
       }
       case 'BoxCollision': gizmo(collisionObject({ type: 'box', centre: [0, 0, 0], half: p.extent }, AMBER), 0.1); break;
       case 'SphereCollision': gizmo(collisionObject({ type: 'sphere', centre: [0, 0, 0], radius: p.radius }, AMBER), 0.1); break;
       case 'CapsuleCollision': gizmo(collisionObject({ type: 'capsule', centre: [0, 0, 0], axis: 1, radius: p.radius, halfHeight: p.halfHeight }, AMBER), 0.1); break;
-      case 'Arrow': {
-        const arrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), p.length, p.color, p.length * 0.22, p.length * 0.12);
-        gizmo(arrow, 0.12);
-        break;
-      }
-      case 'SceneRoot':
-      case 'Scene': {
-        const s = c.type === 'SceneRoot' ? 0.06 : 0.045;
-        const dot = new THREE.Mesh(new THREE.OctahedronGeometry(s), new THREE.MeshBasicMaterial({ color: c.type === 'SceneRoot' ? '#e8e8e8' : '#6aa7c7', wireframe: true }));
-        gizmo(dot, 0.1);
-        break;
-      }
+      case 'Arrow': gizmo(solidArrow(p.length, p.color), 0.12); break;
+      case 'Origin': gizmo(anchorMark(0.11, '#e8e8e8'), 0.12); break;
+      case 'Scene': gizmo(anchorMark(0.07, '#6aa7c7'), 0.1); break;
     }
     return node;
   }
 
-  function frustumLines(fov) {
-    const len = 0.9, h = Math.tan((fov * DEG) / 2) * len, w = h * (16 / 9);
-    const pts = [[0, 0, 0], [len, h, w], [0, 0, 0], [len, -h, w], [0, 0, 0], [len, h, -w], [0, 0, 0], [len, -h, -w],
-      [len, h, w], [len, -h, w], [len, -h, w], [len, -h, -w], [len, -h, -w], [len, h, -w], [len, h, -w], [len, h, w]];
-    const geo = new THREE.BufferGeometry().setFromPoints(pts.map((p) => new THREE.Vector3(...p)));
-    const lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: '#9aa3b2', transparent: true, opacity: 0.6 }));
-    lines.raycast = () => {};
-    return lines;
-  }
-
-  function rangeRings(range, color) {
-    const g = new THREE.Group();
-    const circle = new THREE.BufferGeometry().setFromPoints(Array.from({ length: 65 }, (_, i) => { const a = (i / 64) * Math.PI * 2; return new THREE.Vector3(Math.cos(a) * range, Math.sin(a) * range, 0); }));
-    for (const r of [[0, 0, 0], [Math.PI / 2, 0, 0], [0, Math.PI / 2, 0]]) { const l = new THREE.Line(circle, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.25 })); l.rotation.set(...r); l.raycast = () => {}; g.add(l); }
-    return g;
+  // The camera's view as a light volume: a four-sided beam at the lens aspect that fades with distance.
+  function frustumBeam(fov, active) {
+    const len = active ? 2.4 : 1.1, h = Math.tan((fov * DEG) / 2) * len;
+    return beam({ length: len, radius: h * Math.SQRT2, sides: 4, aspect: 16 / 9, color: '#bcd3ff', strength: active ? 0.3 : 0.16 });
   }
 
   function applyTransform(node, c) {
@@ -191,7 +177,7 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
     const visit = (o) => {
       if (o !== node && o.userData.componentId && !recurse) return;
       if (o.visible === false) return;
-      if ((o.isMesh || o.isLineSegments || o.isLine) && o.geometry) {
+      if ((o.isMesh || o.isLineSegments || o.isLine) && o.geometry && !o.userData.halo) {
         const m = Array.isArray(o.material) ? o.material[0] : o.material;
         if (!m || m.visible !== false) {
           if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
@@ -204,17 +190,26 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
     return box;
   }
 
-  function updateSelectionBox() {
+  // Selection: an amber fresnel halo over the selected surfaces and a footprint of light pooled on the floor.
+  function updateSelection() {
+    if (selection) selection.removeHalo();
     stage.setOverlay(null);
-    selectionBox = null;
+    selection = null;
     const node = objects.get(selectedId);
     if (!node || selectedId === bp.rootId) return;
-    selectionBox = new THREE.Box3Helper(componentBox(node), AMBER);
-    selectionBox.material.depthTest = false;
-    selectionBox.material.transparent = true;
-    selectionBox.renderOrder = 30;
-    selectionBox.userData.node = node;
-    stage.setOverlay(selectionBox);
+    const box = componentBox(node);
+    if (box.isEmpty()) return;
+    const pool = footprint(box, AMBER);
+    selection = { node, pool, removeHalo: addHalo(node), size: box.getSize(new THREE.Vector3()) };
+    stage.setOverlay(pool);
+  }
+
+  function followSelection() {
+    if (!selection) return;
+    const box = componentBox(selection.node);
+    if (box.isEmpty()) return;
+    const c = box.getCenter(new THREE.Vector3());
+    selection.pool.position.x = c.x; selection.pool.position.z = c.z;
   }
 
   function frameAll() {
@@ -238,7 +233,7 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
   // ---------------------------------------------------------------------------------------------- simulation
   stage.frameCallbacks.add((dt) => {
     if (!bp) return;
-    if (selectionBox && simulate) selectionBox.box.copy(componentBox(selectionBox.userData.node));
+    if (simulate) followSelection();
     if (simulate) {
       for (const c of actorComponents(bp)) {
         if (c.type === 'RotatingMovement') {
@@ -254,13 +249,23 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
             const side = Math.cos(comp.props.rotation[1] * DEG) >= 0 ? 1 : -1;
             node.rotateZ(-drive.wheelAngle * side);
           }
-          stage.grid.position.x = -(drive.distance % 0.5);
+          stage.grid.position.x = -(drive.distance % 1);
+          speedFeel(dt, drive.speed, drive.rpm / c.props.redlineRpm);
           updateHud(c);
         }
       }
     }
     updateReadout();
   });
+
+  // While simulating, speed opens the lens a little and high rpm adds a faint engine shimmer to the camera.
+  function speedFeel(dt, speed, rpmShare) {
+    const kick = stage.rig.kick, k = 1 - Math.exp(-dt * 3);
+    kick.fov += (Math.min(9, speed * 0.12) - kick.fov) * k;
+    const shake = Math.max(0, rpmShare - 0.75) * 0.012 * stage.rig.distance * 0.2;
+    const t = performance.now() / 1000;
+    kick.offset.set(Math.sin(t * 61) * shake, Math.sin(t * 47 + 1.3) * shake, Math.sin(t * 53 + 2.1) * shake);
+  }
 
   function setSimulate(on) {
     simulate = on;
@@ -269,7 +274,7 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
     $('SimulateBtn').querySelector('.ico').innerHTML = icon(on ? 'stop' : 'play', 14);
     const vm = actorComponents(bp).find((c) => c.type === 'VehicleMovement');
     $('SimHud').hidden = !(on && vm);
-    if (!on) { drive = createDriveState(); stage.grid.position.x = 0; rebuildScene(); }
+    if (!on) { drive = createDriveState(); stage.grid.position.x = 0; stage.rig.kick.fov = 0; stage.rig.kick.offset.set(0, 0, 0); rebuildScene(); }
   }
 
   function updateHud(vm) {
@@ -429,7 +434,7 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
     list.innerHTML = '';
     const groups = {};
     for (const [type, cls] of Object.entries(COMPONENT_CLASSES)) {
-      if (type === 'SceneRoot') continue;
+      if (type === 'Origin') continue;
       if (q && !cls.label.toLowerCase().includes(q)) continue;
       (groups[cls.group] ||= []).push([type, cls]);
     }
@@ -898,6 +903,7 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
     $('Legend').innerHTML = '';
     $('Legend').append(el('div', {}, CHANNEL_NOTE[id]));
     if (id === 'lod') $('Legend').append(el('div', { class: 'ramp clusters' }));
+    if (id === 'density') $('Legend').append(el('div', { class: 'ramp density' }), el('div', { class: 'ramp-labels' }, el('span', {}, 'sparse'), el('span', {}, 'dense')));
     if (id === 'collision') $('Legend').append(el('div', { class: 'legend-keys' }, el('span', { class: 'k green' }, 'compiled'), el('span', { class: 'k amber' }, 'component')));
     if (!bp) return;
     rebuildScene();
@@ -929,6 +935,20 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
   $('ThrottleInput').addEventListener('input', (e) => { drive.throttle = +e.target.value; $('ThrottleValue').textContent = `${Math.round(drive.throttle * 100)}%`; });
   $('BrakeInput').addEventListener('input', (e) => { drive.brake = +e.target.value; $('BrakeValue').textContent = `${Math.round(drive.brake * 100)}%`; });
 
+  // Camera HUD: orientation dial, lens, turntable, and "look through" for a selected Camera component.
+  const lookChip = el('button', { type: 'button', class: 'cam-chip', title: 'Look through the selected Camera (C)', hidden: '' }, 'Look through');
+  lookChip.addEventListener('click', () => lookThrough());
+  createCameraHud(stage.rig, $('ViewportWell'), { extra: [lookChip] });
+  function lookThrough() {
+    const c = selected(), node = c && objects.get(c.id);
+    if (!c || c.type !== 'Camera' || !node) return;
+    node.updateMatrixWorld(true);
+    const pos = new THREE.Vector3().setFromMatrixPosition(node.matrixWorld);
+    const forward = new THREE.Vector3(1, 0, 0).transformDirection(node.matrixWorld);
+    stage.rig.lookThrough(pos, forward, c.props.fov);
+  }
+  stage.rig.onChange(() => { const c = selected(); lookChip.hidden = !(c && c.type === 'Camera'); });
+
   // Viewport picking (click without drag) and drag-and-drop of content assets.
   const canvas = $('Viewport');
   let down = null;
@@ -957,6 +977,8 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); const d = duplicateComponent(bp, selectedId); if (d) { changed(); select(d.id); } }
     else if (e.key === 'f' || e.key === 'F') frameSelected();
     else if (e.key === 'g' || e.key === 'G') $('GridBtn').click();
+    else if (e.key === 't' || e.key === 'T') document.querySelector('#ViewportWell .cam-chip:nth-child(2)')?.click();
+    else if (e.key === 'c' || e.key === 'C') lookThrough();
     else if (e.key === ' ') { e.preventDefault(); setSimulate(!simulate); }
     else if (e.key === 'Escape') select(bp.rootId);
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); compileBlueprint(); }
