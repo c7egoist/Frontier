@@ -6,12 +6,14 @@
 <title>Brush Studio · Frontier</title>
 <link rel="stylesheet" href="../MaterialInspector/MaterialInspector.css">
 <link rel="stylesheet" href="../MaterialInspector/Outliner.css">
+<link rel="stylesheet" href="../MaterialInspector/Workspace.css">
 <link rel="stylesheet" href="./BrushStudio.css">
 </head>
 <body>
-<!-- TextureStudio's paint brushes, redesigned as a Procreate-style Brush Studio in the Project Zero language: the Brush
-     Library card docks beside the Studio card (section rail · settings · drawing pad with per-tool popups).
-     ?brush=<catalogue id> picks the starting brush, ?tool=<tool id> the starting tool, ?popup=1 opens its menu. -->
+<!-- Texture-painting workspace in the Project Zero language: Brush Library · blank Viewport (tool rail, sliders, closable
+     Drawing Pad previewer) · Studio card.  Every tool has a dedicated studio laid out like Procreate's Brush Studio.
+     ?brush=<catalogue id> picks the starting brush, ?tool=<tool id> the starting tool (and its studio),
+     ?section=<id> a section in that studio, ?pad=0 starts with the drawing pad closed. -->
 <main class="bs-dock">
   <div id="Nav"></div>
   <div id="Studio" class="bs-host"></div>
@@ -21,9 +23,8 @@
   import { DockNav } from "../MaterialInspector/CardKit.js";
   document.getElementById("Nav").outerHTML = DockNav("brush");
   const Q = new URLSearchParams(location.search);
-  const Hub = Mount(document.getElementById("Studio"), { brush: Q.get("brush") || undefined, tool: Q.get("tool") || undefined });
+  const Hub = Mount(document.getElementById("Studio"), { brush: Q.get("brush") || undefined, tool: Q.get("tool") || undefined, pad: Q.get("pad") !== "0" });
   if (Q.get("section")) Hub.Section(Q.get("section"));
-  if (Q.get("popup") === "1") Hub.OpenPopup(Hub.State.Tool);
   globalThis.BrushStudio = Hub;
 </script>
 </body>

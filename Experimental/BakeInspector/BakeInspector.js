@@ -64,6 +64,14 @@ function ResultState() {
   return { Label: Fresh ? "Fresh" : "Stale", Tone: Fresh ? "ok" : "warn", Caption: `${Fresh ? "" : "Settings changed · "}${S.Result.Dry ? "dry run" : S.Result.Device} ${B.Duration(S.Result.Ms / 1000)}` };
 }
 
+// Docked beside the queue outliner (which already shows queued / unbaked counts and output · rays · ETA in its footer),
+// the card trades the three statistic tiles for one quiet line under the Bake button.
+function MetricsHtml() {
+  if (!S.Docked) return StatsHtml();
+  const E = B.Estimate(S.P), R = ResultState();
+  return `<span class="bi-line-stat"><b>${Esc(B.Bytes(E.Bytes))}</b> output</span><span class="bi-line-stat"><b>${Esc(B.Count(E.Rays))}</b> rays</span><span class="bi-line-stat">${E.Maps ? `≈ <b>${Esc(B.Duration(E.Seconds))}</b> on ${Esc(E.Device.toUpperCase())}` : "nothing queued"}</span><span class="bi-line-state tone-${R.Tone || "muted"}" title="${Esc(R.Caption)}">${Esc(R.Label)}</span>`;
+}
+
 function StatsHtml() {
   const E = B.Estimate(S.P), R = ResultState();
   const ResLabel = S.P.resolution >= 1024 ? `${S.P.resolution / 1024}K` : `${S.P.resolution}`;
@@ -175,6 +183,8 @@ function CardHtml() {
         <button type="button" class="icon-btn" data-act="undo" ${H.Past.length && !Run ? "" : "disabled"} title="Undo (Ctrl+Z)" aria-label="Undo">${icon("undo", 14)}</button>
         <button type="button" class="icon-btn" data-act="redo" ${H.Future.length && !Run ? "" : "disabled"} title="Redo (Ctrl+Shift+Z)" aria-label="Redo">${icon("redo", 14)}</button>
         <label class="icon-btn" title="Import bake preset" aria-label="Import bake preset">${icon("upload", 14)}<input type="file" accept=".json,application/json" data-act="import" hidden></label>
+        ${S.Docked ? `<button type="button" class="icon-btn" data-act="export-preset" title="Download bake preset" aria-label="Download bake preset">${icon("download", 14)}</button>
+        <button type="button" class="icon-btn" data-act="copy-request" title="Copy the bake request a host receives" aria-label="Copy bake request">${icon("copy", 14)}</button>` : ""}
         <button type="button" class="icon-btn" data-act="reset" ${Run ? "disabled" : ""} title="Reset to defaults" aria-label="Reset to defaults">${icon("reset", 14)}</button>
       </div>
     </header>
@@ -191,7 +201,7 @@ function CardHtml() {
       <div class="bi-sources">${Source("lowSource", "Low")}${icon("ray", 12)}${Source("highSource", "High")}</div>
     </section>
 
-    <section class="mi-metrics" data-metrics>${StatsHtml()}</section>
+    ${S.Docked ? "" : `<section class="mi-metrics" data-metrics>${StatsHtml()}</section>`}
 
     <section class="bi-bake">
       <div class="bi-bake-row">
@@ -201,23 +211,24 @@ function CardHtml() {
         ${Segments("device", B.DEVICES, P.deviceMode, { Label: "Ray device", Fill: false })}
       </div>
       <div class="bi-progress" data-progress><i style="width:${Run ? Run.Progress * 100 : S.Result && ResultState().Label === "Fresh" ? 100 : 0}%"></i></div>
-      <div class="bi-progress-text" data-progress-text>${Esc(Run ? Run.Text : S.Result ? `Last bake: ${S.Result.Maps.length} maps in ${B.Duration(S.Result.Ms / 1000)}${S.Result.Dry ? " (dry run — no bake engine attached)" : ` on ${S.Result.Device}`}` : Host.Bake ? "Ready" : "Dry run — this page has no bake engine attached; timings follow the estimate")}</div>
+      ${S.Docked ? `<div class="bi-line" data-metrics>${MetricsHtml()}</div>` : ""}
+      <div class="bi-progress-text" data-progress-text>${Esc(Run ? Run.Text : S.Result ? `Last bake: ${S.Result.Maps.length} maps in ${B.Duration(S.Result.Ms / 1000)}${S.Result.Dry ? " (dry run — no bake engine attached)" : ` on ${S.Result.Device}`}` : Host.Bake ? "Ready" : (S.Docked ? "Dry run · no bake engine attached" : "Dry run — this page has no bake engine attached; timings follow the estimate"))}</div>
     </section>
 
     <section class="mi-channels">
-      <div class="mi-section-title"><h3>Maps</h3><small>${E.Maps} OF ${B.BAKE_MAP_CATALOG.length} QUEUED</small></div>
+      <div class="mi-section-title"><h3>${S.Docked ? "Open map" : "Maps"}</h3><small>${S.Docked ? "PICK IN THE QUEUE" : `${E.Maps} OF ${B.BAKE_MAP_CATALOG.length} QUEUED`}</small></div>
       <div class="mi-list">${S.Docked ? DockedMap() : MapGroups()}</div>
     </section>
 
     ${OutputFold()}
 
     <footer class="mi-foot">
-      <div class="mi-export">
+      ${S.Docked ? "" : `<div class="mi-export">
         <button type="button" class="primary" data-act="export-preset">${icon("download", 13)}Preset</button>
         <button type="button" data-act="export-request" title="The exact request a bake host receives">${icon("download", 13)}Request</button>
         <button type="button" data-act="copy-request" title="Copy the bake request">${icon("copy", 13)}Copy</button>
-      </div>
-      <div class="mi-foot-line"><span class="mi-status ${S.Status ? "on" : ""}" data-status>${Esc(S.Status || "Saved locally")}</span><span>Open a map to see what shapes it</span></div>
+      </div>`}
+      <div class="mi-foot-line"><span class="mi-status ${S.Status ? "on" : ""}" data-status>${Esc(S.Status || "Saved locally")}</span><span>${S.Docked ? "Exports live in the header" : "Open a map to see what shapes it"}</span></div>
     </footer>
   </article>`;
 }
@@ -226,7 +237,7 @@ function Render() { Rebuild(Root, CardHtml(), ".bi-card"); Notify(false); }
 
 function RefreshLive() {
   const M = Root.querySelector("[data-metrics]");
-  if (M) M.innerHTML = StatsHtml();
+  if (M) M.innerHTML = MetricsHtml();
   for (const Row of Root.querySelectorAll(".bi-map")) {
     const Id = Row.dataset.row, Read = Row.querySelector(".mi-readout"), C = B.MapCost(S.P, Id);
     if (Read && S.P.selected.includes(Id)) Read.textContent = `${B.Bytes(C.Bytes)}${C.Rays ? ` · ${B.Count(C.Rays)}` : ""}`;
@@ -240,7 +251,7 @@ function UpdateProgress() {
   const Bar = Root.querySelector("[data-progress] i"), Text = Root.querySelector("[data-progress-text]"), M = Root.querySelector("[data-metrics]");
   if (Bar) Bar.style.width = `${(S.Run?.Progress ?? 1) * 100}%`;
   if (Text && S.Run) Text.textContent = S.Run.Text;
-  if (M) M.innerHTML = StatsHtml();
+  if (M) M.innerHTML = MetricsHtml();
   for (const Row of Root.querySelectorAll(".bi-map")) {
     const At = S.Run?.Queue.indexOf(Row.dataset.row) ?? -1;
     Row.classList.toggle("running", At > -1 && At === S.Run.Index);

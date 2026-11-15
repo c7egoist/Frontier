@@ -15,6 +15,10 @@ It is plain ES modules with no build step. three.js (r187), the glide camera (`C
 look is the same Project Zero language as the Component Viewer: charcoal docks on a 2 px seam, pill sliders, white
 active segments and amber (#ffb238) for selection and the impact point.
 
+## Screenshots
+
+![Fracture Editor — objects, 3D viewport, recipe](Screenshots/fracture-editor.png)
+
 ## What changed from the old UI
 
 | Old (Project Zero) | Redesign |

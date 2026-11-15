@@ -280,12 +280,12 @@ function renderHeader() {
   $('CrumbState').className = `pill ${st}`; $('CrumbState').textContent = STATE_LABEL[st];
   $('StageTitle').textContent = o.owner.Name;
   const m = F.MATERIAL[s.Material];
-  $('StageMeta').replaceChildren(
+  $('StageMeta').replaceChildren(...[
     el('span', { class: 'chip' }, ico(primIcon(o.owner.Primitive), 10), o.owner.Primitive),
     el('span', { class: 'chip' }, o.owner.Scale.map((v) => +v.toFixed(3)).join(' × '), ' m'),
     s.Enabled ? el('span', { class: 'chip' }, el('i', { class: 'swatch', style: { background: m.tone } }), m.name) : null,
     s.Enabled ? el('span', { class: 'chip' }, `seed ${s.Seed}`) : null,
-    state.result?.proxy ? el('span', { class: 'chip warnish', title: 'Concave and imported shapes fracture through a convex decomposition' }, state.result.proxy) : null);
+    state.result?.proxy ? el('span', { class: 'chip warnish', title: 'Concave and imported shapes fracture through a convex decomposition' }, state.result.proxy) : null].filter(Boolean));
   const h = history.get(state.selected);
   $('UndoBtn').disabled = !h.undo.length; $('RedoBtn').disabled = !h.redo.length;
   $('RerollBtn').disabled = !s.Enabled;

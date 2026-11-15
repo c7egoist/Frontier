@@ -9,6 +9,10 @@ a notch at the top for shortcuts and a drawer at the bottom.
 python3 Experimental/ComponentViewer/Serve.py        # http://0.0.0.0:8095/ → /Experimental/ComponentViewer/
 ```
 
+## Screenshots
+
+![Component Viewer — components, viewport, details](Screenshots/component-viewer.png)
+
 ## Two screens
 
 **Geometry Compile** (the import inspector) opens for every imported object: OBJ, glTF / GLB, STL, PLY and Frontier's

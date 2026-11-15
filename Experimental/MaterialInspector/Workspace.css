@@ -1,0 +1,35 @@
+/* Workspace.css — outliner · viewport · card, the Project Zero workspace layout shared by Pattern / Stamp / Baking.
+   (The Material workspace keeps outliner · card; it has no viewport.) */
+.mi-trio { display: grid; grid-template-columns: 316px minmax(300px, 1fr) 432px; gap: 14px; width: 100%; max-width: 1720px; align-items: start; }
+.mi-trio > .ol-host, .mi-trio > .mi-host { width: auto; max-width: none; flex: none; }
+.mi-trio > .ol-host { position: sticky; top: 16px; }
+.vp-host { position: sticky; top: 16px; height: calc(100vh - 104px); min-height: 520px; display: flex; }
+
+.vp-card { position: relative; flex: 1; min-width: 0; border-radius: 22px; overflow: hidden; background: #0c0c0c; border: 1px solid #ffffff0b; box-shadow: inset 0 1px 0 #ffffff08, 0 24px 60px #0007; }
+.vp-body { position: absolute; inset: 0; }
+.vp-head { position: absolute; left: 14px; right: 14px; top: 14px; display: flex; align-items: center; gap: 10px; pointer-events: none; }
+.vp-head > * { pointer-events: auto; }
+.vp-title { display: inline-flex; align-items: baseline; gap: 8px; padding: 7px 13px; border-radius: 16px; background: #141414e6; border: 1px solid #ffffff0a; backdrop-filter: blur(8px); }
+.vp-title b { font-weight: 400; font-size: 12px; color: #e8e8e8; }
+.vp-title { min-width: 0; }
+.vp-title small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; font-size: 9.5px; letter-spacing: .5px; color: #686868; text-transform: uppercase; }
+.vp-views { margin-left: auto; display: inline-flex; gap: 2px; padding: 3px; border-radius: 16px; background: #141414e6; border: 1px solid #ffffff0a; backdrop-filter: blur(8px); }
+.vp-views button { border: 0; background: none; color: #8a8a8a; font: inherit; font-size: 10.5px; padding: 4px 11px; border-radius: 13px; cursor: pointer; }
+.vp-views button:hover { color: #eee; }
+.vp-views button.active { background: #e8e8e8; color: #111; }
+.vp-foot { position: absolute; left: 16px; right: 16px; bottom: 13px; display: flex; align-items: center; gap: 12px; color: #444; font-size: 10px; pointer-events: none; }
+.vp-hint { display: inline-flex; align-items: center; gap: 6px; }
+.vp-chips { display: inline-flex; gap: 6px; }
+.vp-chips i { font-style: normal; padding: 2px 8px; border-radius: 8px; border: 1px solid #ffffff0d; color: #5a5a5a; }
+.vp-zoom { margin-left: auto; color: #555; }
+
+@media (max-width: 1180px) {
+  .mi-trio { grid-template-columns: 316px minmax(0, 432px); justify-content: center; }
+  .vp-host { grid-column: 1 / -1; order: -1; position: static; height: 340px; min-height: 0; }
+}
+@media (max-width: 800px) {
+  .mi-trio { grid-template-columns: minmax(0, 432px); }
+  .mi-trio > .ol-host { position: static; max-height: 560px; }
+}
+.mi-trio.solo { grid-template-columns: minmax(300px, 1fr) 432px; }
+@media (max-width: 1180px) { .mi-trio.solo { grid-template-columns: minmax(0, 432px); } }

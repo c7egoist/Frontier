@@ -36,3 +36,10 @@
 .bi-map.running .mi-readout { color: #ffcf80; }
 .bi-map.done .mi-readout { color: #7fd497; }
 .bi-cost { font-size: 9px; color: #7a7a7a; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Docked: one quiet metrics line replaces the three statistic tiles (the queue outliner's footer carries the rest). */
+.bi-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: 10.5px; color: #7a7a7a; }
+.bi-line b { color: #e6e6e6; font-weight: 400; }
+.bi-line-state { margin-left: auto; padding: 2px 9px; border-radius: 9px; background: #1a1a1a; color: #9a9a9a; font-size: 9.5px; letter-spacing: .5px; text-transform: uppercase; }
+.bi-line-state.tone-ok, .bi-line-state.tone-green { color: #46d267; }
+.bi-line-state.tone-warn { color: #ff6b5e; }

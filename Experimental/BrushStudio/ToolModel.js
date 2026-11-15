@@ -1,4 +1,8 @@
-// ToolModel.js — the per-tool popup menus (pure data, no DOM).
+// ToolModel.js — the per-tool studios (pure data, no DOM).
+//
+// Every paint tool has its own dedicated studio, laid out exactly like the Brush Studio: a section list on the left and
+// that section's settings beside it.  STUDIOS[tool].Sections names which groups each section shows; the paint tool's
+// studio *is* the Brush Studio (its brush sections come from BrushModel.SECTIONS, plus a Colour section here).
 //
 // Every paint tool on the pad's rail opens its own Project Zero popup.  A popup is described the same way the Brush
 // Studio sections are — groups of typed fields — so one renderer draws both.  Fields whose key starts with "@" edit the
@@ -119,7 +123,7 @@ export const TOOLS = Object.freeze([
       W("mirror", "Mirror", false, "Flip horizontally"),
     ] },
     { Title: "Look", Fields: [
-      { K: "colour", L: "Tint", T: "colour", Def: "#ffb238" },
+      { K: "colour", L: "Tint", T: "colour", Def: "#46d267" },
       S("opacity", "Opacity", 1, 100, 100), S("hardness", "Hardness", 0, 100, 85),
       Sel("blend", "Blend mode", BLEND_MODES, "Normal"),
     ] },
@@ -154,7 +158,7 @@ export const TOOLS = Object.freeze([
       S("rotation", "Rotation", -180, 180, 0, "", { Unit: "°" }),
     ] },
     { Title: "Look", Fields: [
-      { K: "colour", L: "Colour", T: "colour", Def: "#f0f0f0" }, S("opacity", "Opacity", 1, 100, 100),
+      { K: "colour", L: "Colour", T: "colour", Def: "#3d6fd9" }, S("opacity", "Opacity", 1, 100, 100),
       S("outline", "Outline", 0, 12, 0, "", { Unit: "px" }),
       { K: "outlineColour", L: "Outline colour", T: "colour", Def: "#111111", When: (V) => V.outline > 0 },
     ] },
@@ -281,5 +285,42 @@ export function CurvePath(Points, { Mode = "Smooth", Closed = false, Smoothness 
     }
   }
   Out.push([...(Closed ? Points[0] : Points.at(-1))]);
+  return Out;
+}
+
+// ------------------------------------------------------------------------------------------------ studios
+// Icon colours: every tool and every section glyph carries its own colour (no fills behind the icons, no amber).
+export const TOOL_COLOURS = Object.freeze({ paint: "#ff6b9a", smudge: "#b48cff", erase: "#ff6b5e", fill: "#4d9bff", stamp: "#46d267", gradient: "#36d3c4", text: "#f08cff", curve: "#7cc4ff", move: "#5fe0a0", eyedropper: "#ff8a5c" });
+export const PALETTE = Object.freeze(["#4d9bff", "#46d267", "#ff6b9a", "#b48cff", "#36d3c4", "#ff8a5c", "#7cc4ff", "#f08cff", "#5fe0a0", "#ff6b5e", "#8f9bff", "#4fd1e8", "#c792ea", "#9aa4b2", "#e8e8e8"]);
+const Sec = (Id, Label, Glyph, Hint, Groups) => ({ Id, Label, Glyph, Hint, Groups });
+const About = () => Sec("about", "About", "info", "Shortcut, what changed, reset", []);
+const Material = Sec("material", "Material", "material", "PBR channels this writes", ["Material channels", "Channel values"]);
+
+export const STUDIOS = Object.freeze({
+  paint: { Title: "Brush Studio", Sub: "Texture-painting brush", Sections: [Sec("paint-colour", "Colour", "sphere", "Primary, secondary, swatches, symmetry", ["Colour", "Symmetry & blend"])] },
+  smudge: { Title: "Smudge Studio", Sub: "Push and blend paint", Sections: [Sec("tip", "Tip", "smudge", "Finger or current brush", ["Tip"]), Sec("smudge", "Smudge", "wave", "Strength, finger painting, smoothing", ["Smudge"]), About("smudge")] },
+  erase: { Title: "Eraser Studio", Sub: "Remove paint per channel", Sections: [Sec("eraser", "Eraser", "eraser", "Catalogue eraser or current brush", ["Eraser"]), Sec("tip", "Tip", "shape", "Size, strength, flow, edge", ["Tip"]), Sec("feel", "Feel", "pressure", "Stabilizer, pressure, taper", ["Feel"]), Sec("channels", "Channels", "layers", "Protect channels from erasing", ["Channels to erase"]), About("erase")] },
+  fill: { Title: "Fill Studio", Sub: "Flood regions and similar colour", Sections: [Sec("scope", "Scope", "grid", "Region, similar or everything", ["Scope"]), Sec("source", "Source", "fill", "Colour or grain, opacity, blend", ["Source"]), Material, About("fill")] },
+  stamp: { Title: "Stamp Studio", Sub: "Decals · click, drag or grid", Sections: [Sec("decal", "Decal", "stamp", "Shape and placement", ["Stamp"]), Sec("transform", "Transform", "move", "Size, rotation, jitter, mirror", ["Transform"]), Sec("look", "Look", "eye", "Tint, opacity, hardness, blend", ["Look"]), Material, About("stamp")] },
+  gradient: { Title: "Gradient Studio", Sub: "Linear, radial and conic ramps", Sections: [Sec("shape", "Shape", "radial", "Type and spread", ["Shape"]), Sec("colours", "Colours", "gradient", "Preset and stops", ["Colours"]), Sec("blend", "Blend", "blend", "Opacity, mode, where it paints", ["Blend"]), Sec("line", "Line", "ray", "Apply or clear the line", ["Line"]), About("gradient")] },
+  text: { Title: "Text Studio", Sub: "Lettering painted into the texture", Sections: [Sec("text", "Text", "text", "What it says", ["Text"]), Sec("type", "Type", "pen", "Font, weight, italic, align", ["Type"]), Sec("layout", "Layout", "grid", "Size, spacing, arc, rotation", ["Layout"]), Sec("look", "Look", "eye", "Colour, opacity, outline", ["Look"]), Material, Sec("place", "Place", "move", "Apply or cancel", ["Place"]), About("text")] },
+  curve: { Title: "Curve Studio", Sub: "Point-to-point brush strokes", Sections: [Sec("brush", "Brush", "brush", "The brush the curve strokes with", ["Brush"]), Sec("path", "Path", "curve", "Smooth or polyline, closed loop", ["Path"]), Sec("pressure", "Pressure", "pressure", "Pressure along the path", ["Pressure along the path"]), Sec("points", "Points", "stroke", "Stroke, undo or clear points", ["Points"]), About("curve")] },
+  move: { Title: "Move Studio", Sub: "Offset, transform and wrap paint", Sections: [Sec("target", "Target", "layers", "Everything or the last item", ["Target"]), Sec("offset", "Offset", "move", "U / V offset and nudges", ["Offset"]), Sec("transform", "Transform", "warp", "Scale, rotation, flips, edges", ["Transform"]), Sec("commit", "Commit", "check", "Apply or reset", ["Commit"]), About("move")] },
+  eyedropper: { Title: "Eyedropper Studio", Sub: "Sample colour from the pad", Sections: [Sec("sample", "Sample", "pipette", "The last colour picked", ["Sample"]), Sec("sampling", "Sampling", "sliders", "Area, target, source", ["Sampling"]), Sec("recent", "Recent", "layers", "Colours you have sampled", ["Recent samples"]), About("eyedropper")] },
+});
+
+// Settings that differ from the tool's defaults (drives edited dots, section counts and per-field reset).
+let Defaults = null;
+export const ToolDefault = (Tool, Key) => structuredClone((Defaults ||= CreateTools())[Tool][Key]);
+export function ToolChanged(Tool, Values) {
+  const Out = new Set();
+  Defaults ||= CreateTools();
+  for (const F of OwnFields(Tool)) if (F.T !== "history" && JSON.stringify(Values[F.K]) !== JSON.stringify(Defaults[Tool][F.K])) Out.add(F.K);
+  return Out;
+}
+export const SectionGroups = (Tool, Section) => TOOL[Tool].Groups.filter((G) => Section.Groups.includes(G.Title));
+export function ToolChangedBySection(Tool, Values) {
+  const Ch = ToolChanged(Tool, Values), Out = {};
+  for (const S of STUDIOS[Tool].Sections) Out[S.Id] = SectionGroups(Tool, S).flatMap((G) => G.Fields).filter((F) => Ch.has(F.K)).length;
   return Out;
 }

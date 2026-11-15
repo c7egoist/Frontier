@@ -193,7 +193,7 @@ export function CreatePad(Root, Api) {
     Gx.clearRect(0, 0, Guide.width, Guide.height);
     Gx.setTransform(D, 0, 0, D, 0, 0);
     Gx.lineWidth = 1.2;
-    const Handle = (X, Y, Fill = "#ffb238") => { Gx.beginPath(); Gx.arc(X, Y, 6, 0, Math.PI * 2); Gx.fillStyle = "#111"; Gx.fill(); Gx.beginPath(); Gx.arc(X, Y, 4, 0, Math.PI * 2); Gx.fillStyle = Fill; Gx.fill(); };
+    const Handle = (X, Y, Fill = "#4d9bff") => { Gx.beginPath(); Gx.arc(X, Y, 6, 0, Math.PI * 2); Gx.fillStyle = "#111"; Gx.fill(); Gx.beginPath(); Gx.arc(X, Y, 4, 0, Math.PI * 2); Gx.fillStyle = Fill; Gx.fill(); };
     if (Tool === "gradient" && Tools.gradient.line) {
       const [[X0, Y0], [X1, Y1]] = Tools.gradient.line.map(([X, Y]) => [X * Pad.W, Y * Pad.H]);
       Gx.setLineDash([5, 5]); Gx.strokeStyle = "#ffffffaa"; Gx.beginPath(); Gx.moveTo(X0, Y0); Gx.lineTo(X1, Y1); Gx.stroke(); Gx.setLineDash([]);
@@ -203,13 +203,13 @@ export function CreatePad(Root, Api) {
     if (Tool === "curve" && Tools.curve.points.length) {
       const C = Tools.curve, Pts = C.points.map(([X, Y]) => [X * Pad.W, Y * Pad.H]);
       const Path = CurvePath(Pts, { Mode: C.mode, Closed: C.closed, Smoothness: C.smoothness });
-      Gx.strokeStyle = "#ffb238aa"; Gx.setLineDash([4, 4]); Gx.beginPath(); Path.forEach(([X, Y], I) => (I ? Gx.lineTo(X, Y) : Gx.moveTo(X, Y))); Gx.stroke(); Gx.setLineDash([]);
-      Pts.forEach(([X, Y], I) => Handle(X, Y, I === Pts.length - 1 ? "#ffb238" : "#e8e8e8"));
+      Gx.strokeStyle = "#4d9bffaa"; Gx.setLineDash([4, 4]); Gx.beginPath(); Path.forEach(([X, Y], I) => (I ? Gx.lineTo(X, Y) : Gx.moveTo(X, Y))); Gx.stroke(); Gx.setLineDash([]);
+      Pts.forEach(([X, Y], I) => Handle(X, Y, I === Pts.length - 1 ? "#4d9bff" : "#e8e8e8"));
     }
     if (Tool === "move" && MoveActive(Tools.move)) {
       const M = MoveFromTool(Tools.move);
       Gx.save(); Gx.translate(Pad.W / 2 + M.Dx, Pad.H / 2 + M.Dy); Gx.rotate((M.Rotation * Math.PI) / 180); Gx.scale(M.Scale / 100, M.Scale / 100);
-      Gx.setLineDash([6, 5]); Gx.strokeStyle = "#ffb238cc"; Gx.lineWidth = 1.2 / (M.Scale / 100); Gx.strokeRect(-Pad.W / 2 + 4, -Pad.H / 2 + 4, Pad.W - 8, Pad.H - 8); Gx.restore(); Gx.setLineDash([]);
+      Gx.setLineDash([6, 5]); Gx.strokeStyle = "#4d9bffcc"; Gx.lineWidth = 1.2 / (M.Scale / 100); Gx.strokeRect(-Pad.W / 2 + 4, -Pad.H / 2 + 4, Pad.W - 8, Pad.H - 8); Gx.restore(); Gx.setLineDash([]);
     }
     // Brush outline under the cursor before touching down (Stylus → Hover preview).
     if (Hover && !Drag && ["paint", "erase", "smudge"].includes(Tool)) {
@@ -219,7 +219,7 @@ export function CreatePad(Root, Api) {
     }
     if (Hover && Tool === "stamp") {
       const S = Tools.stamp.size / 2;
-      Gx.strokeStyle = "#ffb23899"; Gx.setLineDash([3, 4]); Gx.strokeRect(Hover.x - S, Hover.y - S, S * 2, S * 2); Gx.setLineDash([]);
+      Gx.strokeStyle = "#4d9bff99"; Gx.setLineDash([3, 4]); Gx.strokeRect(Hover.x - S, Hover.y - S, S * 2, S * 2); Gx.setLineDash([]);
     }
   }
 
@@ -379,7 +379,7 @@ export function CreatePad(Root, Api) {
     if (Tool === "stamp") {
       const S = Tools.stamp, D = Math.hypot(L.x - Drag.Last.x, L.y - Drag.Last.y);
       if (D >= S.spacing * (S.size / 100)) { Drag.Points.push([L.x, L.y, S.align ? Math.atan2(L.y - Drag.Last.y, L.x - Drag.Last.x) : 0]); Drag.Last = L; }
-      const Gc = Gx; if (Gc) { DrawGuides(); Gc.setTransform(Pad.Dpr, 0, 0, Pad.Dpr, 0, 0); Gc.fillStyle = "#ffb238"; for (const [X, Y] of Drag.Points) { Gc.beginPath(); Gc.arc(X, Y, 3, 0, 7); Gc.fill(); } }
+      const Gc = Gx; if (Gc) { DrawGuides(); Gc.setTransform(Pad.Dpr, 0, 0, Pad.Dpr, 0, 0); Gc.fillStyle = "#4d9bff"; for (const [X, Y] of Drag.Points) { Gc.beginPath(); Gc.arc(X, Y, 3, 0, 7); Gc.fill(); } }
       return;
     }
     const U = [Clamp(L.x / Pad.W), Clamp(L.y / Pad.H)];

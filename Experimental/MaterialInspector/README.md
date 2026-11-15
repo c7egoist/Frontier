@@ -6,6 +6,24 @@ This is the Material workspace inspector from **TextureStudio** (`unassignedinbo
 python3 Experimental/MaterialInspector/Serve.py        # http://0.0.0.0:8097/
 ```
 
+## Screenshots
+
+| Material workspace (outliner · card, no viewport) | Material outliner |
+| --- | --- |
+| ![Material workspace](Screenshots/material.png) | ![Material outliner](Screenshots/material-outliner.png) |
+
+Other workspaces: [Pattern / Stamp](../ArtworkInspector/README.md#screenshots), [Map Baking](../BakeInspector/README.md#screenshots) and [Brush Studio](../BrushStudio/README.md).
+
+## Workspace viewport
+
+`Viewport.js` and `Workspace.css` give Pattern, Stamp, Map Baking and Texture Painting the Project Zero workspace layout: outliner · **viewport** · card. The viewport is left **blank on purpose**, because no renderer is attached. It provides the frame a renderer would mount into: a title chip with live meta, view modes, a hint, chips and a zoom readout. `MountViewport(Host, { Title, Meta, Views, Chips, Hint, OnView })` returns `{ Body, SetMeta, SetView }`. The Material workspace has no viewport.
+
+Layout breakpoints:
+
+- **Below 1180 px:** the viewport spans the top.
+- **Below 800 px:** the columns stack.
+- **`?outliner=0`:** a viewport · card pair.
+
 ## What changed from the TextureStudio inspector
 
 | TextureStudio | This card |

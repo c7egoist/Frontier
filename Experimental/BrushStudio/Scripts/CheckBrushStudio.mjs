@@ -137,14 +137,14 @@ await check("sources: every shape and grain renders; random shapes have variants
   return `${M.SHAPES.length} shapes · ${M.GRAINS.length} grains`;
 });
 
-await check("tool popups: 10 tools, unique shortcuts, every popup has groups; values coerce", () => {
+await check("tools: 10 tools, unique shortcuts, every tool has groups; values coerce", () => {
   expect(T.TOOLS.length === 10, `${T.TOOLS.length} tools`);
   expect(new Set(T.TOOLS.map((X) => X.Key)).size === 10, "shortcut clash");
   const Tools = T.CreateTools(), Brush = M.FromInstrument("brush-hog-bristle-flat-12-oil").values;
   const Counts = [];
   for (const Tool of T.TOOLS) {
     const Groups = T.VisibleToolGroups(Tool.Id, Tools[Tool.Id], Brush);
-    expect(Groups.length >= 1, `${Tool.Id} popup empty`);
+    expect(Groups.length >= 1, `${Tool.Id} has no groups`);
     for (const F of T.ToolFields(Tool.Id)) if (F.K.startsWith("@")) expect(M.FIELDS[F.K.slice(1)], `${Tool.Id} binds unknown brush field ${F.K}`);
     Counts.push(`${Tool.Id} ${T.ToolFields(Tool.Id).length}`);
   }
@@ -156,6 +156,31 @@ await check("tool popups: 10 tools, unique shortcuts, every popup has groups; va
   expect(Array.isArray(X.gradient.stops) && X.gradient.stops.length >= 2, "preset loads stops");
   expect(T.ERASERS.length === 7 && T.FONTS.length >= 4, "erasers / fonts");
   return Counts.join(" · ");
+});
+
+await check("tool studios: every tool has a dedicated studio covering every group; edits are tracked per section", () => {
+  const Out = [];
+  for (const Tool of T.TOOLS) {
+    const Studio = T.STUDIOS[Tool.Id];
+    expect(Studio && /Studio$/.test(Studio.Title), `${Tool.Id} has no studio`);
+    expect(T.TOOL_COLOURS[Tool.Id] && !/ffb238/i.test(T.TOOL_COLOURS[Tool.Id]), `${Tool.Id} colour`);
+    const Used = Studio.Sections.flatMap((S) => S.Groups), Titles = Tool.Groups.map((G) => G.Title);
+    for (const U of Used) expect(Titles.includes(U), `${Tool.Id} studio names unknown group ${U}`);
+    if (Tool.Id !== "paint") {
+      for (const Ti of Titles) expect(Used.includes(Ti), `${Tool.Id} group ${Ti} has no section`);
+      expect(Studio.Sections.some((S) => S.Id === "about"), `${Tool.Id} about section`);
+    }
+    expect(new Set(Studio.Sections.map((S) => S.Id)).size === Studio.Sections.length, `${Tool.Id} duplicate section ids`);
+    Out.push(`${Studio.Title.replace(" Studio", "")} ${Studio.Sections.length}`);
+  }
+  expect(T.STUDIOS.stamp.Title === "Stamp Studio" && T.STUDIOS.text.Title === "Text Studio" && T.STUDIOS.erase.Title === "Eraser Studio", "named studios");
+  expect(!T.PALETTE.some((C) => /ffb238/i.test(C)), "no amber in the icon palette");
+  const Tools = T.CreateTools();
+  expect(T.ToolChanged("stamp", Tools.stamp).size === 0, "defaults are unedited");
+  const X = T.SetToolValue(Tools, "stamp", "size", 200);
+  expect(T.ToolChanged("stamp", X.stamp).has("size") && T.ToolChangedBySection("stamp", X.stamp).transform === 1, "edit counted in Transform");
+  expect(T.ToolDefault("stamp", "size") === 84, "default lookup");
+  return Out.join(" · ");
 });
 
 await check("curve tool path and pressure profiles", () => {

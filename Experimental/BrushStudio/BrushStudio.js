@@ -1,15 +1,18 @@
 // BrushStudio.js — Procreate-style Brush Studio for texture painting, in the Project Zero visual language.
 //
-// Layout (left → right): Brush Library card · Studio card = section rail | settings | Drawing Pad.  The pad has the tool
-// rail (Paint · Smudge · Erase | Fill · Stamp · Gradient · Text · Curve · Move | Eyedropper); tapping the active tool opens
-// that tool's own popup, exactly like tapping the active brush in Procreate opens the library.
+// Layout (left → right): Brush Library card · blank workspace Viewport · Studio card (section list | settings).
+// The viewport carries the tool rail (Paint · Smudge · Erase | Fill · Stamp · Gradient · Text · Curve · Move | Eyedropper),
+// the size / opacity sliders and the closable Drawing Pad — a small previewer, not the workspace.  Every tool has its
+// own dedicated studio (Brush Studio, Stamp Studio for decals, Text Studio, Eraser Studio …) laid out the same way:
+// pick a tool on the rail and the Studio card switches to it.
 //
-//   Mount(Host, { brush, tool }) → Hub { State, Brush(), SetValue(), Select(), Section(), Tool(), OpenPopup(), Pad, Render }
+//   Mount(Host, { brush, tool, pad }) → Hub { State, Brush(), SetValue(), Select(), Section(), Tool(), Studio(), TogglePad(), Pad, Render }
 
 import { icon } from "../MaterialInspector/Icons.js";
 import { Esc, Knob, ColourField, Stops, SwitchRow, Toggle, Segments, Clamp, Pct, Fixed, SyncSiblings, Download, History } from "../MaterialInspector/CardKit.js";
 import * as M from "./BrushModel.js";
-import { TOOLS, TOOL, CreateTools, SetToolValue, VisibleToolGroups, VisibleToolFields, ERASERS } from "./ToolModel.js";
+import { TOOLS, TOOL, CreateTools, SetToolValue, VisibleToolFields, ERASERS, STUDIOS, TOOL_COLOURS, PALETTE, ToolChanged, ToolChangedBySection, SectionGroups, ToolDefault } from "./ToolModel.js";
+import { MountViewport } from "../MaterialInspector/Viewport.js";
 import { paintTool, toolSchema, toolArtURL } from "./Engine/PaintToolCatalogue.js";
 import { RenderStroke } from "./Painter.js";
 import { PreviewPoints, sampleCurve } from "./BrushEngine.js";
@@ -32,9 +35,10 @@ const PARAM_TARGETS = {
 export function Mount(Host, Options = {}) {
   const St = {
     Brushes: {}, Custom: [], ActiveId: Options.brush || "brush-hog-bristle-flat-12-oil", Section: "stroke", Open: new Set(), Filter: "",
-    Tool: Options.tool || "paint", PrevTool: "paint", Popup: null, View: "albedo", Paper: "paper", Live: true, Preview: true,
+    Tool: TOOL[Options.tool] ? Options.tool : "paint", PrevTool: "paint", Studio: null, ToolSection: {}, PadOpen: Options.pad !== false, View: "albedo", Paper: "paper", Live: true, Preview: true,
     Tools: CreateTools(), Recent: [], Colours: [], Stats: {}, Note: "",
   };
+  St.Studio = St.Tool;
   if (!M.PAINT_TOOLS.some((T) => T.id === St.ActiveId)) St.ActiveId = M.PAINT_TOOLS.find((T) => T.key === "brush").id;
   St.Open.add(paintTool(St.ActiveId).key);
   const Cache = new Map();
@@ -45,32 +49,33 @@ export function Mount(Host, Options = {}) {
   const Hub = { State: St, Brush, BrushOf };
 
   // ---------------------------------------------------------------------------------------------- skeleton
-  Host.innerHTML = `<div class="bs-shell">
+  Host.innerHTML = `<div class="bs-shell" data-pad="${St.PadOpen ? "open" : "closed"}">
     <aside class="mi-card bs-lib" aria-label="Brush library"></aside>
-    <section class="mi-card bs-studio" aria-label="Brush Studio">
+    <div class="bs-view vp-host"></div>
+    <section class="mi-card bs-studio" aria-label="Tool studio">
       <header class="mi-head bs-head"></header>
       <div class="bs-body">
-        <nav class="bs-sections" aria-label="Brush settings sections"></nav>
+        <nav class="bs-sections" aria-label="Studio sections"></nav>
         <div class="bs-settings" role="region" aria-label="Section settings"></div>
-        <div class="bs-pad">
-          <div class="bs-padbar"></div>
-          <div class="bs-stage" data-paper="paper">
-            <canvas class="bs-canvas" aria-label="Drawing pad"></canvas>
-            <canvas class="bs-guide" aria-hidden="true"></canvas>
-            <div class="bs-rail" role="toolbar" aria-label="Paint tools"></div>
-            <div class="bs-side"></div>
-            <div class="bs-popup-host"></div>
-            <div class="bs-toast" aria-live="polite"></div>
-          </div>
-          <footer class="bs-foot"></footer>
-        </div>
       </div>
     </section>
     <input type="file" class="bs-file" accept=".json,.brush,application/json" hidden>
   </div>`;
   const $ = (S) => Host.querySelector(S);
-  const Lib = $(".bs-lib"), Head = $(".bs-head"), Nav = $(".bs-sections"), Settings = $(".bs-settings");
-  const PadBar = $(".bs-padbar"), Stage = $(".bs-stage"), Rail = $(".bs-rail"), Side = $(".bs-side"), PopHost = $(".bs-popup-host"), Foot = $(".bs-foot"), Toast = $(".bs-toast");
+  const Vp = MountViewport($(".bs-view"), { Title: "Viewport", Meta: "Texture painting", Views: VIEWS, View: St.View, Chips: ["Texture painting"], OnView: (V) => { St.View = V; Pad.Replay(); RenderPadBar(); } });
+  Vp.Body.innerHTML = `<div class="bs-rail" role="toolbar" aria-label="Paint tools"></div>
+    <div class="bs-side"></div>
+    <div class="bs-pad" role="dialog" aria-label="Drawing pad preview">
+      <div class="bs-padbar"></div>
+      <div class="bs-stage" data-paper="paper">
+        <canvas class="bs-canvas" aria-label="Drawing pad"></canvas>
+        <canvas class="bs-guide" aria-hidden="true"></canvas>
+      </div>
+      <footer class="bs-foot"></footer>
+    </div>
+    <div class="bs-toast" aria-live="polite"></div>`;
+  const Shell = $(".bs-shell"), Lib = $(".bs-lib"), Head = $(".bs-head"), Nav = $(".bs-sections"), Settings = $(".bs-settings");
+  const PadBar = $(".bs-padbar"), Stage = $(".bs-stage"), Rail = $(".bs-rail"), Side = $(".bs-side"), Foot = $(".bs-foot"), Toast = $(".bs-toast");
 
   // ---------------------------------------------------------------------------------------------- derived brushes for tools
   let EraseMemo = null, SmudgeMemo = null;
@@ -113,8 +118,7 @@ export function Mount(Host, Options = {}) {
       St.Tools = { ...St.Tools, [Tool]: { ...St.Tools[Tool], [Key]: Value } };
       Pad.Schedule();
       RefreshReadouts();
-    } else if (Kind === "move-reset") { St.Tools = SetToolValue(St.Tools, "move", "u", 0); Object.assign(St.Tools.move, { v: 0, dx: 0, dy: 0, scale: 100, rotation: 0, flipX: false, flipY: false }); RenderPopup(); Pad.Render(); }
-    else if (Kind === "pad-down") { if (["paint", "erase", "smudge"].includes(Data) && St.Popup) ClosePopup(); }
+    } else if (Kind === "move-reset") { St.Tools = SetToolValue(St.Tools, "move", "u", 0); Object.assign(St.Tools.move, { v: 0, dx: 0, dy: 0, scale: 100, rotation: 0, flipX: false, flipY: false }); RenderToolUi(); Pad.Render(); }
     else if (Kind === "sample") Sampled(Data);
   }
 
@@ -129,8 +133,8 @@ export function Mount(Host, Options = {}) {
     E.history = [S.Hex, ...E.history.filter((C) => C !== S.Hex)].slice(0, 12);
     RememberColour(S.Hex);
     Flash(`Sampled ${S.Hex.toUpperCase()} → ${E.target.toLowerCase()}`);
-    if (E.returnTool && St.PrevTool !== "eyedropper") SetTool(St.PrevTool, { Keep: true });
-    else RenderPopup();
+    if (E.returnTool && St.PrevTool !== "eyedropper") SetTool(St.PrevTool);
+    else RenderToolUi();
   }
 
   // ---------------------------------------------------------------------------------------------- editing
@@ -147,14 +151,13 @@ export function Mount(Host, Options = {}) {
   Hub.SetValue = (Key, Value) => EditBrush((B) => M.SetValue(B, Key, Value));
   Hub.Settle = () => { if (H.Settle({ Id: St.ActiveId, Brush: Brush() })) RenderHead(); };
 
-  let SigSettings = "", SigPopup = "";
+  let SigSettings = "";
   function AfterBrushChange() {
     RenderSections();
     RenderHead();
     RenderSide();
-    const Ss = SettingsSig(), Ps = PopupSig();
-    if (Ss !== SigSettings) RenderSettings(); else { RefreshEdited(); PaintPreviews(); }
-    if (Ps !== SigPopup) RenderPopup(); else PaintPopupCanvases();
+    if (SettingsSig() !== SigSettings) RenderSettings(); else { RefreshEdited(); PaintPreviews(); }
+    RenderRail();
     Pad.Schedule(St.Live && Pad.Ops.some((O) => O.Kind === "paint"));
     ScheduleThumb(St.ActiveId);
   }
@@ -166,7 +169,7 @@ export function Mount(Host, Options = {}) {
     if (Snap.Id !== St.ActiveId) { St.ActiveId = Snap.Id; RenderLibrary(); }
     RenderAllBrushParts();
   }
-  function RenderAllBrushParts() { RenderHead(); RenderSections(); RenderSettings(); RenderSide(); RenderPopup(); Pad.Schedule(St.Live); ScheduleThumb(St.ActiveId); }
+  function RenderAllBrushParts() { RenderHead(); RenderSections(); RenderSettings(); RenderSide(); RenderRail(); Pad.Schedule(St.Live); ScheduleThumb(St.ActiveId); }
 
   function Select(Id) {
     if (!M.PAINT_TOOLS.some((T) => T.id === Id) && !St.Brushes[Id]) return;
@@ -207,8 +210,8 @@ export function Mount(Host, Options = {}) {
       St.Tools = SetToolValue(St.Tools, A, Key, V);
       if (A === "erase") EraseMemo = null;
       if (A === "smudge") SmudgeMemo = null;
-      if (PopupSig() !== SigPopup || Key === "preset") RenderPopup(); else PaintPopupCanvases();
-      RenderSide();
+      if (SettingsSig() !== SigSettings || Key === "preset") RenderSettings(); else { RefreshEdited(); PaintPreviews(); }
+      RenderSections(); RenderHead(); RenderSide();
       Pad.Schedule();
     } else if (Scope === "m") {
       const Clean = String(Raw).replace(/[\u0000-\u001f]/g, "").slice(0, A === "signature" ? 120 : 80);
@@ -276,14 +279,13 @@ export function Mount(Host, Options = {}) {
     const Groups = M.PAINT_FAMILIES.map((F) => ({ F, Ids: M.PAINT_TOOLS.filter((T) => T.key === F.key).map((T) => T.id).filter(Match) })).filter((G) => G.Ids.length);
     const Total = M.PAINT_TOOLS.length + St.Custom.length;
     Lib.innerHTML = `<header class="bs-lib-head">
-        <div><small>LIBRARY</small><h1>Brushes</h1></div>
+        <h1>Brushes</h1>
         <span class="bs-count">${Total}</span>
         <button type="button" class="ol-round" data-act="duplicate" title="New brush from the active one" aria-label="Duplicate active brush">${icon("plus", 14)}</button>
       </header>
-      <div class="bs-lib-recent">${St.Recent.slice(0, 5).map((Id) => `<button type="button" class="bs-recent ${Id === St.ActiveId ? "active" : ""}" data-act="pick" data-id="${Esc(Id)}" title="${Esc(BrushOf(Id).name)}"><img alt="" src="${toolArtURL(BrushOf(Id).instrument, true)}"></button>`).join("") || `<small>Recent brushes appear here</small>`}</div>
       <label class="mi-search bs-lib-search">${icon("search", 13)}<input type="search" data-act="filter" value="${Esc(St.Filter)}" placeholder="Search ${Total} brushes" aria-label="Search brushes"></label>
       <div class="bs-lib-list">
-        ${Mine.length ? `<div class="bs-fam open"><div class="bs-fam-head mine"><i style="background:var(--amber)"></i><b>My brushes</b><small>${Mine.length}</small></div>${Mine.map(Row).join("")}</div>` : ""}
+        ${Mine.length ? `<div class="bs-fam open"><div class="bs-fam-head mine"><i style="background:#ff6b9a"></i><b>My brushes</b><small>${Mine.length}</small></div>${Mine.map(Row).join("")}</div>` : ""}
         ${Groups.map(({ F, Ids }) => {
           const Open = Q || St.Open.has(F.key);
           return `<div class="bs-fam ${Open ? "open" : ""}">
@@ -292,7 +294,7 @@ export function Mount(Host, Options = {}) {
           </div>`;
         }).join("") || `<p class="mi-empty">No brush matches “${Esc(St.Filter)}”.</p>`}
       </div>
-      <footer class="bs-lib-foot"><span>${Object.keys(St.Brushes).filter(Edited).length} edited</span><span>${St.Custom.length} yours</span><span>${M.PAINT_FAMILIES.length} families</span></footer>`;
+`;
     PaintThumbs();
   }
 
@@ -327,31 +329,60 @@ export function Mount(Host, Options = {}) {
   }
 
   // ---------------------------------------------------------------------------------------------- studio head
+  // The Studio card follows the tool: Brush Studio for Paint, Stamp Studio (decals) for Stamp, Text Studio for Text …
+  const IsBrushStudio = () => St.Studio === "paint";
+  const StudioSections = (Tool = St.Studio) => Tool === "paint" ? [...STUDIOS.paint.Sections, ...M.SECTIONS] : STUDIOS[Tool].Sections;
+  const SectionId = () => IsBrushStudio() ? St.Section : (St.ToolSection[St.Studio] || STUDIOS[St.Studio].Sections[0].Id);
+  const ToolSec = () => (IsBrushStudio() ? STUDIOS.paint.Sections : STUDIOS[St.Studio].Sections).find((S) => S.Id === SectionId()) || null;
+  const SecColour = (Id, Tool = St.Studio) => PALETTE[Math.max(0, StudioSections(Tool).findIndex((S) => S.Id === Id)) % PALETTE.length];
+  const Glyph = (Name, Size, Colour) => `<span class="bs-glyph" style="--c:${Colour}">${icon(Name, Size)}</span>`;
+
   function RenderHead() {
-    const B = Brush(), Tool = paintTool(B.instrument), Count = Changed().size;
-    Head.innerHTML = `<span class="mi-mark">${icon("brush", 15)}</span>
-      <span class="mi-head-title"><b>Brush Studio</b><small>${Esc(FAMILY_LABEL(Tool.key).toUpperCase())} · ${Count ? `${Count} EDITED` : "AT RESET POINT"}</small></span>
-      <span class="bs-head-name" title="${Esc(B.name)}">${Esc(B.name)}</span>
-      <span class="mi-head-tools">
-        <button type="button" class="icon-btn" data-act="undo" ${H.Past.length ? "" : "disabled"} title="Undo setting (Alt+Z)" aria-label="Undo setting">${icon("undo", 14)}</button>
-        <button type="button" class="icon-btn" data-act="redo" ${H.Future.length ? "" : "disabled"} title="Redo setting" aria-label="Redo setting">${icon("redo", 14)}</button>
-        <button type="button" class="mi-text-btn" data-act="reset-all" ${Count ? "" : "disabled"} title="Back to the reset point">${icon("reset", 11)}Reset</button>
-        <button type="button" class="icon-btn" data-act="import" title="Import a brush" aria-label="Import brush">${icon("upload", 14)}</button>
-        <button type="button" class="icon-btn" data-act="export" title="Export this brush" aria-label="Export brush">${icon("download", 14)}</button>
-        <button type="button" class="bs-done" data-act="duplicate" title="Save as a new brush">${icon("duplicate", 12)}Duplicate</button>
+    const Studio = STUDIOS[St.Studio], T = TOOL[St.Studio];
+    const Pad1 = `<button type="button" class="icon-btn bs-padtoggle ${St.PadOpen ? "on" : ""}" data-act="pad-toggle" aria-pressed="${St.PadOpen}" title="${St.PadOpen ? "Hide" : "Show"} the drawing pad preview" aria-label="Drawing pad">${icon(St.PadOpen ? "eye" : "eye-off", 14)}</button>`;
+    const Back = St.Studio !== St.Tool ? `<button type="button" class="mi-text-btn bs-back" data-act="studio-back" title="Back to the ${Esc(TOOL[St.Tool].Label)} studio">${icon("chevron", 9)}${Esc(STUDIOS[St.Tool].Title)}</button>` : "";
+    if (IsBrushStudio()) {
+      const B = Brush(), Count = Changed().size;
+      Head.innerHTML = `${Glyph(T.Glyph, 18, TOOL_COLOURS.paint)}
+        <span class="mi-head-title"><b>${Studio.Title}</b><small title="${Esc(B.name)}">${Esc(B.name)}${Count ? ` · ${Count} edited` : ""}</small></span>
+        <span class="mi-head-tools">${Back}
+          <button type="button" class="icon-btn" data-act="undo" ${H.Past.length ? "" : "disabled"} title="Undo setting (Alt+Z)" aria-label="Undo setting">${icon("undo", 14)}</button>
+          <button type="button" class="icon-btn" data-act="redo" ${H.Future.length ? "" : "disabled"} title="Redo setting" aria-label="Redo setting">${icon("redo", 14)}</button>
+          <button type="button" class="icon-btn" data-act="reset-all" ${Count ? "" : "disabled"} title="Back to the reset point" aria-label="Reset brush">${icon("reset", 14)}</button>
+          <button type="button" class="icon-btn" data-act="export" title="Export this brush" aria-label="Export brush">${icon("download", 14)}</button>
+          ${Pad1}
+        </span>`;
+      return;
+    }
+    const Count = ToolChanged(St.Studio, St.Tools[St.Studio]).size;
+    Head.innerHTML = `${Glyph(T.Glyph, 18, TOOL_COLOURS[St.Studio])}
+      <span class="mi-head-title"><b>${Studio.Title}</b><small>${Esc(Studio.Sub)}${Count ? ` · ${Count} edited` : ""}</small></span>
+      <span class="mi-head-tools">${Back}
+        <button type="button" class="icon-btn" data-act="tool-reset" ${Count ? "" : "disabled"} title="Reset every ${Esc(T.Label.toLowerCase())} setting" aria-label="Reset ${Esc(T.Label)} settings">${icon("reset", 14)}</button>
+        ${Pad1}
       </span>`;
   }
 
-  // ---------------------------------------------------------------------------------------------- section rail
+  // ---------------------------------------------------------------------------------------------- section list
   function RenderSections() {
-    const By = M.ChangedBySection(Brush());
-    Nav.innerHTML = M.SECTIONS.map((S) => `<button type="button" class="bs-sec ${S.Id === St.Section ? "active" : ""}" data-act="section" data-section="${S.Id}" aria-current="${S.Id === St.Section}" title="${Esc(S.Hint)}">
-        <span class="bs-sec-glyph">${icon(S.Glyph, 13)}</span><span class="bs-sec-label">${Esc(S.Label)}</span>${By[S.Id] ? `<i class="bs-sec-count" title="${By[S.Id]} edited">${By[S.Id]}</i>` : ""}
-      </button>`).join("") + `<div class="bs-sec-foot"><small>Edited settings show an amber count — reset per field, per section, or the whole brush.</small></div>`;
+    const Tool = St.Studio, Active = SectionId();
+    const ToolBy = ToolChangedBySection(Tool, St.Tools[Tool]);
+    const By = IsBrushStudio() ? { ...M.ChangedBySection(Brush()), ...ToolBy } : ToolBy;
+    const Row = (S) => `<button type="button" class="bs-sec ${S.Id === Active ? "active" : ""}" data-act="section" data-section="${S.Id}" aria-current="${S.Id === Active}" title="${Esc(S.Hint)}" style="--c:${SecColour(S.Id)}">
+        ${Glyph(S.Glyph, 14, SecColour(S.Id))}<span class="bs-sec-label">${Esc(S.Label)}</span>${By[S.Id] ? `<i class="bs-sec-count" title="${By[S.Id]} edited">${By[S.Id]}</i>` : ""}
+      </button>`;
+    Nav.innerHTML = IsBrushStudio()
+      ? `<small class="bs-sec-cap">Paint</small>${STUDIOS.paint.Sections.map(Row).join("")}<small class="bs-sec-cap">Brush</small>${M.SECTIONS.map(Row).join("")}`
+      : `<small class="bs-sec-cap">${Esc(TOOL[Tool].Label)}</small>${STUDIOS[Tool].Sections.map(Row).join("")}`;
   }
 
   // ---------------------------------------------------------------------------------------------- settings column
+  function ToolSig() {
+    const Sec = ToolSec(), Tool = St.Studio, V = St.Tools[Tool], Bv = Brush().values;
+    return `${Tool}|${Sec.Id}|${St.ActiveId}|` + SectionGroups(Tool, Sec).map((G) => VisibleToolFields(G, V, Bv).map((F) => F.K).join(",")).join(";");
+  }
   function SettingsSig() {
+    if (ToolSec()) return ToolSig();
     const Sec = M.SECTIONS.find((S) => S.Id === St.Section), V = Brush().values;
     if (St.Section === "instrument") return `${St.Section}|${Brush().instrument}|${JSON.stringify(Brush().params)}`;
     if (St.Section === "about") return `${St.Section}|${St.ActiveId}`;
@@ -359,6 +390,7 @@ export function Mount(Host, Options = {}) {
   }
 
   function RenderSettings() {
+    if (ToolSec()) return RenderToolSettings();
     const Sec = M.SECTIONS.find((S) => S.Id === St.Section), B = Brush(), V = B.values, Ch = Changed();
     const Count = M.ChangedBySection(B)[Sec.Id];
     let Body = "";
@@ -374,7 +406,7 @@ export function Mount(Host, Options = {}) {
       </div>`;
     }).join("");
     Settings.innerHTML = `<div class="bs-set-head">
-        <span class="bs-set-glyph">${icon(Sec.Glyph, 16)}</span>
+        ${Glyph(Sec.Glyph, 18, SecColour(Sec.Id))}
         <div><h2>${Esc(Sec.Label)}</h2><small>${Esc(Sec.Hint)}</small></div>
         ${Sec.Id !== "about" ? `<button type="button" class="mi-text-btn" data-act="reset-section" ${Count ? "" : "disabled"}>${icon("reset", 10)}Reset section</button>` : ""}
       </div>
@@ -383,15 +415,59 @@ export function Mount(Host, Options = {}) {
     PaintPreviews();
   }
 
+  // A tool studio section: the tool's groups for this section, or its About page.
+  function RenderToolSettings() {
+    const Tool = St.Studio, T = TOOL[Tool], Sec = ToolSec(), V = St.Tools[Tool], Bv = Brush().values;
+    const Count = ToolChangedBySection(Tool, V)[Sec.Id];
+    const Scroll = Settings.scrollTop;
+    const Body = Sec.Id === "about" ? ToolAboutHtml(Tool)
+      : SectionGroups(Tool, Sec).filter((G) => !G.When || G.When(V, Bv)).map((G) => {
+        const Fields = VisibleToolFields(G, V, Bv);
+        if (!Fields.length) return "";
+        return `<div class="bs-group"><div class="bs-group-title"><b>${Esc(G.Title)}</b>${G.Hint ? `<small>${Esc(G.Hint)}</small>` : ""}</div>${Fields.map((F) => ToolFieldHtml(Tool, F)).join("")}</div>`;
+      }).join("");
+    Settings.innerHTML = `<div class="bs-set-head">
+        ${Glyph(Sec.Glyph, 18, SecColour(Sec.Id))}
+        <div><h2>${Esc(Sec.Label)}</h2><small>${Esc(Sec.Hint)}</small></div>
+        ${Sec.Id !== "about" ? `<button type="button" class="mi-text-btn" data-act="reset-section" ${Count ? "" : "disabled"}>${icon("reset", 10)}Reset section</button>` : ""}
+      </div>
+      <div class="bs-set-body" data-tool="${T.Id}">${Body}</div>`;
+    Settings.scrollTop = Scroll;
+    SigSettings = SettingsSig();
+    PaintPreviews();
+  }
+
+  function ToolAboutHtml(Tool) {
+    const T = TOOL[Tool], By = ToolChangedBySection(Tool, St.Tools[Tool]), Total = Object.values(By).reduce((A, N) => A + N, 0);
+    const Rows = STUDIOS[Tool].Sections.filter((S) => By[S.Id]).map((S) => `<button type="button" class="bs-about-row" data-act="section" data-section="${S.Id}">${Glyph(S.Glyph, 11, SecColour(S.Id))}<span>${Esc(S.Label)}</span><i style="width:${Math.min(100, By[S.Id] * 20)}%;background:${SecColour(S.Id)}"></i><b>${By[S.Id]}</b></button>`).join("");
+    const Uses = { smudge: "the active brush when “Smudge with current brush” is on", erase: "a catalogue eraser, or the active brush", curve: "the active brush" }[Tool];
+    return `<div class="bs-tool-card" style="--c:${TOOL_COLOURS[Tool]}">${Glyph(T.Glyph, 30, TOOL_COLOURS[Tool])}
+        <div><b>${Esc(T.Label)}</b><small>${Esc(T.Verb)}</small><small>Shortcut <kbd>${T.Key}</kbd>${Uses ? ` · paints with ${Esc(Uses)}` : ""}</small></div></div>
+      <div class="bs-group"><div class="bs-group-title"><b>Since the defaults</b><small>${Total} setting${Total === 1 ? "" : "s"}</small></div>
+        ${Rows || `<p class="mi-empty">Nothing edited — ${Esc(T.Label.toLowerCase())} is at its defaults.</p>`}
+      </div>
+      <div class="bs-group"><div class="bs-group-title"><b>Tool</b></div>
+        <div class="bs-actions">
+          ${St.Tool !== Tool ? `<button type="button" class="primary" data-act="tool" data-tool="${Tool}">${icon("check", 11)}Use ${Esc(T.Label)}</button>` : ""}
+          <button type="button" data-act="tool-reset" ${Total ? "" : "disabled"}>${icon("reset", 11)}Reset all settings</button>
+        </div>
+      </div>`;
+  }
+
   function RefreshEdited() {
     // Cheap pass after slider drags: edited dots and field reset buttons, without rebuilding inputs.
-    const Ch = Changed(), B = Brush();
+    const Ch = Changed(), B = Brush(), TCh = {};
     for (const K of Settings.querySelectorAll(".mi-knob, .bs-switch, .bs-field, .bs-curve")) {
       const El = K.querySelector("[data-bind]");
       if (!El) continue;
-      const Bind = El.dataset.bind, Key = Bind.startsWith("b|") ? Bind.slice(2).split(":")[0] : Bind.startsWith("p|") ? `instrument.${Bind.slice(2)}` : null;
-      if (!Key) continue;
-      const On = Ch.has(Key);
+      const Bind = El.dataset.bind;
+      let On;
+      if (Bind.startsWith("t|")) { const [, Tl, K2] = Bind.split("|"); if (!TCh[Tl]) TCh[Tl] = ToolChanged(Tl, St.Tools[Tl]); On = TCh[Tl].has(K2.split(":")[0]); }
+      else {
+        const Key = Bind.startsWith("b|") ? Bind.slice(2).split(":")[0] : Bind.startsWith("p|") ? `instrument.${Bind.slice(2)}` : null;
+        if (!Key) continue;
+        On = Ch.has(Key);
+      }
       K.classList.toggle("edited", On);
       const Lab = K.querySelector(".bs-label"); Lab?.classList.toggle("edited", On);
       const Slot = K.querySelector(".mi-knob-label") || Lab || K;
@@ -399,12 +475,13 @@ export function Mount(Host, Options = {}) {
       if (On && !Btn) Slot.insertAdjacentHTML("beforeend", ResetBtn(Bind, true));
       if (!On && Btn) Btn.remove();
     }
-    const Count = M.ChangedBySection(B)[St.Section];
+    const Count = ToolSec() ? ToolChangedBySection(St.Studio, St.Tools[St.Studio])[SectionId()] : M.ChangedBySection(B)[St.Section];
     const RS = Settings.querySelector('[data-act="reset-section"]');
     if (RS) RS.disabled = !Count;
     for (const C of Settings.querySelectorAll(".bs-curve")) {
       const Bind = C.dataset.curve, Key = Bind.slice(2);
       const Pts = B.values[Key];
+      if (!Pts) continue;
       for (const P of C.querySelectorAll(".bs-preset")) P.classList.toggle("active", JSON.stringify(M.CURVE_PRESETS[P.dataset.value]) === JSON.stringify(Pts));
     }
   }
@@ -429,7 +506,7 @@ export function Mount(Host, Options = {}) {
 
   function AboutHtml(B) {
     const By = M.ChangedBySection(B), Total = Object.values(By).reduce((A, N) => A + N, 0);
-    const Rows = M.SECTIONS.filter((S) => By[S.Id]).map((S) => `<button type="button" class="bs-about-row" data-act="section" data-section="${S.Id}">${icon(S.Glyph, 11)}<span>${Esc(S.Label)}</span><i style="width:${Math.min(100, By[S.Id] * 14)}%"></i><b>${By[S.Id]}</b></button>`).join("");
+    const Rows = M.SECTIONS.filter((S) => By[S.Id]).map((S) => `<button type="button" class="bs-about-row" data-act="section" data-section="${S.Id}">${Glyph(S.Glyph, 11, SecColour(S.Id, "paint"))}<span>${Esc(S.Label)}</span><i style="width:${Math.min(100, By[S.Id] * 14)}%;background:${SecColour(S.Id, "paint")}"></i><b>${By[S.Id]}</b></button>`).join("");
     return `<div class="bs-about-card">
         <canvas class="bs-about-stroke" width="660" height="150" aria-label="Brush stroke"></canvas>
         <div class="bs-about-meta"><canvas class="bs-about-stamp" width="120" height="120" aria-label="Brush stamp"></canvas>
@@ -487,6 +564,8 @@ export function Mount(Host, Options = {}) {
         X.putImageData(Img, 0, 0);
       }
     }
+    const Ct = Settings.querySelector(".bs-card-thumb");
+    if (Ct) StrokeThumb(Ct, Brush(), { Fill: 0.32 });
     const As = Settings.querySelector(".bs-about-stroke");
     if (As) StrokeThumb(As, B, { Fill: 0.3 });
     const Am = Settings.querySelector(".bs-about-stamp");
@@ -498,14 +577,13 @@ export function Mount(Host, Options = {}) {
 
   // ---------------------------------------------------------------------------------------------- pad chrome
   function RenderPadBar() {
-    PadBar.innerHTML = `<div class="bs-padbar-title"><b>Drawing pad</b><small>${Esc(TOOL[St.Tool].Verb)}</small></div>
-      <span class="bs-padbar-tools">
-        ${Segments("view", VIEWS, St.View, { Label: "Channel view" })}
-        ${Segments("paper", [["", "paper", "surface"], ["", "grey", "value"], ["", "dark", "material"]].map(([L, V, Ic]) => [L, V, Ic]), St.Paper, { Label: "Paper", Fill: false })}
-        <button type="button" class="bs-chip ${St.Live ? "on" : ""}" data-act="live" aria-pressed="${St.Live}" title="Re-render your strokes with the brush as you edit it">${icon("play", 10)}Live</button>
-        <button type="button" class="bs-chip ${St.Preview ? "on" : ""}" data-act="preview" aria-pressed="${St.Preview}" title="Show the preview stroke">${icon("wave", 10)}Preview</button>
-        <button type="button" class="bs-chip" data-act="clear" title="Clear the pad">${icon("trash", 10)}Clear</button>
-      </span>`;
+    const View = VIEWS.find(([, Id]) => Id === St.View)?.[0] || "Colour";
+    PadBar.innerHTML = `<span class="bs-padbar-title"><b>Drawing pad</b><small>Preview · ${Esc(View)} · ${Esc(TOOL[St.Tool].Label)}</small></span>
+      <span class="bs-papers" role="radiogroup" aria-label="Paper">${Object.entries(PAPERS).map(([Id, C]) => `<button type="button" role="radio" aria-checked="${Id === St.Paper}" class="bs-paper ${Id === St.Paper ? "active" : ""}" data-act="paper" data-value="${Id}" style="--p:${C}" title="${Id[0].toUpperCase() + Id.slice(1)} paper" aria-label="${Id} paper"></button>`).join("")}</span>
+      <button type="button" class="bs-ibtn ${St.Live ? "on" : ""}" data-act="live" aria-pressed="${St.Live}" title="Live — re-render your strokes as you edit the brush" aria-label="Live">${icon("play", 11)}</button>
+      <button type="button" class="bs-ibtn ${St.Preview ? "on" : ""}" data-act="preview" aria-pressed="${St.Preview}" title="Show the preview stroke" aria-label="Preview stroke">${icon("wave", 12)}</button>
+      <button type="button" class="bs-ibtn" data-act="clear" title="Clear the pad (undoable)" aria-label="Clear the pad">${icon("trash", 12)}</button>
+      <button type="button" class="bs-ibtn" data-act="pad-toggle" title="Close the drawing pad" aria-label="Close the drawing pad">${icon("close", 11)}</button>`;
     Stage.dataset.paper = St.Paper;
     Stage.dataset.view = St.View;
   }
@@ -513,10 +591,11 @@ export function Mount(Host, Options = {}) {
   function RenderRail() {
     Rail.innerHTML = RAIL.map((Group) => `<span class="bs-rail-group">${Group.map((Id) => {
       const T = TOOL[Id], Active = Id === St.Tool;
-      return `<button type="button" class="bs-tool ${Active ? "active" : ""} ${St.Popup === Id ? "open" : ""}" data-act="tool" data-tool="${Id}" aria-pressed="${Active}" aria-haspopup="dialog" aria-expanded="${St.Popup === Id}" title="${Esc(T.Label)} (${T.Key})${Active ? " — click again for its menu" : ""}">${icon(T.Glyph, 15)}${Active && Id === "paint" ? `<i class="bs-tool-ink" style="background:${Brush().values["colour.primary"]}"></i>` : ""}</button>`;
+      return `<button type="button" class="bs-tool ${Active ? "active" : ""}" data-act="tool" data-tool="${Id}" aria-pressed="${Active}" title="${Esc(T.Label)} (${T.Key}) — opens the ${Esc(STUDIOS[Id].Title)}" style="--c:${TOOL_COLOURS[Id]}">${icon(T.Glyph, 16)}${Active && Id === "paint" ? `<i class="bs-tool-ink" style="background:${Brush().values["colour.primary"]}"></i>` : ""}</button>`;
     }).join("")}</span>`).join("") + `<span class="bs-rail-group">
-      <button type="button" class="bs-tool" data-act="pad-undo" ${Pad.CanUndo() ? "" : "disabled"} title="Undo on the pad (Ctrl+Z)" aria-label="Undo on the pad">${icon("undo", 14)}</button>
-      <button type="button" class="bs-tool" data-act="pad-redo" ${Pad.CanRedo() ? "" : "disabled"} title="Redo on the pad (Ctrl+Shift+Z)" aria-label="Redo on the pad">${icon("redo", 14)}</button>
+      <button type="button" class="bs-tool plain" data-act="pad-undo" ${Pad.CanUndo() ? "" : "disabled"} title="Undo on the pad (Ctrl+Z)" aria-label="Undo on the pad">${icon("undo", 14)}</button>
+      <button type="button" class="bs-tool plain" data-act="pad-redo" ${Pad.CanRedo() ? "" : "disabled"} title="Redo on the pad (Ctrl+Shift+Z)" aria-label="Redo on the pad">${icon("redo", 14)}</button>
+      <button type="button" class="bs-tool plain ${St.PadOpen ? "on" : ""}" data-act="pad-toggle" aria-pressed="${St.PadOpen}" title="${St.PadOpen ? "Hide" : "Show"} the drawing pad" aria-label="Drawing pad">${icon("image", 14)}</button>
     </span>`;
   }
 
@@ -532,37 +611,30 @@ export function Mount(Host, Options = {}) {
   }
 
   function RenderFoot() {
-    const S = St.Stats || {}, B = Brush(), V = B.values;
-    const Mode = M.RENDER_MODES.find((R) => R.Id === V["render.mode"])?.Label || "";
+    const S = St.Stats || {}, V = Brush().values;
     Foot.innerHTML = [
-      ["Size", `${Fixed(M.EffectiveSize(V), 0.1)}`, "px"],
-      ["Opacity", `${Math.round(M.EffectiveOpacity(V) * 100)}`, "%"],
-      ["Dabs", `${S.LiveDabs && Pad.Ops.length ? S.LiveDabs : S.Dabs ?? 0}`, ""],
-      ["Render", `${Fixed(S.Ms ?? 0, 0.1)}`, "ms"],
-      ["Items", `${Pad.Ops.length}`, ""],
-      ["Mode", Mode, ""],
-    ].map(([L, Vv, U]) => `<span class="bs-stat"><small>${L}</small><b>${Esc(Vv)}${U ? `<em>${U}</em>` : ""}</b></span>`).join("");
+      [`${Fixed(M.EffectiveSize(V), 0.1)}`, "px"],
+      [`${Math.round(M.EffectiveOpacity(V) * 100)}`, "%"],
+      [`${S.LiveDabs && Pad.Ops.length ? S.LiveDabs : S.Dabs ?? 0}`, "dabs"],
+      [`${Fixed(S.Ms ?? 0, 0.1)}`, "ms"],
+      [`${Pad.Ops.length}`, Pad.Ops.length === 1 ? "item" : "items"],
+    ].map(([Vv, U]) => `<span class="bs-stat"><b>${Esc(Vv)}</b>${Esc(U)}</span>`).join("");
+    Vp.SetMeta(`${STUDIOS[St.Tool].Title.replace(" Studio", "")} · ${Brush().name}`);
   }
 
   // ---------------------------------------------------------------------------------------------- tool popups
-  function PopupSig() {
-    if (!St.Popup) return "";
-    const V = St.Tools[St.Popup], Bv = Brush().values;
-    return St.Popup + "|" + St.ActiveId + "|" + VisibleToolGroups(St.Popup, V, Bv).map((G) => VisibleToolFields(G, V, Bv).map((F) => F.K).join(",")).join(";");
-  }
-
   function ToolFieldHtml(Tool, F) {
     const V = St.Tools[Tool], B = Brush(), Bv = B.values;
     if (F.T === "brush") {
       const Key = F.K.slice(1), Bf = M.FIELDS[Key];
       return FieldHtml({ ...Bf, L: F.L || Bf.L, Hint: F.Hint ?? Bf.Hint }, Bv[Key], `b|${Key}`, Changed().has(Key));
     }
-    const Bind = `t|${Tool}|${F.K}`;
+    const Bind = `t|${Tool}|${F.K}`, Edited = ToolChanged(Tool, V).has(F.K);
     switch (F.T) {
       case "brushcard": return `<div class="bs-brushcard">
           <canvas class="bs-card-thumb" width="400" height="84" aria-label="Active brush stroke"></canvas>
           <div class="bs-brushcard-row"><span><b>${Esc(B.name)}</b><small>${Esc(M.Caption(B))}</small></span>
-            <button type="button" class="mi-text-btn" data-act="studio" title="Edit in the Brush Studio">${icon("sliders", 10)}Studio</button></div>
+            <button type="button" class="mi-text-btn" data-act="studio" title="Edit this brush in the Brush Studio">${icon("sliders", 10)}Brush Studio</button></div>
           ${St.Recent.length > 1 ? `<div class="bs-brushcard-recent">${St.Recent.slice(0, 6).map((Id) => `<button type="button" class="bs-recent ${Id === St.ActiveId ? "active" : ""}" data-act="pick" data-id="${Esc(Id)}" title="${Esc(BrushOf(Id).name)}"><img alt="" src="${toolArtURL(BrushOf(Id).instrument, true)}"></button>`).join("")}</div>` : ""}
         </div>`;
       case "colours": {
@@ -575,7 +647,7 @@ export function Mount(Host, Options = {}) {
             <div class="bs-swatches">${Sw.map((C) => `<button type="button" class="bs-sw ${C === Bv["colour.primary"] ? "active" : ""}" style="background:${C}" data-act="swatch" data-value="${C}" title="${C}" aria-label="Use ${C}"></button>`).join("")}</div></div>
         </div>`;
       }
-      case "instrument": return `<div class="bs-field"><span class="bs-label"><span>${Esc(F.L)}</span></span><div class="bs-erasers">${ERASERS.map((Id) => `<button type="button" class="bs-eraser ${V.instrument === Id ? "active" : ""}" data-act="set" data-bind="${Bind}" data-value="${Id}" title="${Esc(paintTool(Id).label)}"><img alt="" src="${toolArtURL(Id, true)}"><span>${Esc(paintTool(Id).label.replace(/ Eraser$/, ""))}</span></button>`).join("")}</div></div>`;
+      case "instrument": return `<div class="bs-field">${Label(F.L, "", Bind, Edited)}<div class="bs-erasers">${ERASERS.map((Id) => `<button type="button" class="bs-eraser ${V.instrument === Id ? "active" : ""}" data-act="set" data-bind="${Bind}" data-value="${Id}" title="${Esc(paintTool(Id).label)}"><img alt="" src="${toolArtURL(Id, true)}"><span>${Esc(paintTool(Id).label.replace(/ Eraser$/, ""))}</span></button>`).join("")}</div></div>`;
       case "sample": {
         const L = V.last;
         if (!L?.Hex) return `<div class="bs-sample empty"><i></i><span><b>No sample yet</b><small>Click or drag on the pad.</small></span></div>`;
@@ -592,8 +664,8 @@ export function Mount(Host, Options = {}) {
       case "nudge": return `<div class="bs-nudge">${[["←", -1, 0], ["↑", 0, -1], ["↓", 0, 1], ["→", 1, 0]].map(([L, X, Y]) => `<button type="button" class="mi-mini" data-act="nudge" data-x="${X}" data-y="${Y}" aria-label="Nudge ${L}">${L}</button>`).join("")}<small>${Math.round(V.dx)} · ${Math.round(V.dy)} px dragged</small></div>`;
       case "readout": return `<p class="bs-readout" data-readout="${Tool}">${Esc(Readout(Tool))}</p>`;
       case "actions": return `<div class="bs-actions">${F.Items.map(([L, A, G, Tone]) => `<button type="button" class="${Tone === "primary" ? "primary" : ""}" data-act="${A}">${icon(G, 11)}${Esc(L)}</button>`).join("")}</div>`;
-      case "switch": return `<div class="bs-switch">${SwitchRow("toggle", V[F.K], F.L, F.Hint, `data-bind="${Bind}"`)}</div>`;
-      default: return FieldHtml(F, V[F.K], Bind, false);
+      case "switch": return `<div class="bs-switch ${Edited ? "edited" : ""}">${SwitchRow("toggle", V[F.K], F.L, F.Hint, `data-bind="${Bind}"`)}${ResetBtn(Bind, Edited)}</div>`;
+      default: return FieldHtml(F, V[F.K], Bind, Edited);
     }
   }
 
@@ -605,52 +677,43 @@ export function Mount(Host, Options = {}) {
     return "";
   }
   function RefreshReadouts() {
-    for (const R of PopHost.querySelectorAll("[data-readout]")) R.textContent = Readout(R.dataset.readout);
-    const Nd = PopHost.querySelector(".bs-nudge small"); if (Nd) Nd.textContent = `${Math.round(St.Tools.move.dx)} · ${Math.round(St.Tools.move.dy)} px dragged`;
+    for (const R of Settings.querySelectorAll("[data-readout]")) R.textContent = Readout(R.dataset.readout);
+    const Nd = Settings.querySelector(".bs-nudge small"); if (Nd) Nd.textContent = `${Math.round(St.Tools.move.dx)} · ${Math.round(St.Tools.move.dy)} px dragged`;
   }
   function RefreshSample() {
-    const El = PopHost.querySelector(".bs-sample");
+    const El = Settings.querySelector(".bs-sample");
     if (El) El.outerHTML = ToolFieldHtml("eyedropper", { K: "sample", T: "sample" });
   }
 
-  function RenderPopup() {
-    RenderRail();
-    if (!St.Popup) { PopHost.innerHTML = ""; SigPopup = ""; return; }
-    const Tool = TOOL[St.Popup], V = St.Tools[St.Popup], Bv = Brush().values;
-    const Scroll = PopHost.querySelector(".bs-popup-body")?.scrollTop || 0;
-    PopHost.innerHTML = `<div class="bs-popup" role="dialog" aria-label="${Esc(Tool.Label)} settings" data-popup="${Tool.Id}">
-      <header class="bs-popup-head"><span class="bs-popup-glyph">${icon(Tool.Glyph, 14)}</span><span><b>${Esc(Tool.Label)}</b><small>${Esc(Tool.Verb)}</small></span>
-        <button type="button" class="icon-btn" data-act="tool-reset" title="Reset this tool" aria-label="Reset ${Esc(Tool.Label)} settings">${icon("reset", 12)}</button>
-        <button type="button" class="icon-btn" data-act="popup-close" title="Close (Esc)" aria-label="Close">${icon("close", 12)}</button></header>
-      <div class="bs-popup-body">${VisibleToolGroups(Tool.Id, V, Bv).map((G) => `<div class="bs-group"><div class="bs-group-title"><b>${Esc(G.Title)}</b>${G.Hint ? `<small>${Esc(G.Hint)}</small>` : ""}</div>${VisibleToolFields(G, V, Bv).map((F) => ToolFieldHtml(Tool.Id, F)).join("")}</div>`).join("")}</div>
-    </div>`;
-    const Body = PopHost.querySelector(".bs-popup-body"); if (Body) Body.scrollTop = Scroll;
-    // Anchor under the tool button.
-    const Btn = Rail.querySelector(`[data-tool="${Tool.Id}"]`), Pop = PopHost.firstElementChild;
-    if (Btn && Pop) {
-      const Sr = Stage.getBoundingClientRect(), Br = Btn.getBoundingClientRect();
-      const Left = Clamp(Br.left - Sr.left + Br.width / 2 - 170, 8, Math.max(8, Sr.width - 348));
-      Pop.style.left = `${Left}px`;
-      Pop.style.setProperty("--arrow", `${Br.left - Sr.left + Br.width / 2 - Left}px`);
-    }
-    SigPopup = PopupSig();
-    PaintPopupCanvases();
-  }
-  function PaintPopupCanvases() { const C = PopHost.querySelector(".bs-card-thumb"); if (C) StrokeThumb(C, Brush(), { Fill: 0.32 }); }
-  function OpenPopup(Tool) { St.Popup = Tool; RenderPopup(); }
-  function ClosePopup() { St.Popup = null; RenderPopup(); }
-  Hub.OpenPopup = OpenPopup; Hub.ClosePopup = ClosePopup;
+  // Re-render whatever shows tool state: the active studio section (when it is a tool section) and its counts.
+  function RenderToolUi() { RenderHead(); RenderSections(); if (ToolSec()) RenderSettings(); RenderRail(); }
 
-  function SetTool(Id, { Keep = false } = {}) {
+  function OpenStudio(Tool, Section) {
+    if (!STUDIOS[Tool]) return;
+    St.Studio = Tool;
+    if (Section) { if (Tool === "paint" && !STUDIOS.paint.Sections.some((S) => S.Id === Section)) St.Section = Section; else if (Tool === "paint") St.Section = Section; else St.ToolSection[Tool] = Section; }
+    RenderHead(); RenderSections(); RenderSettings(); Settings.scrollTop = 0;
+  }
+  Hub.Studio = OpenStudio;
+
+  function SetTool(Id) {
     if (!TOOL[Id]) return;
-    if (Id === St.Tool && !Keep) { St.Popup = St.Popup === Id ? null : Id; RenderPopup(); return; }
     if (Id !== St.Tool) St.PrevTool = St.Tool;
     St.Tool = Id;
-    if (St.Popup) St.Popup = Id;
-    RenderPadBar(); RenderPopup(); RenderSide();
+    St.Studio = Id;
+    RenderHead(); RenderSections(); RenderSettings(); Settings.scrollTop = 0;
+    RenderPadBar(); RenderRail(); RenderSide(); RenderFoot();
     Pad.Render();
   }
   Hub.Tool = SetTool;
+
+  function TogglePad(Open = !St.PadOpen) {
+    St.PadOpen = !!Open;
+    Shell.dataset.pad = St.PadOpen ? "open" : "closed";
+    RenderHead(); RenderRail();
+    if (St.PadOpen) { Pad.Resize(); Pad.Replay(); }
+  }
+  Hub.TogglePad = TogglePad;
 
   function Flash(Text) {
     Toast.textContent = Text;
@@ -667,7 +730,7 @@ export function Mount(Host, Options = {}) {
     St.Custom = [D.id, ...St.Custom];
     Select(D.id);
     St.Section = "about";
-    RenderSections(); RenderSettings();
+    OpenStudio("paint");
     Flash(`Saved “${D.name}”`);
   }
   function ExportActive() { const B = Brush(); Download(M.Export(B), `${M.Slug ? M.Slug(B.name) : B.name.replace(/\W+/g, "-").toLowerCase()}.brush.json`, "application/json"); Flash("Exported"); }
@@ -699,6 +762,7 @@ export function Mount(Host, Options = {}) {
     if (Scope === "b") EditBrush((Br) => ({ ...Br, values: M.Normalise({ ...Br.values, [A]: structuredClone(B.reset.values[A]) }) }));
     else if (Scope === "p") EditBrush((Br) => M.SetParam(Br, A, B.reset.params[A]));
     else if (Scope === "m") EditBrush((Br) => ({ ...Br, [A]: Br.reset[A] ?? Br[A] }));
+    else if (Scope === "t") { const K2 = Bind.split("|")[2]; St.Tools = SetToolValue(St.Tools, A, K2, ToolDefault(A, K2)); EraseMemo = SmudgeMemo = null; RenderToolUi(); RenderSide(); Pad.Schedule(); return; }
     RenderSettings();
   }
 
@@ -726,8 +790,8 @@ export function Mount(Host, Options = {}) {
     if (El.tagName === "SELECT") { Write(Bind, El.value); return; }
     if (Bind.startsWith("m|")) { Write(Bind, El.value); H.Settle({ Id: St.ActiveId, Brush: Brush() }); return; }
     if (El.type === "color" && Bind.startsWith("b|")) RememberColour(El.value);
-    if (Bind.startsWith("b|") || Bind.startsWith("p|")) { H.Settle({ Id: St.ActiveId, Brush: Brush() }); RenderHead(); if (St.Popup === "paint") { /* keep popup inputs */ } }
-    if (Bind.startsWith("t|")) RenderPopup();
+    if (Bind.startsWith("b|") || Bind.startsWith("p|")) { H.Settle({ Id: St.ActiveId, Brush: Brush() }); RenderHead(); }
+    if (Bind.startsWith("t|")) RenderToolUi();
   });
 
   Host.addEventListener("click", (E) => {
@@ -737,7 +801,7 @@ export function Mount(Host, Options = {}) {
     switch (Act) {
       case "pick": Select(El.dataset.id); break;
       case "family": { const K = El.dataset.family; St.Open.has(K) ? St.Open.delete(K) : St.Open.add(K); RenderLibrary(); break; }
-      case "section": St.Section = El.dataset.section; RenderSections(); RenderSettings(); Settings.scrollTop = 0; break;
+      case "section": { const Id = El.dataset.section; if (IsBrushStudio() && !STUDIOS.paint.Sections.some((S) => S.Id === Id)) St.Section = Id; else if (IsBrushStudio()) St.Section = Id; else St.ToolSection[St.Studio] = Id; RenderSections(); RenderSettings(); Settings.scrollTop = 0; break; }
       case "set": ApplySet(Bind, El.dataset.value); if (Bind.startsWith("b|") || Bind.startsWith("p|")) RenderSettings(); break;
       case "toggle": ApplyToggle(Bind); if (!Bind.startsWith("t|")) RenderSettings(); break;
       case "chan": {
@@ -754,11 +818,18 @@ export function Mount(Host, Options = {}) {
         const Target = El.dataset.target, [Scope, A, B2] = Target.split("|");
         const List = Scope === "b" ? Brush().values[A] : St.Tools[A][B2];
         const Next = Act === "stop-add" ? [...List, List.at(-1)] : List.slice(0, -1);
-        if (Scope === "b") { EditBrush((Br) => M.SetValue(Br, A, Next)); RenderSettings(); } else { Write(Target, Next); RenderPopup(); }
+        if (Scope === "b") { EditBrush((Br) => M.SetValue(Br, A, Next)); RenderSettings(); } else { Write(Target, Next); RenderSettings(); }
         break;
       }
       case "field-reset": FieldReset(Bind); break;
       case "reset-section": {
+        if (ToolSec()) {
+          const Tool = St.Studio, Sec = ToolSec();
+          for (const G of SectionGroups(Tool, Sec)) for (const F of G.Fields) if (!F.K.startsWith("@") && "Def" in F && F.T !== "history") St.Tools = SetToolValue(St.Tools, Tool, F.K, ToolDefault(Tool, F.K));
+          EraseMemo = SmudgeMemo = null;
+          RenderToolUi(); RenderSide(); Pad.Schedule(); Flash(`${Sec.Label} reset`);
+          break;
+        }
         const Sec = M.SECTIONS.find((S) => S.Id === St.Section), R = Brush().reset;
         if (Sec.Id === "instrument") EditBrush((Br) => ({ ...Br, params: structuredClone(R.params), values: M.Normalise(M.ApplyInstrumentParams(Br.values, R.params)) }));
         else EditBrush((Br) => { const V = { ...Br.values }; for (const G of Sec.Groups) for (const F of G.Fields) V[F.K] = structuredClone(R.values[F.K]); return { ...Br, values: M.Normalise(V) }; });
@@ -773,14 +844,15 @@ export function Mount(Host, Options = {}) {
       case "undo": Step(true); break;
       case "redo": Step(false); break;
       case "tool": SetTool(El.dataset.tool); break;
-      case "popup-close": ClosePopup(); break;
-      case "tool-reset": { const Fresh = CreateTools()[St.Popup]; St.Tools = { ...St.Tools, [St.Popup]: { ...Fresh, history: St.Tools[St.Popup].history ?? Fresh.history } }; EraseMemo = SmudgeMemo = null; RenderPopup(); RenderSide(); Pad.Render(); break; }
-      case "studio": ClosePopup(); St.Section = St.Section === "about" ? "stroke" : St.Section; Settings.querySelector("h2")?.scrollIntoView?.({ block: "nearest" }); Flash("Editing in the studio"); break;
-      case "swap-colours": { const V = Brush().values; EditBrush((Br) => M.SetValue(M.SetValue(Br, "colour.primary", V["colour.secondary"]), "colour.secondary", V["colour.primary"])); RenderPopup(); RenderRail(); break; }
+      case "tool-reset": { const Tool = St.Studio, Fresh = CreateTools()[Tool]; St.Tools = { ...St.Tools, [Tool]: { ...Fresh, history: St.Tools[Tool].history ?? Fresh.history } }; EraseMemo = SmudgeMemo = null; RenderToolUi(); RenderSide(); Pad.Render(); Flash(`${TOOL[Tool].Label} reset`); break; }
+      case "studio": OpenStudio("paint", St.Section === "about" ? "stroke" : St.Section); Flash("Brush Studio — the curve, smudge and eraser tools share this brush"); break;
+      case "studio-back": OpenStudio(St.Tool); break;
+      case "swap-colours": { const V = Brush().values; EditBrush((Br) => M.SetValue(M.SetValue(Br, "colour.primary", V["colour.secondary"]), "colour.secondary", V["colour.primary"])); RenderSettings(); RenderRail(); break; }
       case "swatch": {
-        const Key = St.Popup === "eyedropper" && St.Tools.eyedropper.target === "Secondary" ? "colour.secondary" : "colour.primary";
-        EditBrush((Br) => M.SetValue(Br, Key, El.dataset.value)); RenderPopup(); break;
+        const Key = St.Studio === "eyedropper" && St.Tools.eyedropper.target === "Secondary" ? "colour.secondary" : "colour.primary";
+        EditBrush((Br) => M.SetValue(Br, Key, El.dataset.value)); RenderSettings(); break;
       }
+      case "pad-toggle": TogglePad(); break;
       case "use-sample": { const L = St.Tools.eyedropper.last; if (L?.Hex) { EditBrush((Br) => M.SetValue(Br, El.dataset.value === "secondary" ? "colour.secondary" : "colour.primary", L.Hex)); Flash(`${L.Hex.toUpperCase()} → ${El.dataset.value}`); } break; }
       case "nudge": { const D = E.shiftKey ? 10 : 1; St.Tools.move = { ...St.Tools.move, dx: St.Tools.move.dx + D * +El.dataset.x, dy: St.Tools.move.dy + D * +El.dataset.y }; RefreshReadouts(); Pad.Render(); break; }
       case "gradient-apply": if (!Pad.CommitGradient()) Flash("Drag on the pad first"); else Flash("Gradient applied"); break;
@@ -794,7 +866,7 @@ export function Mount(Host, Options = {}) {
       case "move-reset": OnPad("move-reset"); break;
       case "pad-undo": Pad.Undo(); break;
       case "pad-redo": Pad.Redo(); break;
-      case "view": St.View = El.dataset.value; RenderPadBar(); Pad.Replay(); break;
+      case "view": Vp.SetView(El.dataset.value); break;
       case "paper": St.Paper = El.dataset.value; RenderPadBar(); break;
       case "live": St.Live = !St.Live; RenderPadBar(); Pad.Replay(); break;
       case "preview": St.Preview = !St.Preview; RenderPadBar(); Pad.Schedule(); break;
@@ -863,7 +935,7 @@ export function Mount(Host, Options = {}) {
   const Keys = Object.fromEntries(TOOLS.map((T) => [T.Key.toLowerCase(), T.Id]));
   function OnKey(E) {
     const Typing = /INPUT|TEXTAREA|SELECT/.test(E.target?.tagName || "") && E.target.type !== "range";
-    if (E.key === "Escape") { if (St.Popup) { ClosePopup(); E.preventDefault(); } return; }
+    if (E.key === "Escape") { if (St.Studio !== St.Tool) { OpenStudio(St.Tool); E.preventDefault(); } return; }
     if (Typing) return;
     const Mod = E.ctrlKey || E.metaKey;
     if (Mod && E.key.toLowerCase() === "z") { E.preventDefault(); E.shiftKey ? Pad.Redo() : Pad.Undo(); return; }
@@ -880,13 +952,13 @@ export function Mount(Host, Options = {}) {
     if (Id) { SetTool(Id); E.preventDefault(); }
   }
   document.addEventListener("keydown", OnKey);
-  globalThis.addEventListener?.("resize", () => { if (St.Popup) RenderPopup(); });
 
   // ---------------------------------------------------------------------------------------------- first paint
   St.Recent = [St.ActiveId];
-  Hub.Render = () => { RenderLibrary(); RenderHead(); RenderSections(); RenderSettings(); RenderPadBar(); RenderRail(); RenderSide(); RenderPopup(); RenderFoot(); Pad.Resize(); Pad.Replay(); };
-  Hub.Section = (Id) => { St.Section = Id; RenderSections(); RenderSettings(); };
-  Hub.SetView = (V) => { St.View = V; RenderPadBar(); Pad.Replay(); };
+  Hub.Render = () => { RenderLibrary(); RenderHead(); RenderSections(); RenderSettings(); RenderPadBar(); RenderRail(); RenderSide(); RenderFoot(); Pad.Resize(); Pad.Replay(); };
+  Hub.Section = (Id) => { if (IsBrushStudio() || M.SECTIONS.some((S) => S.Id === Id)) { if (!IsBrushStudio()) St.Studio = "paint"; St.Section = Id; } else St.ToolSection[St.Studio] = Id; RenderHead(); RenderSections(); RenderSettings(); };
+  Hub.SetView = (V) => Vp.SetView(V);
+  Hub.Viewport = Vp;
   Hub.Destroy = () => { document.removeEventListener("keydown", OnKey); Pad.Destroy(); };
   Hub.Render();
   return Hub;

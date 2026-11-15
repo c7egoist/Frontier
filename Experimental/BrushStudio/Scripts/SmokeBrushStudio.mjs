@@ -1,8 +1,8 @@
 // UI smoke test: boots the Brush Studio in jsdom (pixel-less canvas) and drives every path — library (families, search,
 // pick), every studio section and field type (sliders, switches, segments, selects, shape / grain / render pickers,
 // colours, curves, channels), per-field / per-section / whole-brush reset, reset point, duplicate, export / import, the
-// drawing pad (paint, smudge, erase, fill, stamp, gradient, text, curve, move, eyedropper), every tool popup and its
-// controls, channel views, keyboard shortcuts, pad undo / redo / clear and settings undo / redo.
+// drawing pad (paint, smudge, erase, fill, stamp, gradient, text, curve, move, eyedropper), every tool's dedicated studio
+// (every section and control), the closable pad, channel views, keyboard shortcuts, pad undo / redo / clear and settings undo / redo.
 //   npm install --prefix /tmp/smoke jsdom@25
 //   JSDOM_DIR=/tmp/smoke node Experimental/BrushStudio/Scripts/SmokeBrushStudio.mjs
 import { readFileSync } from "node:fs";
@@ -225,49 +225,76 @@ await step("pad undo / redo / clear and keyboard shortcuts", async () => {
 });
 
 await step("channel views, paper, live and preview toggles", async () => {
-  for (const V of ["roughness", "metalness", "height", "emissive", "albedo"]) { const B = byAct("view").find((E) => E.dataset.value === V); click(B); expect(St.View === V, V); await sleep(5); }
+  for (const V of ["roughness", "metalness", "height", "emissive", "albedo"]) { const B = qa("[data-vp-view]").find((E) => E.dataset.vpView === V); click(B); expect(St.View === V, V); await sleep(5); }
   for (const B of byAct("paper")) click(byAct("paper").find((E) => E.dataset.value === B.dataset.value));
   const L = St.Live; click(byAct("live")[0]); expect(St.Live !== L, "live"); click(byAct("live")[0]);
   const P = St.Preview; click(byAct("preview")[0]); expect(St.Preview !== P, "preview"); click(byAct("preview")[0]);
 });
 
-await step("every tool popup opens from the rail and every control edits that tool", async () => {
+await step("every tool opens its own studio and every section's controls edit that tool", async () => {
   const Notes = [];
+  const Panel = () => q(".bs-settings");
   for (const T of TOOLS) {
-    App.Tool(T.Id);
-    click(byAct("tool").find((B) => B.dataset.tool === T.Id)); // tapping the active tool opens its popup
-    if (St.Popup !== T.Id) App.OpenPopup(T.Id);
-    const Pop = q(".bs-popup");
-    expect(Pop && St.Popup === T.Id, `${T.Id} popup`);
+    click(byAct("tool").find((B) => B.dataset.tool === T.Id));
+    expect(St.Tool === T.Id && St.Studio === T.Id, `${T.Id} studio`);
+    const Ids = byAct("section").map((B) => B.dataset.section).filter((Id) => T.Id !== "paint" || Id === "paint-colour");
+    expect(Ids.length >= (T.Id === "paint" ? 1 : 3), `${T.Id} studio has ${Ids.length} sections`);
     let N = 0;
     const Bind = (E) => E.dataset.bind || "";
-    for (const R of qa('input[type="range"][data-bind]', q(".bs-popup")).slice(0, 8)) { const Fresh = qa('input[type="range"]', q(".bs-popup")).find((E) => Bind(E) === Bind(R)); if (Fresh) { setVal(Fresh, String(Math.round((+Fresh.min + +Fresh.max) / 2))); N++; } }
-    for (const B of qa('[data-act="set"]:not(.active)', q(".bs-popup")).slice(0, 6)) { const Fresh = qa('[data-act="set"]', q(".bs-popup")).find((E) => Bind(E) === Bind(B) && E.dataset.value === B.dataset.value); if (Fresh) { click(Fresh); N++; } }
-    for (const B of qa('[data-act="toggle"]', q(".bs-popup")).slice(0, 4)) { const Fresh = qa('[data-act="toggle"]', q(".bs-popup")).find((E) => Bind(E) === Bind(B)); if (Fresh) { click(Fresh); N++; } }
-    for (const S of qa("select[data-bind]", q(".bs-popup")).slice(0, 3)) { const Fresh = qa("select", q(".bs-popup")).find((E) => Bind(E) === Bind(S)); const Opt = Fresh && [...Fresh.options].find((O) => O.value !== Fresh.value); if (Opt) { setVal(Fresh, Opt.value); N++; } }
-    for (const C of qa('input[type="color"][data-bind]', q(".bs-popup")).slice(0, 2)) { setVal(C, "#22aa66"); N++; }
-    const Txt = q("textarea[data-bind]", q(".bs-popup")); if (Txt) { setVal(Txt, "Hello pad"); N++; }
-    for (const Ch of qa('[data-act="chan"]', q(".bs-popup")).slice(0, 2)) { const Fresh = qa('[data-act="chan"]', q(".bs-popup")).find((E) => Bind(E) === Bind(Ch) && E.dataset.value === Ch.dataset.value); if (Fresh) { click(Fresh); N++; } }
-    for (const A of ["swatch", "swap-colours", "nudge", "gradient-clear", "curve-clear", "text-cancel"]) { const B = byAct(A, q(".bs-popup") || w.document)[0]; if (B) { click(B); N++; } }
-    if (q(".bs-popup")) click(byAct("tool-reset", q(".bs-popup"))[0]);
-    expect(St.Popup === T.Id, `${T.Id} popup closed itself`);
-    expect(N >= 3, `${T.Id} popup only had ${N} working controls`);
-    click(byAct("popup-close", q(".bs-popup"))[0]);
-    expect(!St.Popup && !q(".bs-popup"), `${T.Id} close`);
+    for (const Id of Ids) {
+      click(byAct("section").find((B) => B.dataset.section === Id));
+      expect(q(".bs-set-head h2"), `${T.Id}/${Id} heading`);
+      for (const R of qa('input[type="range"][data-bind]', Panel()).slice(0, 8)) { const Fresh = qa('input[type="range"]', Panel()).find((E) => Bind(E) === Bind(R)); if (Fresh) { setVal(Fresh, String(Math.round((+Fresh.min + +Fresh.max) / 2) + 1)); N++; } }
+      for (const B of qa('[data-act="set"]:not(.active)', Panel()).slice(0, 6)) { const Fresh = qa('[data-act="set"]', Panel()).find((E) => Bind(E) === Bind(B) && E.dataset.value === B.dataset.value); if (Fresh) { click(Fresh); N++; } }
+      for (const B of qa('[data-act="toggle"]', Panel()).slice(0, 4)) { const Fresh = qa('[data-act="toggle"]', Panel()).find((E) => Bind(E) === Bind(B)); if (Fresh) { click(Fresh); N++; } }
+      for (const S of qa("select[data-bind]", Panel()).slice(0, 3)) { const Fresh = qa("select", Panel()).find((E) => Bind(E) === Bind(S)); const Opt = Fresh && [...Fresh.options].find((O) => O.value !== Fresh.value); if (Opt) { setVal(Fresh, Opt.value); N++; } }
+      for (const C of qa('input[type="color"][data-bind]', Panel()).slice(0, 2)) { setVal(C, "#22aa66"); N++; }
+      const Txt = q("textarea[data-bind]", Panel()); if (Txt) { setVal(Txt, "Hello pad"); N++; }
+      for (const Ch of qa('[data-act="chan"]', Panel()).slice(0, 2)) { const Fresh = qa('[data-act="chan"]', Panel()).find((E) => Bind(E) === Bind(Ch) && E.dataset.value === Ch.dataset.value); if (Fresh) { click(Fresh); N++; } }
+      for (const A of ["swatch", "swap-colours", "nudge", "gradient-clear", "curve-clear", "text-cancel"]) { const B = byAct(A, Panel())[0]; if (B) { click(B); N++; } }
+      expect(St.Studio === T.Id, `${T.Id} studio stayed open`);
+    }
+    if (T.Id !== "paint") {
+      // edited marks: section counts, a per-field reset, a section reset, the About page and a whole-tool reset
+      const Edited = qa(".bs-sec-count").length;
+      expect(Edited >= 1, `${T.Id}: edits show section counts`);
+      const Fr = qa('[data-act="field-reset"]', Panel())[0]; if (Fr) click(Fr);
+      const Rs = byAct("reset-section", Panel())[0]; if (Rs && !Rs.disabled) click(Rs);
+      click(byAct("section").find((B) => B.dataset.section === "about"));
+      expect(q(".bs-tool-card"), `${T.Id} about card`);
+      const Reset = byAct("tool-reset").find((B) => !B.disabled); if (Reset) click(Reset);
+      expect(qa(".bs-sec-count").length === 0, `${T.Id}: tool reset clears edits`);
+    }
+    expect(N >= 3, `${T.Id} studio only had ${N} working controls`);
     Notes.push(`${T.Id} ${N}`);
   }
-  App.OpenPopup("paint"); key("Escape"); expect(!St.Popup, "Escape closes popup");
   return Notes.join(" · ");
 });
 
-await step("paint popup's studio link and brush-bound fields stay in sync with the studio", async () => {
-  App.Tool("paint"); App.OpenPopup("paint");
-  const R = qa('input[type="range"]', q(".bs-popup")).find((E) => E.dataset.bind === "b|prop.size" || E.dataset.bind?.endsWith("|prop.size"));
-  expect(R, "size slider bound to the brush");
-  setVal(R, "33");
-  expect(App.Brush().values["prop.size"] === 33, `popup size → brush ${App.Brush().values["prop.size"]}`);
-  click(byAct("studio", q(".bs-popup"))[0]);
-  expect(!St.Popup, "studio link closes the popup");
+await step("studio link: a brush-using tool opens the Brush Studio and Escape returns", async () => {
+  App.Tool("curve");
+  click(byAct("section").find((B) => B.dataset.section === "brush"));
+  click(byAct("studio")[0]);
+  expect(St.Studio === "paint" && St.Tool === "curve", `studio link → ${St.Studio}`);
+  expect(q(".bs-head").textContent.includes("Brush Studio") && byAct("studio-back").length, "back chip");
+  key("Escape"); expect(St.Studio === "curve", "Escape returns to the Curve Studio");
+  App.Tool("paint"); App.Section("properties");
+  const R = qa('input[type="range"]', q(".bs-settings")).find((E) => E.dataset.bind === "b|prop.size");
+  expect(R, "size slider bound to the brush"); setVal(R, "33");
+  expect(App.Brush().values["prop.size"] === 33, `studio size → brush ${App.Brush().values["prop.size"]}`);
+  expect(q('.bs-side input[data-fid="side-size"]').value === "33", "side slider follows the brush");
+});
+
+await step("drawing pad closes and reopens; viewport stays blank", async () => {
+  expect(St.PadOpen && q(".bs-shell").dataset.pad === "open", "pad starts open");
+  click(byAct("pad-toggle", q(".bs-padbar"))[0]);
+  expect(!St.PadOpen && q(".bs-shell").dataset.pad === "closed", "close from the pad");
+  click(byAct("pad-toggle", q(".bs-rail"))[0]);
+  expect(St.PadOpen, "reopen from the rail");
+  click(byAct("pad-toggle", q(".bs-head"))[0]); expect(!St.PadOpen, "close from the studio head");
+  App.TogglePad(true); expect(St.PadOpen, "TogglePad(true)");
+  expect(!q(".vp-body canvas:not(.bs-canvas):not(.bs-guide)"), "no renderer canvas in the viewport");
+  expect(q(".vp-title small").textContent.length > 0, "viewport meta");
 });
 
 console.log(errors.length ? `\n${errors.length} error(s):\n` + errors.join("\n\n") : `\n${passed} passed, 0 errors`);

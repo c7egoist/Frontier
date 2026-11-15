@@ -8,6 +8,14 @@ python3 Experimental/ArtworkInspector/Serve.py        # http://0.0.0.0:8098/  (?
 
 The two studios share one card. The dock bar above it (Material · Pattern · Stamp · Baking) switches between studios. There is no mode toggle in the card itself.
 
+## Screenshots
+
+| Pattern workspace | Stamp workspace |
+| --- | --- |
+| ![Pattern — outliner, blank viewport, card](Screenshots/pattern.png) | ![Stamp — outliner, blank viewport, card](Screenshots/stamp.png) |
+
+Both modes use the shared workspace layout: outliner · **viewport** · card. The viewport is blank because no renderer is attached; its view modes are Tile / Repeat 3×3 / On mesh for Pattern and Decal / On mesh / UV for Stamp.
+
 ## What changed from the TextureStudio inspector
 
 | TextureStudio | This card |

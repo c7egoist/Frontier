@@ -6,6 +6,19 @@ This is the inspector of TextureStudio's **Baking** workspace, rebuilt as a **si
 python3 Experimental/BakeInspector/Serve.py        # http://0.0.0.0:8099/
 ```
 
+## Screenshots
+
+![Map Baking — queue outliner, blank viewport, decluttered card](Screenshots/baking.png)
+
+The workspace is the queue outliner · **viewport** (blank; views Low / High / Cage / Result) · card.
+
+The docked card is decluttered:
+
+- It shows only the map opened in the queue.
+- Output, rays, ETA and freshness sit on one line under the Bake button, instead of three stat tiles.
+- Export preset and copy request are icon buttons in the header, instead of a footer block.
+- Undocked (`?outliner=0`), it keeps the full card.
+
 ## What changed from the TextureStudio inspector
 
 | TextureStudio | This card |
