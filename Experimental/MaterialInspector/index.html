@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Material Inspector · Frontier</title>
+<link rel="stylesheet" href="./MaterialInspector.css">
+</head>
+<body>
+<!-- One card, nothing else: the TextureStudio Material workspace inspector, redesigned in the Project Zero style.
+     The dock column only gives the card the width it has inside the editor. -->
+<main class="mi-dock">
+  <div id="Card" class="mi-host"></div>
+</main>
+<script type="module">
+  import { Mount } from "./MaterialInspector.js";
+  globalThis.MaterialInspector = Mount(document.getElementById("Card"));
+</script>
+</body>
+</html>
