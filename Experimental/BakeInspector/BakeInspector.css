@@ -1,0 +1,38 @@
+/* Map Baking card — only what the shared Project Zero sheet (../MaterialInspector/MaterialInspector.css) and the artwork card
+   sheet (row + dot line) lack. */
+.bi-name { pointer-events: none; }
+
+/* low / high sources */
+.bi-sources { display: flex; align-items: center; gap: 6px; margin-top: 12px; color: #555; }
+.bi-source { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 6px 0 12px; border-radius: 14px; background: #151515; border: 1px solid #ffffff0a; color: #8a8a8a; cursor: pointer; }
+.bi-source:hover { border-color: #ffffff1c; color: #ddd; }
+.bi-source > span { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.25; }
+.bi-source b { font-size: 10px; color: #cfcfcf; font-weight: 400; }
+.bi-source small { font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bi-source.custom { border-color: #ffb23833; }
+.bi-source.custom small { color: #ffcf80; }
+
+/* bake bar */
+.bi-bake { margin-top: 10px !important; padding: 12px; border-radius: 18px; background: #151515; border: 1px solid #ffffff08; display: flex; flex-direction: column; gap: 9px; }
+.bi-bake-row { display: flex; gap: 8px; align-items: center; }
+.bi-go { flex: 1; height: 34px; border-radius: 17px; background: #e8e8e8; color: #111; font-weight: 400; font-size: 12px; border-color: transparent; }
+.bi-go:hover { background: #fff; }
+.bi-go:disabled { background: #2a2a2a; color: #777; }
+.bi-go.running { background: #2a1716; color: #ff9b91; border-color: #ff6b5e44; }
+.bi-go.running:hover { background: #3a1c1a; }
+.bi-progress { height: 4px; border-radius: 3px; background: #222; overflow: hidden; }
+.bi-progress i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, #ffb238, #ffd38a); transition: width 0.12s linear; }
+.bi-progress-text { font-size: 9.5px; color: #6f6f6f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* map rows */
+.bi-group-line { display: flex; align-items: center; gap: 4px; }
+.bi-group-line .mi-group-head { flex: 1; }
+.bi-group-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.bi-all { min-height: 20px; padding: 1px 8px; font-size: 9px; background: transparent; color: #6f6f6f; }
+.bi-map.off .mi-row-name { opacity: 0.5; }
+.bi-map.off .mi-readout { color: #5c5c5c; background: transparent; }
+.bi-map.off .mi-dot::after { background: transparent; box-shadow: inset 0 0 0 1.5px #5a5a5a; }
+.bi-map.running .mi-dot::after { background: var(--amber); box-shadow: 0 0 10px #ffb238aa; animation: mi-pulse 0.7s ease-in-out infinite alternate; }
+.bi-map.running .mi-readout { color: #ffcf80; }
+.bi-map.done .mi-readout { color: #7fd497; }
+.bi-cost { font-size: 9px; color: #7a7a7a; font-variant-numeric: tabular-nums; white-space: nowrap; }

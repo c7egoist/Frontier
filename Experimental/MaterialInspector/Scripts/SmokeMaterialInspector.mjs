@@ -1,4 +1,4 @@
-// UI smoke test: boots the Material Inspector card in jsdom and drives every path — library switch, rename, metric scrub,
+// UI smoke test: boots the Material Inspector card in jsdom and drives every path — library switch, rename, statistic tiles,
 // strata (select / toggle / rename / add + remove detail), channel groups, search, open/close rows, value / colour / vector
 // editors, every source kind (field generators + knobs + stops, ramp shapes + angle, image), direct switch, add / remove
 // channel, stratum knobs, presets, undo / redo, export, import and cross-window storage sync.  Layout and pixels are not
@@ -103,7 +103,7 @@ await step("scalar value: slider + number + scrub", async () => {
   open("metallic");
   setVal(q('.mi-editor input[type="range"][data-bind="ch"]'), "0.6");
   expect(Math.abs(St.P.metalness - 0.6) < 1e-9, `metalness ${St.P.metalness}`);
-  expect(q('[data-metric="metalness"]').textContent === "60%", "metric follows");
+  expect(q('[data-stat="response"]').textContent.includes("Hybrid"), "response tile follows (hybrid at 0.6)");
   setVal(q('.mi-editor input[type="number"][data-bind="ch"]'), "0.25");
   expect(St.P.metalness === 0.25, "number input");
   setVal(q('.mi-editor input[type="number"][data-bind="ch"]'), "7");
@@ -116,13 +116,8 @@ await step("scalar value: slider + number + scrub", async () => {
   click(readout);
   expect(St.Channel === "metallic", "click after drag swallowed");
   await sleep(5);
-  const tile = q('[data-scrub-flat="roughness"]');
-  const r0 = St.P.roughness;
-  tile.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 0, button: 0 }));
-  tile.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: 50 }));
-  tile.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 50 }));
-  await sleep(5);
-  expect(St.P.roughness > r0, "roughness tile scrub");
+  const cls = St.P.metalness >= 0.9 ? "Conductor" : St.P.metalness <= 0.1 ? "Dielectric" : "Hybrid";
+  expect(q('[data-stat="response"]').textContent.includes(cls), `response tile reads ${cls} at metalness ${St.P.metalness}`);
 });
 
 await step("colour + vector editors", async () => {
@@ -308,7 +303,7 @@ await step("cross-window storage sync", async () => {
   other.roughness = 0.77;
   const ev = new w.StorageEvent("storage", { key: PREFIX + St.P.id, newValue: JSON.stringify(other) });
   w.dispatchEvent(ev);
-  expect(St.P.roughness === 0.77 && q('[data-metric="roughness"]').textContent === "0.77", "synced");
+  expect(St.P.roughness === 0.77 && q('[data-stat="response"]').textContent.includes("Matte"), "synced");
 });
 
 console.log(errors.length ? `\n${errors.length} error(s):\n` + errors.join("\n\n") : "\n0 errors");

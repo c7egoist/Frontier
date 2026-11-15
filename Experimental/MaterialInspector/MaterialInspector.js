@@ -1,7 +1,7 @@
 // MaterialInspector.js — the single Material Inspector card (TextureStudio Material workspace), Project Zero styling.
 //
 // One card, top to bottom:
-//   identity (name · library pick) → metric trio (scrub) → strata strip → channel list (grouped, one inline editor)
+//   identity (name · library pick) → statistics (response · albedo · signal) → strata strip → channel list (grouped, one inline editor)
 //   → stratum knobs (folded) → export.
 // The old inspector stacked a pill cloud of every channel, then an "Inspect channel" dropdown, a "Source" dropdown, a
 // "Generator" dropdown and a column of sliders under it.  Here every channel is one quiet row with its live value;
@@ -9,10 +9,8 @@
 
 import * as M from "./MaterialModel.js";
 import { icon } from "./Icons.js";
+import { Esc, Fixed, Pct, Knob, ColourField, Stops, Toggle, StatTile, SyncSiblings as SyncKit } from "./CardKit.js";
 
-const Esc = (S) => String(S).replace(/[&<>"']/g, (C) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[C]);
-const Fixed = (V, Step) => (Step >= 1 ? String(Math.round(V)) : (+V).toFixed(Step >= 0.1 ? 1 : 2));
-const Pct = (V, Lo, Hi) => `${(((V - Lo) / (Hi - Lo || 1)) * 100).toFixed(1)}%`;
 const GLYPH = { value: "value", field: "field", ramp: "ramp", texture: "image", pattern: "pattern" };
 const MODEL_GLYPH = { surface: "surface", coat: "coat", flakes: "flakes", detail: "detail" };
 const SHORT_GEN = { "camouflage-smooth": "Camo soft", camouflage: "Camo pixel", noise: "Noise", stripes: "Grain", checker: "Checker", cells: "Cells", ridged: "Ridged", rings: "Rings" };
@@ -90,42 +88,6 @@ function Select(Material) {
   S.Channel = Layer().Channels.includes("colour") ? "colour" : Layer().Channels[0];
   S.History = []; S.Future = []; S.Pending = null; S.Query = ""; S.AddOpen = false; S.Groups = {};
   Save();
-}
-
-// ------------------------------------------------------------------------------------------------ small templates
-function Knob({ Bind, Label, Value, Min, Max, Step: St, Unit = "", Hint = "" }) {
-  return `<div class="mi-knob">
-    <span class="mi-knob-label">${Esc(Label)}${Hint ? `<small>${Esc(Hint)}</small>` : ""}</span>
-    <div class="slider-pill">
-      <span class="split-value"><input type="number" data-bind="${Bind}" data-fid="n:${Bind}" min="${Min}" max="${Max}" step="${St}" value="${Fixed(Value, St)}" aria-label="${Esc(Label)}"><small>${Esc(Unit || "—")}</small></span>
-      <input type="range" data-bind="${Bind}" data-fid="r:${Bind}" min="${Min}" max="${Max}" step="${St}" value="${Value}" style="--fill:${Pct(Value, Min, Max)}" aria-label="${Esc(Label)} slider">
-    </div>
-  </div>`;
-}
-
-function ColourField(Bind, Label, Value) {
-  return `<div class="mi-colour">
-    <label class="mi-colour-chip" style="background:${Value}"><input type="color" data-bind="${Bind}" data-fid="c:${Bind}" value="${Value}" aria-label="${Esc(Label)}"></label>
-    <input class="mi-hex" data-bind="${Bind}" data-hex data-fid="h:${Bind}" value="${Value.toUpperCase()}" maxlength="7" spellcheck="false" aria-label="${Esc(Label)} hex">
-    <small>sRGB</small>
-  </div>`;
-}
-
-function Stops(Bind, Stops, Max = 8) {
-  return `<div class="mi-stops" data-stops="${Bind}">
-    <div class="mi-stops-bar" style="background:linear-gradient(90deg, ${Stops.join(", ")})"></div>
-    <div class="mi-stops-row">
-      ${Stops.map((C, I) => `<label class="mi-stop" style="background:${C}" title="Stop ${I + 1} · ${C}"><input type="color" data-bind="${Bind}:${I}" data-fid="s:${Bind}:${I}" value="${C}" aria-label="Stop ${I + 1}"></label>`).join("")}
-      <span class="mi-stops-tools">
-        <button type="button" class="mi-mini" data-act="stop-remove" data-target="${Bind}" ${Stops.length <= 2 ? "disabled" : ""} aria-label="Remove last stop">${icon("minus", 12)}</button>
-        <button type="button" class="mi-mini" data-act="stop-add" data-target="${Bind}" ${Stops.length >= Max ? "disabled" : ""} aria-label="Add stop">${icon("plus", 12)}</button>
-      </span>
-    </div>
-  </div>`;
-}
-
-function Toggle(Act, On, Label) {
-  return `<button type="button" class="toggle ${On ? "on" : ""}" data-act="${Act}" role="switch" aria-checked="${On}" aria-label="${Esc(Label)}"><i></i></button>`;
 }
 
 // ------------------------------------------------------------------------------------------------ channel rows
@@ -252,6 +214,24 @@ function EditorHtml(L, Key) {
   </div>`;
 }
 
+// ------------------------------------------------------------------------------------------------ statistics
+// Response / Albedo / Signal (see MaterialModel.Insight) instead of echoing roughness and metalness, which the channel rows
+// already show.
+function MetricsHtml() {
+  const I = M.Insight(S.P), A = I.Albedo, Sg = I.Signal;
+  const LogPos = (F) => (Math.log10(Math.max(0.01, F)) + 2) / 2; // 0.01 … 1 on a log axis
+  const MixText = ["field", "ramp", "texture", "pattern"].filter((K) => Sg.Mix[K]).map((K) => `${Sg.Mix[K]} ${K === "texture" ? "image" : K}`).join(" · ");
+  return StatTile({ Key: "response", Label: "Response", Value: I.F0.toFixed(I.F0 < 0.1 ? 3 : 2), Unit: "F0", Hot: true, Tone: I.Hybrid ? "warn" : "",
+      Caption: `${I.Class} · ${I.Gloss}`, Meter: { Kind: "band", Lo: LogPos(0.02), Hi: LogPos(0.08), At: LogPos(I.F0), Tone: I.Hybrid ? "warn" : "ok" },
+      Title: `Head-on reflectance F0 = ${I.F0.toFixed(3)} (log axis; the shaded band is the dielectric range 0.02–0.08).${I.Hybrid ? " Metalness between 0.1 and 0.9 is physically ambiguous outside masks." : ""}` })
+    + StatTile({ Key: "albedo", Label: "Albedo", Value: String(Math.round(A.Srgb * 100)), Unit: "%", Tone: A.Ok ? "ok" : "warn",
+      Caption: `${A.State}${A.Driven ? " · avg" : ""}`, Meter: { Kind: "band", Lo: A.Band[0], Hi: A.Band[1], At: A.Srgb, Tone: A.Ok ? "ok" : "warn" },
+      Title: `Base colour luminance ${Math.round(A.Srgb * 255)}/255 sRGB (${(A.Linear * 100).toFixed(1)}% linear). Plausible band for a ${I.Class.toLowerCase()}: ${Math.round(A.Band[0] * 255)}–${Math.round(A.Band[1] * 255)}.` })
+    + StatTile({ Key: "signal", Label: "Signal", Value: String(Sg.Driven), Unit: `/ ${Sg.Slots}`,
+      Caption: MixText || "All flat values", Meter: { Kind: "stack", Parts: Object.entries(Sg.Mix).map(([K, N]) => ({ Share: N, Colour: M.SIGNAL_COLOURS[K], Title: `${N} ${K === "texture" ? "image" : K}` })) },
+      Title: `${Sg.Driven} of ${Sg.Slots} channel slots on enabled strata are driven by a field, ramp, image or pattern.` });
+}
+
 // ------------------------------------------------------------------------------------------------ card
 function StratumKnobs(L) {
   const Knobs = M.STRATUM_KNOBS[L.Model] || [];
@@ -279,7 +259,7 @@ function AddMenu(L) {
 }
 
 function CardHtml() {
-  const P = S.P, L = Layer(), Sum = M.Summary(P);
+  const P = S.P, L = Layer();
   const Entry = M.CATALOG.find((E) => E.id === P.id);
   return `<article class="mi-card" aria-label="Material Inspector">
     <header class="mi-head">
@@ -305,11 +285,7 @@ function CardHtml() {
       </div>
     </section>
 
-    <section class="mi-metrics">
-      <div class="mi-metric hot" data-scrub-flat="roughness" title="Drag to scrub roughness"><span>Roughness</span><strong data-metric="roughness">${Sum.Roughness.toFixed(2)}</strong><small>Microfacet</small></div>
-      <div class="mi-metric" data-scrub-flat="metalness" title="Drag to scrub metalness"><span>Metalness</span><strong data-metric="metalness">${Math.round(Sum.Metalness * 100)}%</strong><small>Conductor</small></div>
-      <div class="mi-metric"><span>Strata</span><strong>${Sum.Enabled}/${Sum.Total}</strong><small>${Sum.Authored} driven</small></div>
-    </section>
+    <section class="mi-metrics" data-metrics>${MetricsHtml()}</section>
 
     <section class="mi-strata">
       <div class="mi-section-title"><h3>Strata</h3><small>TOP → BOTTOM</small>
@@ -407,10 +383,9 @@ function Render() {
 
 // Cheap refresh during drags: metrics, the open row's head and its previews; inputs being dragged keep their own state.
 function RefreshLive() {
-  const Sum = M.Summary(S.P), L = Layer();
-  const R = Root.querySelector('[data-metric="roughness"]'), Mt = Root.querySelector('[data-metric="metalness"]');
-  if (R) R.textContent = Sum.Roughness.toFixed(2);
-  if (Mt) Mt.textContent = `${Math.round(Sum.Metalness * 100)}%`;
+  const L = Layer();
+  const Metrics = Root.querySelector("[data-metrics]");
+  if (Metrics) Metrics.innerHTML = MetricsHtml();
   for (const Row of Root.querySelectorAll("[data-row]")) {
     const Key = Row.dataset.row, Head = Row.querySelector(".mi-row-head");
     if (!Head) continue;
@@ -460,18 +435,7 @@ function Write(Bind, Raw) {
   return S.P;
 }
 
-function SyncSiblings(El) {
-  const Bind = El.dataset.bind;
-  for (const Other of Root.querySelectorAll(`[data-bind="${CSS.escape(Bind)}"]`)) {
-    if (Other === El) continue;
-    if (Other.type === "range") { Other.value = El.value; Other.style.setProperty("--fill", Pct(+El.value, +Other.min, +Other.max)); }
-    else if (Other.type === "number") Other.value = Fixed(+El.value, +Other.step);
-    else if (Other.type === "color") { Other.value = El.value; Other.parentElement.style.background = El.value; }
-    else if (Other.dataset.hex !== undefined) Other.value = El.value.toUpperCase();
-  }
-  if (El.type === "range") El.style.setProperty("--fill", Pct(+El.value, +El.min, +El.max));
-  if (El.type === "color") El.parentElement.style.background = El.value;
-}
+const SyncSiblings = (El) => SyncKit(Root, El);
 
 function SetChannel(Key) {
   S.Channel = Key;
@@ -665,17 +629,15 @@ function OnKey(Event) {
   }
 }
 
-// Drag-to-scrub on row readouts (scalar channels) and on the roughness / metalness tiles.
+// Drag-to-scrub on row readouts (scalar channels).
 function OnPointerDown(Event) {
-  const Readout = Event.target.closest("[data-scrub]"), Tile = Event.target.closest("[data-scrub-flat]");
-  if ((!Readout && !Tile) || Event.button !== 0) return;
-  const L = Layer();
-  const Key = Readout ? Readout.dataset.scrub : null, Flat = Tile ? Tile.dataset.scrubFlat : null;
-  const Spec = Key ? M.CHANNEL[Key] : { Minimum: 0, Maximum: 1 };
-  const Start = Key ? M.ReadChannel(S.P, L, Key) : +(S.P[Flat] ?? 0);
-  const X0 = Event.clientX, Target = Readout || Tile;
+  const Readout = Event.target.closest("[data-scrub]");
+  if (!Readout || Event.button !== 0) return;
+  const L = Layer(), Key = Readout.dataset.scrub, Spec = M.CHANNEL[Key];
+  const Start = M.ReadChannel(S.P, L, Key);
+  const X0 = Event.clientX, Target = Readout;
   let Moved = false;
-  if (Readout) Readout.dataset.dragged = "0";
+  Readout.dataset.dragged = "0";
   Target.setPointerCapture?.(Event.pointerId);
   const Move = (E) => {
     const Dx = E.clientX - X0;
@@ -684,7 +646,7 @@ function OnPointerDown(Event) {
     Root.classList.add("scrubbing");
     const Span = Spec.Maximum - Spec.Minimum, V = Math.max(Spec.Minimum, Math.min(Spec.Maximum, Start + (Dx / (E.shiftKey ? 800 : 200)) * Span));
     const Rounded = Span > 100 ? Math.round(V) : Math.round(V * 1000) / 1000;
-    Apply(Key ? M.WriteChannel(S.P, L, Key, Rounded) : M.WriteParameter(S.P, Flat, Rounded), true);
+    Apply(M.WriteChannel(S.P, L, Key, Rounded), true);
     RefreshLive();
   };
   const Up = () => {

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Map Baking · Frontier</title>
+<link rel="stylesheet" href="../MaterialInspector/MaterialInspector.css">
+<link rel="stylesheet" href="../ArtworkInspector/ArtworkInspector.css">
+<link rel="stylesheet" href="./BakeInspector.css">
+</head>
+<body>
+<!-- One card, nothing else: TextureStudio's Baking workspace inspector, redesigned in the Project Zero style.  No bake engine
+     is attached on this page, so "Bake" runs the card's labelled dry run (see README for wiring the real bakers). -->
+<main class="mi-dock">
+  <div id="Nav"></div>
+  <div id="Card" class="mi-host"></div>
+</main>
+<script type="module">
+  import { Mount } from "./BakeInspector.js";
+  import { DockNav } from "../MaterialInspector/CardKit.js";
+  document.getElementById("Nav").outerHTML = DockNav("bake");
+  globalThis.BakeInspector = Mount(document.getElementById("Card"));
+</script>
+</body>
+</html>

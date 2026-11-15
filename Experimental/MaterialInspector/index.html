@@ -10,10 +10,13 @@
 <!-- One card, nothing else: the TextureStudio Material workspace inspector, redesigned in the Project Zero style.
      The dock column only gives the card the width it has inside the editor. -->
 <main class="mi-dock">
+  <div id="Nav"></div>
   <div id="Card" class="mi-host"></div>
 </main>
 <script type="module">
   import { Mount } from "./MaterialInspector.js";
+  import { DockNav } from "./CardKit.js";
+  document.getElementById("Nav").outerHTML = DockNav("material");
   globalThis.MaterialInspector = Mount(document.getElementById("Card"));
 </script>
 </body>

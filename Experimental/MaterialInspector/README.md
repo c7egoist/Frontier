@@ -13,7 +13,7 @@ python3 Experimental/MaterialInspector/Serve.py        # http://0.0.0.0:8097/
 | Two tabs: *Properties* and *Layer Stack*. | One card. The strata are a compact stack inside it. |
 | A cloud of 28 removable channel pills, followed by an "Inspect Channel" dropdown, a "Source" dropdown, a "Generator" dropdown and a column of sliders. | One quiet row per channel showing its live value. Rows are grouped (Core, Specular, Coat, Sheen, Thin film, Volume, Emission), and groups without authored channels start folded. Opening a row expands **that one channel's** editor in place. |
 | Source and generator are hidden behind dropdowns. | Source is a visible segment (Value · Field · Ramp · Image). The eight field generators are chips. Ramp shape is a segment. |
-| "Drag pills to scrub values". | You can drag any scalar readout in the list, or the Roughness / Metalness tiles, without opening anything. Shift gives fine control. |
+| "Drag pills to scrub values". | You can drag any scalar readout in the list without opening anything. Shift gives fine control. |
 | Separate "Surface Albedo & Microfacet" sliders that duplicate channels. | Channels *are* the values. Only the stratum's own knobs (finish, coat orange peel, flake dispersion and palette, detail presets) are in a folded section. |
 
 Short strata (coat, flakes and new detail strata, with 8 or fewer channels) are shown as a flat list without group heads.
@@ -21,7 +21,10 @@ Short strata (coat, flakes and new detail strata, with 8 or fewer channels) are 
 ## Card anatomy
 
 1. **Identity.** Editable material name, catalog label and library picker.
-2. **Metric trio.** Roughness, Metalness and Strata. The first two can be scrubbed.
+2. **Statistics.** Three tiles that answer questions the channel list cannot (the old Roughness / Metalness / Strata trio only repeated values shown below it):
+   - **Response:** reflectance at normal incidence (F0), with a log-scale meter on which the dielectric band 2–8 % is marked. F0 is blended from IOR × specular and the base colour by metalness. The caption gives the class (Dielectric / Hybrid / Conductor) and gloss band. The tile turns amber for in-between metalness, which is rarely physical.
+   - **Albedo:** sRGB luminance of the base colour (sampled mean when a field or ramp drives it), on a meter marked with the plausible band: 12–94 % for dielectrics, ≥ 70 % for conductors. It warns when the colour falls outside that band.
+   - **Signal:** how many channel slots across enabled strata are driven by fields, ramps or images rather than constant values, as a stacked meter by source kind.
 3. **Strata** (top → bottom):
    - The dot toggles a stratum on or off.
    - Click a stratum to select it; double-click to rename it.
@@ -37,6 +40,8 @@ Short strata (coat, flakes and new detail strata, with 8 or fewer channels) are 
 6. **Export:** `.material` TOML, JSON (`alloy.material.v6`), or Copy.
 
 Keyboard: ↑ / ↓ move between channel rows. Esc closes the open editor. Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) undo and redo.
+
+The same card language is reused by the [Pattern / Stamp Studio](../ArtworkInspector/README.md) and [Map Baking](../BakeInspector/README.md) cards. `CardKit.js` holds the shared templates (knob, colour field, stops, segments, chips, stat tile + meters, undo history, dock nav) and `Icons.js` the shared glyphs.
 
 ## Data and compatibility
 

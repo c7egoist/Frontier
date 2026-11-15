@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pattern / Stamp Studio · Frontier</title>
+<link rel="stylesheet" href="../MaterialInspector/MaterialInspector.css">
+<link rel="stylesheet" href="./ArtworkInspector.css">
+</head>
+<body>
+<!-- One card, nothing else: TextureStudio's Pattern Studio / Stamp Studio inspector, redesigned in the Project Zero style.
+     ?mode=pattern (default) or ?mode=stamp.  The dock column only gives the card the width it has inside the editor. -->
+<main class="mi-dock">
+  <div id="Nav"></div>
+  <div id="Card" class="mi-host"></div>
+</main>
+<script type="module">
+  import { Mount } from "./ArtworkInspector.js";
+  import { DockNav } from "../MaterialInspector/CardKit.js";
+  const Mode = new URLSearchParams(location.search).get("mode") === "stamp" ? "stamp" : "pattern";
+  document.getElementById("Nav").outerHTML = DockNav(Mode);
+  document.title = `${Mode === "stamp" ? "Stamp" : "Pattern"} Studio · Frontier`;
+  globalThis.ArtworkInspector = Mount(document.getElementById("Card"), { mode: Mode });
+</script>
+</body>
+</html>

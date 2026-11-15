@@ -489,6 +489,55 @@ export function Summary(P) {
   };
 }
 
+// The statistics the card's three tiles show.  Roughness / metalness alone repeat what the channel rows already say; these
+// answer the questions a look-dev pass actually asks:
+//   Response — what fraction of light the surface reflects head-on (F0), and whether it is a dielectric, a conductor or a
+//              physically dubious in-between, plus a gloss class.
+//   Albedo   — is the base colour inside the PBR-plausible brightness band for its class (charcoal ≈ 4 %, fresh snow ≈ 90 %;
+//              metals reflect ≥ ~50 %)?  Driven colours are averaged over the source.
+//   Signal   — how much of the material is authored beyond flat values: driven channel slots over all enabled slots, with
+//              the source mix (field / ramp / image / pattern).
+export const SIGNAL_COLOURS = Object.freeze({ value: "#3a3a3a", field: "#ffb238", ramp: "#4d9bff", texture: "#46d267", pattern: "#c48cff" });
+const SrgbLuma = ([R, G, B]) => (0.2126 * R + 0.7152 * G + 0.0722 * B) / 255;
+const LinearLuma = (Rgb) => { const L = Rgb.map((C) => { const S = C / 255; return S <= 0.04045 ? S / 12.92 : Math.pow((S + 0.055) / 1.055, 2.4); }); return 0.2126 * L[0] + 0.7152 * L[1] + 0.0722 * L[2]; };
+
+export function Insight(P) {
+  const Surface = P.Authoring.Layers.find((L) => L.Model === "surface") || P.Authoring.Layers[0];
+  const Metal = Clamp(+(P.metalness ?? 0)), Rough = Clamp(+(P.roughness ?? 0.5));
+  const Ior = Clamp(+(P.ior ?? 1.5), 1, 3), Spec = Clamp(+(P.specular ?? 1));
+
+  // Base colour — sampled mean when a field / ramp drives it.
+  const ColourSource = ChannelSource(P, Surface, "colour"), Kind = SourceKind(ColourSource.Mode);
+  let Rgb = HexRgb(ReadChannel(P, Surface, "colour")), Driven = false;
+  if ((Kind === "field" || Kind === "ramp") && ColourSource.Direct) {
+    const Sum = [0, 0, 0];
+    for (let Y = 0; Y < 6; Y++) for (let X = 0; X < 6; X++) SampleSource(P, ColourSource, (X + 0.5) / 6, (Y + 0.5) / 6).forEach((C, I) => { Sum[I] += C; });
+    Rgb = Sum.map((C) => C / 36);
+    Driven = true;
+  }
+  const Lin = LinearLuma(Rgb), Srgb = SrgbLuma(Rgb);
+  const DielectricF0 = Math.pow((Ior - 1) / (Ior + 1), 2) * Spec;
+  const F0 = DielectricF0 * (1 - Metal) + Lin * Metal;
+  const Class = Metal >= 0.9 ? "Conductor" : Metal <= 0.1 ? "Dielectric" : "Hybrid";
+  const Gloss = Rough < 0.2 ? "Mirror" : Rough < 0.45 ? "Gloss" : Rough < 0.7 ? "Satin" : "Matte";
+
+  // PBR-plausible albedo bands in sRGB luminance: dielectrics ~0.12‥0.94 (30‥240 / 255), conductors ≥ ~0.70.
+  const Band = Class === "Conductor" ? [0.7, 1] : [0.12, 0.94];
+  const AlbedoState = Srgb < Band[0] ? (Class === "Conductor" ? "Dim for metal" : "Too dark") : Srgb > Band[1] ? "Too bright" : "In range";
+
+  // Signal: every channel slot on every enabled stratum.
+  const Mix = { value: 0, field: 0, ramp: 0, texture: 0, pattern: 0 };
+  for (const L of P.Authoring.Layers.filter((E) => E.Enabled)) for (const C of L.Channels) Mix[SourceKind(ChannelSource(P, L, C).Mode)] = (Mix[SourceKind(ChannelSource(P, L, C).Mode)] || 0) + 1;
+  const Slots = Object.values(Mix).reduce((A, B) => A + B, 0), DrivenSlots = Slots - Mix.value;
+
+  return {
+    F0, Class, Gloss, Metal, Rough,
+    Hybrid: Class === "Hybrid",
+    Albedo: { Srgb, Linear: Lin, Rgb, Driven, Band, State: AlbedoState, Ok: AlbedoState === "In range" },
+    Signal: { Slots, Driven: DrivenSlots, Mix },
+  };
+}
+
 export function ChannelReadout(P, Layer, Channel) {
   const Spec = CHANNEL[Channel], Source = ChannelSource(P, Layer, Channel), Kind = SourceKind(Source.Mode);
   if (Kind === "field") {
