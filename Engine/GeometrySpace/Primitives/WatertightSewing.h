@@ -28,6 +28,7 @@ struct WatertightAuditSummary
     uint32_t OpenBoundaryEdgeCount           = 0u;    // [count] - Unpaired half-edges on open borders
     uint32_t NonManifoldEdgeCount            = 0u;    // [count] - Undirected edges shared by 3 or more half-edges
     uint32_t OrientationConflictEdgeCount    = 0u;    // [count] - Paired edges running in identical direction
+    uint32_t PartCount                       = 0u;    // [count] - Vertex-connected face components (union-find over face corners)
     int32_t  EulerCharacteristic             = 0;     // [-]     - V - E + F topological invariant (2 for sphere, 0 for torus)
     float    SignedEnclosedVolumeCubicMeters = 0.0f;  // [m^3]   - Divergence-theorem enclosed solid volume
     float    SurfaceAreaSquareMeters         = 0.0f;  // [m^2]   - Total 3D polygon surface area
@@ -54,6 +55,9 @@ uint32_t WeldCoincidentVertices(
     PolygonNetwork& TargetNetwork,
     float           WeldToleranceMeters = 1.0e-4f,
     uint32_t*       OutRemovedDegenerateFaces = nullptr);
+
+// Reverses every face loop (mirror / flip-normals transforms), then relinks opposite edges and recomputes normals.
+void ReverseNetworkWinding(PolygonNetwork& TargetNetwork);
 
 uint32_t UnifyConsistentFaceWinding(
     PolygonNetwork& TargetNetwork,

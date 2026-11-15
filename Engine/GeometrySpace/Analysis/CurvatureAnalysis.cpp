@@ -228,15 +228,14 @@ CurvatureAnalysisSummary EvaluateSurfaceCurvature(const PolygonNetwork& Network)
 }
 
 //------------------------------------------------------------------------------------------------------------------------
-//                                  MIKKELSEN / DUFF CONTINUOUS CORNER TANGENT BASES
+//                          CREASE CORNER NORMALS + MIKKELSEN / DUFF CONTINUOUS CORNER TANGENT BASES
 //------------------------------------------------------------------------------------------------------------------------
 
-std::vector<CornerTangentBasis> EvaluateContinuousCornerTangents(const PolygonNetwork& Network)
+std::vector<Mathematics::Axis3D> EvaluateCreaseCornerNormals(const PolygonNetwork& Network, float CreaseAngleDegrees)
 {
-    std::vector<CornerTangentBasis> CornerBases(Network.Edges.size());
     if (Network.Edges.empty() || Network.Faces.empty())
     {
-        return CornerBases;
+        return std::vector<Mathematics::Axis3D>(Network.Edges.size(), { 0.0f, 1.0f, 0.0f });
     }
 
     // 📝 Step 1: Compute crease-aware smooth corner normals (hard creases split normal smoothing; smooth seams still share normals!)
@@ -251,7 +250,7 @@ std::vector<CornerTangentBasis> EvaluateContinuousCornerTangents(const PolygonNe
         }
     }
 
-    const float CreaseCosThreshold = std::cos(55.0f * Constants::DegToRadFloat);
+    const float CreaseCosThreshold = std::cos(CreaseAngleDegrees * Constants::DegToRadFloat);
 
     for (uint32_t VIdx = 0u; VIdx < static_cast<uint32_t>(CornersAtVertex.size()); ++VIdx)
     {
@@ -286,6 +285,29 @@ std::vector<CornerTangentBasis> EvaluateContinuousCornerTangents(const PolygonNe
                 BlendedNormal = BlendedNormal + FaceB.GeometricNormal * Weight;
             }
             CornerNormals[EdgeA] = Mathematics::NormalizeAxis(BlendedNormal, FaceA.GeometricNormal);
+        }
+    }
+
+    return CornerNormals;
+}
+
+std::vector<CornerTangentBasis> EvaluateContinuousCornerTangents(const PolygonNetwork& Network)
+{
+    std::vector<CornerTangentBasis> CornerBases(Network.Edges.size());
+    if (Network.Edges.empty() || Network.Faces.empty())
+    {
+        return CornerBases;
+    }
+
+    // 📝 Step 1: Crease-aware smooth corner normals at the 55° tangent-space crease limit
+    const std::vector<Mathematics::Axis3D> CornerNormals = EvaluateCreaseCornerNormals(Network, 55.0f);
+    std::vector<std::vector<uint32_t>>     CornersAtVertex(Network.Vertices.size());
+    for (uint32_t EdgeIdx = 0u; EdgeIdx < static_cast<uint32_t>(Network.Edges.size()); ++EdgeIdx)
+    {
+        const uint32_t OrigV = Network.Edges[EdgeIdx].OriginVertexIndex;
+        if (OrigV < CornersAtVertex.size() && Network.Edges[EdgeIdx].EnclosingFaceIndex < Network.Faces.size())
+        {
+            CornersAtVertex[OrigV].push_back(EdgeIdx);
         }
     }
 

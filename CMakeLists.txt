@@ -654,6 +654,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/ParticleSpace/ParticleSimulationCoordinator.cpp
     Engine/SimulationSpace/ForceFields/ForceMotionPath.cpp
     Engine/SimulationSpace/ForceFields/VectorField.cpp
+    Engine/SimulationSpace/PhysicsSpace/CollisionFitSolver.cpp
     Engine/SimulationSpace/ForceFields/StreamTransportField.cpp
     Engine/SimulationSpace/ForceFields/TurbulenceField.cpp
     Engine/SimulationSpace/ForceFields/FieldFormulaCompiler.cpp
@@ -690,6 +691,8 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/Workspaces/UV/Solvers/UVProjectionSolvers.cpp
     Engine/Workspaces/UV/Solvers/UVIslandLayoutOperations.cpp
     Engine/Workspaces/UV/UVWorkspaceSession.cpp
+    Engine/Workspaces/Geometry/GeometryCompileSteps.cpp
+    Engine/Workspaces/Geometry/GeometryCompileSession.cpp
 )
 if(NOT ANDROID)
     list(APPEND FRONTIER_ENGINE_SOURCES Engine/Windowing/PlatformWindowDesktop.cpp)
@@ -904,6 +907,8 @@ if(BUILD_TESTING)
         frontier_register_exhibit(PatternStampWorkspaceUIValidation Exhibits/PatternStampWorkspaceUIValidation.cpp)
     endif()
     frontier_register_exhibit(UVParameterizationValidation      Exhibits/UVParameterizationValidation.cpp)
+    frontier_register_exhibit(GeometryReaderValidation          Exhibits/GeometryReaderValidation.cpp)
+    frontier_register_exhibit(GeometryCompileValidation         Exhibits/GeometryCompileValidation.cpp)
     frontier_register_exhibit(UVInteractiveAuthoringValidation  Exhibits/UVInteractiveAuthoringValidation.cpp)
     frontier_register_exhibit(UVBoundaryValidation              Exhibits/UVBoundaryValidation.cpp)
     frontier_register_exhibit(UVAuthoringChaosValidation        Exhibits/UVAuthoringChaosValidation.cpp)

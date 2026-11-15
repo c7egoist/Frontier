@@ -141,6 +141,34 @@ void ReverseSingleFaceLoopInPlace(PolygonNetwork& Network, uint32_t FaceIdx)
 } // namespace
 
 //------------------------------------------------------------------------------------------------------------------------
+//                                                 WINDING REVERSAL
+//------------------------------------------------------------------------------------------------------------------------
+
+void ReverseNetworkWinding(PolygonNetwork& TargetNetwork)
+{
+    for (uint32_t FaceIdx = 0u; FaceIdx < static_cast<uint32_t>(TargetNetwork.Faces.size()); ++FaceIdx)
+    {
+        ReverseSingleFaceLoopInPlace(TargetNetwork, FaceIdx);
+    }
+    // Reversed loops re-assign edge origins, so each vertex re-anchors on an edge that now leaves it.
+    for (Vertex& Vert : TargetNetwork.Vertices)
+    {
+        Vert.OutgoingEdgeIndex = InvalidNetworkIndex;
+    }
+    for (uint32_t EdgeIdx = 0u; EdgeIdx < static_cast<uint32_t>(TargetNetwork.Edges.size()); ++EdgeIdx)
+    {
+        const uint32_t OriginV = TargetNetwork.Edges[EdgeIdx].OriginVertexIndex;
+        if (OriginV < TargetNetwork.Vertices.size() && TargetNetwork.Vertices[OriginV].OutgoingEdgeIndex == InvalidNetworkIndex)
+        {
+            TargetNetwork.Vertices[OriginV].OutgoingEdgeIndex = EdgeIdx;
+        }
+    }
+    ++TargetNetwork.NetworkRevision;
+    TargetNetwork.LinkOppositeEdges(false);
+    TargetNetwork.RecomputeNormals();
+}
+
+//------------------------------------------------------------------------------------------------------------------------
 //                                                 WATERTIGHT SOLID AUDIT
 //------------------------------------------------------------------------------------------------------------------------
 
@@ -204,6 +232,46 @@ WatertightAuditSummary EvaluateWatertightAudit(const PolygonNetwork& Network) no
     }
 
     Audit.SignedEnclosedVolumeCubicMeters = EvaluateSignedComponentVolume(Network, AllFaces);
+
+    // 📝 Part count: union-find over vertices joined by face loops; a part is one root reached by at least one face
+    std::vector<uint32_t> PartRoot(Network.Vertices.size());
+    for (uint32_t VIdx = 0u; VIdx < static_cast<uint32_t>(PartRoot.size()); ++VIdx)
+    {
+        PartRoot[VIdx] = VIdx;
+    }
+    auto ResolveRoot = [&PartRoot](uint32_t VIdx) noexcept
+    {
+        while (PartRoot[VIdx] != VIdx)
+        {
+            PartRoot[VIdx] = PartRoot[PartRoot[VIdx]];
+            VIdx           = PartRoot[VIdx];
+        }
+        return VIdx;
+    };
+    std::vector<uint8_t> CornerReached(Network.Vertices.size(), 0u);
+    for (const Face& CurrentFace : Network.Faces)
+    {
+        if (CurrentFace.BoundaryLoopEdgeIndex >= Network.Edges.size())
+        {
+            continue;
+        }
+        const uint32_t AnchorV = Network.Edges[CurrentFace.BoundaryLoopEdgeIndex].OriginVertexIndex;
+        uint32_t       Walk    = CurrentFace.BoundaryLoopEdgeIndex;
+        for (uint16_t Step = 0u; Step < CurrentFace.CornerCount && Walk < Network.Edges.size(); ++Step)
+        {
+            const uint32_t CornerV = Network.Edges[Walk].OriginVertexIndex;
+            if (CornerV < PartRoot.size() && AnchorV < PartRoot.size())
+            {
+                CornerReached[CornerV] = 1u;
+                PartRoot[ResolveRoot(CornerV)] = ResolveRoot(AnchorV);
+            }
+            Walk = Network.Edges[Walk].NextEdgeIndex;
+        }
+    }
+    for (uint32_t VIdx = 0u; VIdx < static_cast<uint32_t>(PartRoot.size()); ++VIdx)
+    {
+        Audit.PartCount += (CornerReached[VIdx] != 0u && ResolveRoot(VIdx) == VIdx) ? 1u : 0u;
+    }
     Audit.EulerCharacteristic =
         static_cast<int32_t>(Audit.VertexCount) -
         static_cast<int32_t>(Audit.UniqueUndirectedEdgeCount) +

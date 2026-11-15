@@ -9,12 +9,15 @@
 
 #include "Engine/ParticleSpace/Origins/ControlVehicleSurfaceLoader.h"
 
+#include "Engine/Interchange/GeometryInterchange.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <mutex>
 #include <unordered_map>
@@ -31,8 +34,6 @@ constexpr float    VehicleHeightRebase  = 0.11285f;               // [m]
 constexpr float    VehicleGroundLift    = 0.53000f;               // [m]
 constexpr float    RimToHubScale        = 0.34460f / 0.344818f;   // [-]
 constexpr float    BodyCreaseCosine     = 0.78801075f;            // cos(38 deg)
-constexpr uint32_t CornerNormalsBit     = 1u;
-constexpr uint32_t Fct1HeaderBytes      = 48u;
 
 struct AxleMountSpec
 {
@@ -49,30 +50,7 @@ constexpr std::array<AxleMountSpec, 4u> VehicleAxleMounts = {{
     { { -1.6686f, -1.0475f, 0.0914f }, true,  ControlVehiclePartCategory::RimRearRight,  ControlVehiclePartCategory::TyreRearRight  },
 }};
 
-struct DecodedFct1Stream
-{
-    uint32_t              VertexCount   = 0u;
-    uint32_t              FaceCount     = 0u;
-    std::vector<float>    Positions     {};
-    std::vector<uint32_t> Indices       {};
-    std::vector<uint32_t> SlotCodes     {};
-    std::vector<float>    CornerNormals {};
-    bool                  Valid         = false;
-};
-
-uint32_t ReadUint32LE(const uint8_t* Ptr) noexcept
-{
-    uint32_t Out = 0u;
-    std::memcpy(&Out, Ptr, sizeof(Out));
-    return Out;
-}
-
-float ReadFloat32LE(const uint8_t* Ptr) noexcept
-{
-    float Out = 0.0f;
-    std::memcpy(&Out, Ptr, sizeof(Out));
-    return Out;
-}
+using Interchange::DecodedFct1Stream;
 
 [[nodiscard]] std::filesystem::path LocateVehicleBinaryFile(const char* FileName)
 {
@@ -102,70 +80,19 @@ float ReadFloat32LE(const uint8_t* Ptr) noexcept
     return {};
 }
 
+// FCT1 layout validation lives in Interchange::GeometryInterchange::DecodeFct1Bytes; particles only add the 38-degree body creases.
 [[nodiscard]] DecodedFct1Stream DecodeFct1BinaryFile(const std::filesystem::path& FilePath)
 {
-    DecodedFct1Stream Stream {};
-    if (FilePath.empty()) return Stream;
+    if (FilePath.empty()) return {};
 
-    std::ifstream Input(FilePath, std::ios::binary | std::ios::ate);
-    if (!Input.is_open()) return Stream;
+    std::ifstream Input(FilePath, std::ios::binary);
+    if (!Input.is_open()) return {};
+    const std::vector<uint8_t> RawBytes((std::istreambuf_iterator<char>(Input)), std::istreambuf_iterator<char>());
 
-    const std::streamsize ByteSize = Input.tellg();
-    if (ByteSize < static_cast<std::streamsize>(Fct1HeaderBytes)) return Stream;
+    DecodedFct1Stream Stream = Interchange::GeometryInterchange::DecodeFct1Bytes(RawBytes);
+    if (!Stream.Valid) return Stream;
 
-    std::vector<uint8_t> RawBytes(static_cast<std::size_t>(ByteSize));
-    Input.seekg(0, std::ios::beg);
-    if (!Input.read(reinterpret_cast<char*>(RawBytes.data()), ByteSize)) return Stream;
-
-    if (RawBytes[0] != 'F' || RawBytes[1] != 'C' || RawBytes[2] != 'T' || RawBytes[3] != '1')
-    {
-        return Stream;
-    }
-
-    Stream.VertexCount        = ReadUint32LE(RawBytes.data() + 4u);
-    Stream.FaceCount          = ReadUint32LE(RawBytes.data() + 8u);
-    const uint32_t HeaderBits = ReadUint32LE(RawBytes.data() + 12u);
-
-    const std::size_t PosBytes   = static_cast<std::size_t>(Stream.VertexCount) * 12u;
-    const std::size_t IdxBytes   = static_cast<std::size_t>(Stream.FaceCount) * 12u;
-    const std::size_t SlotBytes  = static_cast<std::size_t>(Stream.FaceCount) * 4u;
-    const bool        HasNormals = (HeaderBits & CornerNormalsBit) != 0u;
-    const std::size_t NormBytes  = HasNormals ? (static_cast<std::size_t>(Stream.FaceCount) * 36u) : 0u;
-    const std::size_t Expected   = static_cast<std::size_t>(Fct1HeaderBytes) + PosBytes + IdxBytes + SlotBytes + NormBytes;
-
-    if (RawBytes.size() != Expected) return Stream;
-
-    std::size_t Cursor = Fct1HeaderBytes;
-    Stream.Positions.resize(static_cast<std::size_t>(Stream.VertexCount) * 3u);
-    for (std::size_t I = 0u; I < Stream.Positions.size(); ++I)
-    {
-        Stream.Positions[I] = ReadFloat32LE(RawBytes.data() + Cursor + I * 4u);
-    }
-    Cursor += PosBytes;
-
-    Stream.Indices.resize(static_cast<std::size_t>(Stream.FaceCount) * 3u);
-    for (std::size_t I = 0u; I < Stream.Indices.size(); ++I)
-    {
-        Stream.Indices[I] = ReadUint32LE(RawBytes.data() + Cursor + I * 4u);
-    }
-    Cursor += IdxBytes;
-
-    Stream.SlotCodes.resize(Stream.FaceCount);
-    for (std::size_t I = 0u; I < Stream.SlotCodes.size(); ++I)
-    {
-        Stream.SlotCodes[I] = ReadUint32LE(RawBytes.data() + Cursor + I * 4u);
-    }
-    Cursor += SlotBytes;
-
-    if (HasNormals)
-    {
-        Stream.CornerNormals.resize(static_cast<std::size_t>(Stream.FaceCount) * 9u);
-        for (std::size_t I = 0u; I < Stream.CornerNormals.size(); ++I)
-        {
-            Stream.CornerNormals[I] = ReadFloat32LE(RawBytes.data() + Cursor + I * 4u);
-        }
-    }
-    else
+    if (Stream.CornerNormals.empty())
     {
         // Derive 38-degree creased area-weighted corner normals (crisp body creases, smooth panels)
         std::vector<float> FaceNormals(static_cast<std::size_t>(Stream.FaceCount) * 3u, 0.0f);

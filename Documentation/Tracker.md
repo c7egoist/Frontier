@@ -15,6 +15,7 @@ Deferred items live in [Backlog.md](Backlog.md); architectural invariants live i
 | **Phase 2** | **Shared UI Components & Multi-Document Workspace Groundwork** | 🟢 Complete | `Engine/Components/` · `Engine/Workspaces/` · `Engine/Codecs/` |
 | **Phase 3** | **`.slang` Shader Compiler, Vulkan 1.2 Timeline Interchange, GPU Picking & `TransformGizmo`** | 🟢 Complete | `Engine/GeometricRaster/` · `Engine/Editor/Viewports/` |
 | **Phase 4** | **`GeometrySpace::PolygonNetwork` & Native UV Workspace (`FrontierUV` + `FrontierEditor`)** | 🟢 Complete | `Engine/GeometrySpace/` · `Engine/Interchange/` · `Engine/Workspaces/UV/` · `Engine/Lifecycle/` · `Exhibits/` |
+| **Phase 4b** | **Geometry Compiler port: G1 readers + G2 headless compile** | 🟡 G1 / G2 complete | `Engine/Interchange/` · `Engine/Workspaces/Geometry/` · `Engine/SimulationSpace/PhysicsSpace/` · `Exhibits/` |
 | **Phase 5** | **Simulation, Audio & Networking Spaces** | 🏳️ Planned | `Engine/SimulationSpace/` · `Engine/AudioSpace/` · `Engine/NetworkingSpace/` |
 
 ---
@@ -83,3 +84,14 @@ Starting focus agreed with user: **`Input/` + `Editor/` groundwork**.
 6. **Remaining Domain Threads & Simulation Spaces (🚩 Next)**:
    - Design `GameThread` and remaining Option A domain threads before implementation.
    - Convert remaining `Experimental/` domain studios (`TextureStudio`, `FluidEditor`, `FractureEditor`, `ParticleEditor`, `VehicleLab`) onto the shared `PolygonNetwork` + Vulkan `.slang` + `TransformGizmo` infrastructure.
+
+---
+
+## Phase 4b — Geometry Compiler Port (🟡 G1 / G2 Complete)
+
+Plan: [Plans/GeometryCompilerPortPlan.md](Plans/GeometryCompilerPortPlan.md) · audit: [Plans/GeometryCompilerReuseAudit.md](Plans/GeometryCompilerReuseAudit.md).
+
+- ✔️ **G1 readers** in `GeometryInterchange`: glTF and GLB (scene instance walk), STL (binary and ASCII), PLY (ASCII and binary), FCT1 (`DecodeFct1Bytes`, now shared with `ControlVehicleSurfaceLoader`). Gate: `GeometryReaderValidation` 29 / 29.
+- ✔️ **G2 headless compile**: `Workspaces/Geometry/GeometryCompileSession` and `GeometryCompileSteps`, `PhysicsSpace/CollisionFitSolver`, plus `WatertightSewing` part count and winding reversal, and `CurvatureAnalysis::EvaluateCreaseCornerNormals`. Gate: `GeometryCompileValidation` 29 / 29.
+- ⏭️ **G3 / G4**: UV, SDF, LOD and icon runners, then the editor workspace UI.
+

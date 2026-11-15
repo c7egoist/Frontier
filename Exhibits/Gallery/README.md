@@ -1,6 +1,6 @@
 # 🏆 Exhibit Proof Gallery
 
-> **TL;DR:** 97 proof captures from this repo's own engine build (`ctest --test-dir Build/Editor`, gallery built 2026-11-15). They come from 35 tests in 20 domains. Shown as 1280 px JPEGs (7 MB). The full-size PNGs (462 MB) are written to `Exhibits/Images/` by every test run and kept out of git.
+> **TL;DR:** 100 proof captures from this repo's own engine build (`ctest --test-dir Build/Editor`, gallery built 2026-11-15). They come from 37 tests in 21 domains. Shown as 1280 px JPEGs (7 MB). The full-size PNGs (485 MB) are written to `Exhibits/Images/` by every test run and kept out of git.
 
 🌐 Grid view: `Exhibits/Gallery/index.html` (served at `:8095/Exhibits/Gallery/`).
 
@@ -19,6 +19,7 @@
 | [DirectLighting](#directlighting) | 1 | `SolarShadowValidation` |
 | [Docking](#docking) | 2 | `DockingValidation` |
 | [Geometry](#geometry) | 2 | `GeometryCompletionValidation`, `GeometryNetworkValidation` |
+| [GeometryCompiler](#geometrycompiler) | 3 | `GeometryCompileValidation`, `GeometryReaderValidation` |
 | [GlobalIllumination](#globalillumination) | 2 | `TieredWorldRenderValidation` |
 | [Input](#input) | 1 | `InputValidation` |
 | [Lifecycle](#lifecycle) | 1 | `LifecycleValidation` |
@@ -193,6 +194,22 @@
 **02-GeometryCompletionAndAcceleration** · `GeometryCompletionValidation` · 1440×900
 
 ![02-GeometryCompletionAndAcceleration](Geometry/02-GeometryCompletionAndAcceleration.jpg)
+
+---
+
+## GeometryCompiler
+
+**01-ReaderFormatTiles** · `GeometryReaderValidation` · 1800×1120
+
+![01-ReaderFormatTiles](GeometryCompiler/01-ReaderFormatTiles.jpg)
+
+**02-CompileStepTimeline** · `GeometryCompileValidation` · 1800×1000
+
+![02-CompileStepTimeline](GeometryCompiler/02-CompileStepTimeline.jpg)
+
+**03-CollisionFits** · `GeometryCompileValidation` · 1800×1000
+
+![03-CollisionFits](GeometryCompiler/03-CollisionFits.jpg)
 
 ---
 

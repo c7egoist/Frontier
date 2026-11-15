@@ -63,6 +63,12 @@ void ConstructDuffOrthonormalBasis(
 // Evaluates Meyer et al. (2003) discrete mean, Gaussian, and principal curvatures across Network.
 [[nodiscard]] CurvatureAnalysisSummary EvaluateSurfaceCurvature(const PolygonNetwork& Network);
 
+// Evaluates angle-weighted corner normals (one per DirectedEdge). Faces across an EnableSharpCrease edge stay apart
+// when their normals differ by more than CreaseAngleDegrees; smooth seams still share normals.
+[[nodiscard]] std::vector<Mathematics::Axis3D> EvaluateCreaseCornerNormals(
+    const PolygonNetwork& Network,
+    float                 CreaseAngleDegrees = 55.0f);
+
 // Evaluates Mikkelsen-compatible UV-Jacobian corner tangent bases (one per DirectedEdge), respecting seams & sharp creases.
 [[nodiscard]] std::vector<CornerTangentBasis> EvaluateContinuousCornerTangents(const PolygonNetwork& Network);
 
