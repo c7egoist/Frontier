@@ -9,6 +9,13 @@ a notch at the top for shortcuts and a drawer at the bottom.
 python3 Experimental/ComponentViewer/Serve.py        # http://0.0.0.0:8095/ → /Experimental/ComponentViewer/
 ```
 
+🧩 **Two workspaces (M0 split, 2026-11-15).** Geometry Compile is now its own page,
+[`Experimental/GeometryCompiler/Compile.html`](../GeometryCompiler/Compile.html) (8095 serves it too). Imports, samples
+and **Recompile** open it in a full-window frame; it hands the compiled asset back through
+[`Shared/GeometryCompile/CompileExchange.js`](../Shared/GeometryCompile/CompileExchange.js) (structured-clone messages,
+mirrors `CompiledGeometryExchange` in the C++ plan). Opened directly, the compiler runs standalone with its own start
+screen. Code both pages use lives in `Experimental/Shared/` (table below).
+
 ## Screenshots
 
 ![Component Viewer — components, viewport, details](Screenshots/component-viewer.png)
@@ -141,20 +148,18 @@ Vehicle Movement, using the Vehicle Lab sheet values: 1300 kg, a 520 N·m peak a
 
 | File | Role |
 |---|---|
-| `Main.js` | Boot, workers, icon renderer, import flow, vehicle class |
-| `GeometryCompile.js` | Import inspector UI |
-| `CompileSteps.js` | Step pipeline, settings, invalidation (no DOM) |
+| `Main.js` | Boot, compile context, import flow and Geometry Compiler hand-off, vehicle class |
 | `ComponentViewer.js` | Blueprint editor UI |
 | `Blueprint.js` | Component classes, property specs, tree operations, validation, torque curve, drive step (no DOM) |
-| `Render.js` | three.js stage, mesh channels, icon renderer |
-| `Camera.js` | Glide camera rig and its HUD (dial, lens, turntable) |
 | `Sockets.js` | Socket kinds, parameters, step (springs, pendulum, dock state machine), joint pose (no DOM) |
 | `SocketVisuals.js` | One debug look per socket kind |
-| `Visuals.js` | Shader debug visuals: field shells, beams, glows, selection tint, camera model, dot floor, density |
-| `Ui.js`, `Icons.js`, `ComponentViewer.css` | Project Zero controls, icons and styles |
-| `Engine/` | Readers, mesh analysis, workers; SDF, UV, cluster LOD, simplification, transform and OBJ export from Frontier-1 |
-| `Models/` | ControlVehicle Body / Tyre / Rim (FCT1) from Vehicle Lab |
-| `Vendor/`, `Fonts/` | three.js r187; DM Sans (OFL) |
+| `ComponentViewer.css` | Viewer-only styles (compile frame, simulate HUD, construction script, sockets) |
+| **`../GeometryCompiler/`** | **Workspace 2:** `Compile.html`, `CompileMain.js` (standalone / framed boot), `GeometryCompile.js` (import inspector UI), `GeometryCompiler.css`, `Scripts/SmokeGeometryCompile.mjs` |
+| `../Shared/GeometryCompile/CompileSteps.js` | Step pipeline, settings, invalidation (no DOM) |
+| `../Shared/GeometryCompile/CompileContext.js` · `CompileSources.js` · `CompileExchange.js` | Workers + icon baker · file / preset / FCT1 sources · viewer ↔ compiler messages |
+| `../Shared/GeometryCompile/Engine/` | Readers, mesh analysis, workers; SDF, UV, cluster LOD, simplification, transform and OBJ export from Frontier-1 |
+| `../Shared/Studio/` | `Render.js` (three.js stage, channels, icon renderer), `Camera.js` (glide rig + HUD), `Visuals.js` (shader debug visuals), `Ui.js`, `Icons.js`, `Studio.css`, `Vendor/` (three.js r187), `Fonts/` (DM Sans, OFL), `Scripts/StudioHarness.mjs` (jsdom harness) |
+| `../Shared/Models/` | ControlVehicle Body / Tyre / Rim (FCT1) from Vehicle Lab |
 
 ## Checks
 
@@ -162,7 +167,11 @@ Vehicle Movement, using the Vehicle Lab sheet values: 1300 kg, a 520 N·m peak a
 node Experimental/ComponentViewer/Scripts/CheckComponentViewer.mjs          # readers, pipeline, blueprint model, drive
 npm install --prefix /tmp/smoke jsdom@25
 JSDOM_DIR=/tmp/smoke node Experimental/ComponentViewer/Scripts/SmokeComponentViewer.mjs   # UI paths in jsdom
+JSDOM_DIR=/tmp/smoke node Experimental/GeometryCompiler/Scripts/SmokeGeometryCompile.mjs  # compiler page in jsdom
 ```
+
+The viewer smoke plays the framed compiler with a stand-in that compiles headlessly and structured-clones the result,
+so the hand-off is exercised end to end; the compiler smoke drives every step, Compile all, exports and the handshake.
 
 The smoke test boots the whole page with mocked WebGL and workers, then clicks through every main path. It fails on any
 runtime error. It does not check what the GPU draws.

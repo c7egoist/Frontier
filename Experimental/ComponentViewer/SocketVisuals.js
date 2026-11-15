@@ -1,8 +1,8 @@
 // Socket debug looks, one per kind, in the same language as Visuals.js (shaded solids, light fans, glows; no line
 // helpers). Everything that shows the *range* of a socket sits on the socket itself; the parts that show the *current
 // state* (needle, carriage, stem, coil, rope, plug) are moved by update() every frame from the socket state.
-import * as THREE from './Vendor/three.esm.min.js';
-import { clock, beam, glowSprite, fieldShell, shellMaterial, markDebug } from './Visuals.js';
+import * as THREE from '../Shared/Studio/Vendor/three.esm.min.js';
+import { clock, beam, glowSprite, fieldShell, shellMaterial, markDebug } from '../Shared/Studio/Visuals.js';
 import { SOCKET_KIND, DOCK_COLORS, axisVector, axisBasis, rotateVector } from './Sockets.js';
 
 const DEG = Math.PI / 180;

@@ -13,6 +13,8 @@
 > - the workspace panes.
 >
 > 🔴 One finding blocks part of the work: the **Hybrid** solver chosen in `GeometryCompilerFindingsReport.md` has **no source on the branch** (`CompilerSolvers.js` is missing; see §1.2).
+>
+> 🏁 **Status 2026-11-15:** the engine is imported into this repo and builds (51/52 CTest). M0 split is done: the step shell now lives at `Experimental/GeometryCompiler/Compile.html`, beside the reference studio `index.html`. §1.1 and §1.2 weren't answered, so the recommended defaults apply (marked ⭐ below); say so if you want them changed.
 
 ---
 
@@ -30,6 +32,8 @@
 
 💡 **Recommendation: A**, prototyped first in HTML (G0) so the C++ has a 1:1 reference (CLAUDE.md §2.5).
 
+⭐ **Default in effect: A** (no answer yet). M0 already split the step shell out as `Compile.html`; G0 folds the studio tools from `index.html` into its steps.
+
 ### 1.2 🚩 The missing Hybrid solver
 
 | Rank | Option | Summary |
@@ -37,6 +41,8 @@
 | 🏆 🥇 | **A — You point to the branch that holds `CompilerSolvers.js`** (Hybrid probabilistic QEM, adaptive shrinkwrap, retopo-seeded `LOD 3`) | Port it 1:1 with the locked constants from the report (`seedRatio = 0.28`, `minAngleGuardRad = 0.20`, …). |
 | 🥈 | B — Ship G3 on today's `ClusterPyramid` QEM + material seams. Hybrid goes to `Backlog.md`. | Nothing blocks. The report's thin-wall result (`0` breaches vs `11`) isn't delivered yet. |
 | 🥉 | C — Re-derive Hybrid from the report text alone | 🔴 High drift risk. The report says relaxing those constants caused stalls, spikes and chord sag. |
+
+⭐ **Default in effect: B** (no answer yet). G3 ships on `ClusterPyramid` QEM + material seams; Hybrid is backlogged until you point to `CompilerSolvers.js` (then A).
 
 📝 Also checked: the report quotes **14/14** suites, but `GeometryCompilerValidation.mjs` on `7eb76ce` holds **6 suites (6/6 PASS, run 2026-11-15)**. Every C++ gate below is defined against the 6 suites that exist, plus the 11 compile checks from Component Viewer.
 
@@ -109,7 +115,7 @@
 
 | # | Milestone | Deliverables | Exit gate (Exhibit + `.png` → `Exhibits/Images/GeometryCompiler/`) |
 | :---: | :--- | :--- | :--- |
-| **G0** | HTML merge | `Experimental/GeometryCompiler/` adopts the step shell (§1.1 A) with studio tools inside the steps. Component Viewer's Compile button opens it. | HTML: 6 GC suites + 11 compile checks + smoke. Reference captures for every step. |
+| **G0** | HTML merge | `Experimental/GeometryCompiler/` adopts the step shell (§1.1 A) with studio tools inside the steps. ✔️ Already done in M0: `Compile.html` exists and Component Viewer's Compile opens it (framed, `CompileExchange.js`). Left: fold `index.html`'s tools into the steps. | HTML: 6 GC suites + 11 compile checks + smoke. Reference captures for every step. |
 | **G1** | Readers | STL (bin / ascii), PLY (ascii / bin), GLB, FCT1, OBJ `usemtl` slots | `GeometryReaderValidation`: ports checks 1–3 (FCT1 counts, fan-triangulated quads). Proof: the 6 formats rendered as clay tiles. |
 | **G2** | Headless compile | `GeometryCompileSession`, `CompileStepSequence`, `ConnectivityReport`, `GeometryTransformDirectives`, `CornerNormalSplitter`, `CollisionFitSolver`, `.GeometrySpace` sections | `GeometryCompileValidation`: ports checks 4–9 (units, welding, normals, fits, downstream-only invalidation, vehicle body with 8 material families). Proof: step timeline + collision fits. |
 | **G3** | Cluster LOD | `ClusterBuildDirectives`, seam policies, `MaterialDriftMeasurement`, inspection shading, Hybrid (if §1.2 A) | Ports checks 10–11 + GC suite 1 (monotone error, nested spheres, crack-free cuts, edge counts). Body LOD 2 < 1% drift (Slide = 0.02% at 744 tris). Proof: Off / Slide / Pin side by side. |
@@ -127,7 +133,7 @@
 
 | Risk | Rating | Mitigation |
 | :--- | :---: | :--- |
-| Hybrid solver source missing | 🔴 | §1.2. G3 can ship on `ClusterPyramid` meanwhile. |
+| Hybrid solver source missing | 🔴 | §1.2 default B: G3 ships on `ClusterPyramid`; Hybrid backlogged. |
 | Report numbers vs code drift (14 vs 6 suites) | 🚩 | Gates are defined only against runnable suites. Report corrections noted in `Tracker.md`. |
 | WebGPU WGSL raymarcher → `.slang` | 🚩 | Same math, and the 4 modes keep the CPU fallback as the Exhibit reference image. |
 | Nanite-style cluster streaming | ✔️ | Stays out of scope (report §5). Only the cut and culling views are ported. |

@@ -4,19 +4,19 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { readGeometry, readObj, readStl, readPly, readGlb, readFacet } from '../Engine/ImportFormats.js';
-import { convertSource, analyseTopology, cornerNormals, fitCollision, computeBounds } from '../Engine/MeshAnalysis.js';
-import { createAsset, compileAll, invalidate, isCompiled, staleSteps, runStep } from '../CompileSteps.js';
-import { bakeSdf } from '../Engine/SdfBake.js';
-import { buildClusterHierarchy } from '../Engine/ClusterHierarchy.js';
-import { constructSource } from '../Engine/SourceGeometry.js';
+import { readGeometry, readObj, readStl, readPly, readGlb, readFacet } from '../../Shared/GeometryCompile/Engine/ImportFormats.js';
+import { convertSource, analyseTopology, cornerNormals, fitCollision, computeBounds } from '../../Shared/GeometryCompile/Engine/MeshAnalysis.js';
+import { createAsset, compileAll, invalidate, isCompiled, staleSteps, runStep } from '../../Shared/GeometryCompile/CompileSteps.js';
+import { bakeSdf } from '../../Shared/GeometryCompile/Engine/SdfBake.js';
+import { buildClusterHierarchy } from '../../Shared/GeometryCompile/Engine/ClusterHierarchy.js';
+import { constructSource } from '../../Shared/GeometryCompile/Engine/SourceGeometry.js';
 import {
   createBlueprint, addComponent, attachComponent, removeComponent, duplicateComponent, renameComponent, findComponent, childrenOf,
   validateBlueprint, sampleCurve, stepDrive, createDriveState, createComponent, VEHICLE_SHEET,
 } from '../Blueprint.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const models = join(here, '..', 'Models');
+const models = join(here, '..', '..', 'Shared', 'Models');
 let passed = 0;
 const test = async (name, fn) => { await fn(); passed++; console.log(`  ok  ${name}`); };
 const buf = (b) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
@@ -268,8 +268,8 @@ await test('Torque curve interpolation hits authored samples; drive preview acce
 
 await test('Glide camera: framing fits the bounds, flights take the short way round and settle, dolly zoom keeps the subject size', async () => {
   globalThis.addEventListener ??= () => {};
-  const THREE = await import('../Vendor/three.esm.min.js');
-  const { CameraRig } = await import('../Camera.js');
+  const THREE = await import('../../Shared/Studio/Vendor/three.esm.min.js');
+  const { CameraRig } = await import('../../Shared/Studio/Camera.js');
   const dom = { addEventListener() {}, clientHeight: 600, setPointerCapture() {} };
   const camera = new THREE.PerspectiveCamera(40, 16 / 9, 0.1, 100);
   const rig = new CameraRig(camera, dom);
@@ -293,7 +293,7 @@ await test('Glide camera: framing fits the bounds, flights take the short way ro
 });
 
 await test('Density view: smaller triangles map to the hot end of the ramp', async () => {
-  const { densityColors } = await import('../Visuals.js');
+  const { densityColors } = await import('../../Shared/Studio/Visuals.js');
   const tri = (s, x) => [x, 0, 0, x + s, 0, 0, x, s, 0];
   const colors = densityColors(new Float32Array([...tri(0.01, 0), ...tri(0.1, 1), ...tri(1, 2)]));
   const red = (t) => colors[t * 9], blue = (t) => colors[t * 9 + 2];
@@ -302,8 +302,8 @@ await test('Density view: smaller triangles map to the hot end of the ramp', asy
 });
 
 await test('Selection tint works inside the selected materials: no extra mesh, child components untouched, restore is exact', async () => {
-  const THREE = await import('../Vendor/three.esm.min.js');
-  const { addHalo } = await import('../Visuals.js');
+  const THREE = await import('../../Shared/Studio/Vendor/three.esm.min.js');
+  const { addHalo } = await import('../../Shared/Studio/Visuals.js');
   const matA = new THREE.MeshStandardMaterial(), matB = [new THREE.MeshStandardMaterial(), new THREE.MeshStandardMaterial()], matChild = new THREE.MeshStandardMaterial();
   const node = new THREE.Group(), a = new THREE.Mesh(new THREE.BoxGeometry(), matA), b = new THREE.Mesh(new THREE.BoxGeometry(), matB);
   const child = new THREE.Group(); child.userData.componentId = 'C9'; const c = new THREE.Mesh(new THREE.BoxGeometry(), matChild); child.add(c);

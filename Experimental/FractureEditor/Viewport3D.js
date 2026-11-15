@@ -2,9 +2,9 @@
 // lighter and rougher), an amber impact point you place on the surface, explode / cutaway / drop-test previews and a
 // hover halo per piece.  Built on the Component Viewer's glide camera and line-free visuals (dot floor, glow sprite,
 // in-material halo) — no wireframes, no outline helpers, no selection footprint.
-import * as THREE from '../ComponentViewer/Vendor/three.esm.min.js';
-import { CameraRig } from '../ComponentViewer/Camera.js';
-import { dotFloor, glowSprite, haloCompile, clock } from '../ComponentViewer/Visuals.js';
+import * as THREE from '../Shared/Studio/Vendor/three.esm.min.js';
+import { CameraRig } from '../Shared/Studio/Camera.js';
+import { dotFloor, glowSprite, haloCompile, clock } from '../Shared/Studio/Visuals.js';
 
 const RAMP = ['#306bf2', '#29c7c2', '#59d15c', '#f7cc40', '#f04d3d'].map((c) => new THREE.Color(c));
 const ramp = (t, out = new THREE.Color()) => { t = Math.max(0, Math.min(1, t)) * (RAMP.length - 1); const i = Math.min(RAMP.length - 2, Math.floor(t)); return out.copy(RAMP[i]).lerp(RAMP[i + 1], t - i); };

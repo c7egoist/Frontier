@@ -1,136 +1,51 @@
-// UI smoke test: boots Main.js inside jsdom with mocked WebGL / 2D canvas / Workers (workers run in-process) and
-// drives the main paths — boot, tree, channels, drawer, simulate, graph, add / duplicate / delete, compile, details
-// edits, Geometry Compile (every step, bake all, exports, open as Blueprint), content actions, tabs, file import.
-// Rendering itself is not checked (no GPU); this catches wiring and runtime errors.
+// UI smoke test: boots Main.js inside jsdom (Shared/Studio/Scripts/StudioHarness.mjs mocks WebGL, canvas, layout and
+// runs the workers in-process) and drives the main paths — boot, tree, channels, drawer, simulate, graph, add /
+// duplicate / delete, compile, details edits, content actions, tabs, file import.
+// Geometry Compile is a separate workspace (Experimental/GeometryCompiler/Compile.html, own smoke). Here the framed
+// compiler is played by a stand-in that speaks CompileExchange.js: it compiles the asset headlessly with the real
+// CompileSteps, structured-clones it (as postMessage would) and posts 'finish' back.
 //   npm install --prefix /tmp/smoke jsdom@25
 //   JSDOM_DIR=/tmp/smoke node Experimental/ComponentViewer/Scripts/SmokeComponentViewer.mjs
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { bootStudio } from '../../Shared/Studio/Scripts/StudioHarness.mjs';
+import { compileAll } from '../../Shared/GeometryCompile/CompileSteps.js';
+import { bakeSdf } from '../../Shared/GeometryCompile/Engine/SdfBake.js';
+import { buildClusterHierarchy } from '../../Shared/GeometryCompile/Engine/ClusterHierarchy.js';
+import { CHANNEL } from '../../Shared/GeometryCompile/CompileExchange.js';
 
-const { JSDOM } = createRequire(pathToFileURL(resolve(process.env.JSDOM_DIR || process.cwd()) + '/'))('jsdom');
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..') + '/';
-const REPO = resolve(ROOT, '../..');
-const html = readFileSync(ROOT + 'index.html', 'utf8').replace(/<script[\s\S]*?<\/script>/g, '');
-const dom = new JSDOM(html, { url: 'http://localhost:8095/Experimental/ComponentViewer/', pretendToBeVisual: true });
-const w = dom.window;
-const errors = [];
-process.on('unhandledRejection', (e) => { errors.push('unhandledRejection: ' + (e && e.stack || e)); });
-w.addEventListener('error', (e) => errors.push('window error: ' + (e.error && e.error.stack || e.message)));
-const origError = console.error;
-console.error = (...a) => { errors.push('console.error: ' + a.map((x) => (x && x.stack) || String(x)).join(' ')); };
+const { w, $, click, key, sleep, step, errors, downloads, finish } = bootStudio({ htmlPath: ROOT + 'index.html', url: 'http://localhost:8095/Experimental/ComponentViewer/' });
 
-// ---------------------------------------------------------------- WebGL mock
-const GL = { VERSION: 7938, SHADING_LANGUAGE_VERSION: 35724, FRAMEBUFFER_COMPLETE: 36053, ACTIVE_UNIFORMS: 35718, ACTIVE_ATTRIBUTES: 35721, MAX_TEXTURE_SIZE: 3379, MAX_SAMPLES: 36183 };
-let constCounter = 50000;
-const constMap = new Map();
-function glMock(canvas) {
-  const target = {
-    canvas, drawingBufferWidth: 300, drawingBufferHeight: 150,
-    getParameter(p) {
-      if (p === GL.VERSION) return 'WebGL 2.0';
-      if (p === GL.SHADING_LANGUAGE_VERSION) return 'WebGL GLSL ES 3.00';
-      if (p === 2978 || p === 3088) return new Int32Array([0, 0, 300, 150]);
-      return 16;
-    },
-    getShaderPrecisionFormat() { return { precision: 23, rangeMin: 127, rangeMax: 127 }; },
-    getExtension(name) { return name === 'EXT_color_buffer_float' || name === 'WEBGL_lose_context' ? { loseContext() {} } : null; },
-    getSupportedExtensions() { return []; },
-    getContextAttributes() { return { alpha: true, antialias: true, depth: true, stencil: false, premultipliedAlpha: true, preserveDrawingBuffer: true, powerPreference: 'default' }; },
-    getShaderParameter() { return true; }, getProgramParameter(p, n) { return (n === GL.ACTIVE_UNIFORMS || n === GL.ACTIVE_ATTRIBUTES) ? 0 : true; },
-    getShaderInfoLog() { return ''; }, getProgramInfoLog() { return ''; }, getShaderSource() { return ''; },
-    checkFramebufferStatus() { return GL.FRAMEBUFFER_COMPLETE; },
-    isContextLost() { return false; },
-    getUniformLocation() { return {}; }, getAttribLocation() { return 0; }, getError() { return 0; },
-    readPixels(x, y, wd, h, f, t, buf) { if (buf) buf.fill(0); },
-    fenceSync() { return {}; }, clientWaitSync() { return 37149; },
-  };
-  return new Proxy(target, {
-    get(t, k) {
-      if (k in t) return t[k];
-      if (typeof k === 'string' && /^[A-Z0-9_]+$/.test(k)) { if (GL[k]) return GL[k]; if (!constMap.has(k)) constMap.set(k, constCounter++); return constMap.get(k); }
-      if (typeof k === 'string' && k.startsWith('create')) return () => ({});
-      return () => undefined;
-    },
-  });
-}
-function ctx2dMock(canvas) {
-  const target = {
-    canvas, measureText: (s) => ({ width: String(s).length * 6 }),
-    createImageData: (a, b) => ({ width: a, height: b, data: new Uint8ClampedArray(a * b * 4) }),
-    getImageData: (x, y, a, b) => ({ width: a, height: b, data: new Uint8ClampedArray(a * b * 4) }),
-    createLinearGradient: () => ({ addColorStop() {} }), createRadialGradient: () => ({ addColorStop() {} }), createPattern: () => ({}),
-    getTransform: () => ({ a: 1, d: 1 }),
-  };
-  return new Proxy(target, { get(t, k) { if (k in t) return t[k]; return () => undefined; }, set(t, k, v) { t[k] = v; return true; } });
-}
-w.HTMLCanvasElement.prototype.getContext = function (type) {
-  if (type === '2d') return (this._c2 ||= ctx2dMock(this));
-  return (this._gl ||= glMock(this));
+// ---------------------------------------------------------------- Geometry Compiler stand-in (the framed page)
+const compilerCtx = {
+  sdfWorker: async (r) => bakeSdf(r.positions, r.indices, { resolution: r.resolution, band: r.band }),
+  lodWorker: async (r) => buildClusterHierarchy(r.positions, r.indices, { ...r.build, families: r.families || null }),
+  renderIcon: async () => 'data:image/png;base64,AAAA',
 };
-w.HTMLCanvasElement.prototype.toDataURL = () => 'data:image/png;base64,AAAA';
-w.HTMLCanvasElement.prototype.toBlob = (cb) => cb(new Blob(['x']));
-w.HTMLCanvasElement.prototype.setPointerCapture = function () {};
-w.HTMLCanvasElement.prototype.releasePointerCapture = function () {};
-w.Element.prototype.setPointerCapture ||= function () {};
-w.Element.prototype.releasePointerCapture ||= function () {};
-w.Element.prototype.hasPointerCapture ||= function () { return false; };
-w.Element.prototype.scrollIntoView ||= function () {};
-// Layout: give every element a plausible size.
-Object.defineProperty(w.HTMLElement.prototype, 'offsetParent', { get() { return this.closest('[hidden]') ? null : w.document.body; } });
-Object.defineProperty(w.HTMLElement.prototype, 'clientWidth', { get() { return 800; } });
-Object.defineProperty(w.HTMLElement.prototype, 'clientHeight', { get() { return 600; } });
-w.Element.prototype.getBoundingClientRect = function () { return { x: 0, y: 0, left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600 }; };
-w.SVGElement.prototype.getBBox = function () { return { x: 0, y: 0, width: 100, height: 20 }; };
-w.URL.createObjectURL = () => 'blob:x'; w.URL.revokeObjectURL = () => {};
-w.HTMLAnchorElement.prototype.click = function () { downloads.push(this.download); };
-const downloads = [];
-
-// ---------------------------------------------------------------- Worker mock (in-process)
-class FakeWorker {
-  constructor(url) { this.url = String(url); }
-  postMessage(data) {
+const compiler = { opened: [], reply: 'compile', frame: null };
+function fromCompiler(data) { w.dispatchEvent(new w.MessageEvent('message', { data: { channel: CHANNEL, ...data }, source: compiler.frame.contentWindow })); }
+function attachCompiler() {
+  const frame = $('Compile');
+  if (compiler.frame === frame && frame.contentWindow.__standIn) return;
+  compiler.frame = frame;
+  frame.contentWindow.__standIn = true;
+  frame.contentWindow.postMessage = (m) => {
+    if (!m || m.channel !== CHANNEL || m.type !== 'open') return;
+    compiler.opened.push(m);
     setTimeout(async () => {
       try {
-        let result;
-        if (this.url.includes('SdfWorker')) { const { bakeSdf } = await import(pathToFileURL(ROOT + 'Engine/SdfBake.js')); result = bakeSdf(data.request.positions, data.request.indices, { resolution: data.request.resolution, band: data.request.band }); }
-        else { const { buildClusterHierarchy } = await import(pathToFileURL(ROOT + 'Engine/ClusterHierarchy.js')); result = buildClusterHierarchy(data.request.positions, data.request.indices, { ...data.request.build, families: data.request.families || null }); }
-        this.onmessage({ data: { ticket: data.ticket, type: 'done', result } });
-      } catch (e) { this.onmessage({ data: { ticket: data.ticket, type: 'error', message: e.message } }); }
+        if (compiler.reply === 'compile') {
+          await compileAll(m.asset, compilerCtx);
+          fromCompiler({ type: 'finish', asset: structuredClone(m.asset), open: true, existing: m.recompile });
+        } else fromCompiler({ type: 'finish', asset: structuredClone(m.asset), cancelled: true, existing: m.recompile });
+      } catch (e) { errors.push('compiler stand-in: ' + e.stack); }
     }, 0);
-  }
-  terminate() {}
+  };
+  fromCompiler({ type: 'ready' });
 }
-
-// ---------------------------------------------------------------- globals
-const keys = ['window', 'document', 'navigator', 'HTMLElement', 'HTMLCanvasElement', 'HTMLInputElement', 'HTMLImageElement', 'Element', 'Node', 'Event', 'KeyboardEvent', 'MouseEvent', 'WheelEvent', 'DragEvent', 'CustomEvent',
-  'DOMParser', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'SVGElement', 'Image', 'FileReader', 'DocumentFragment', 'localStorage', 'sessionStorage', 'matchMedia', 'innerWidth', 'innerHeight', 'File', 'DataTransfer', 'addEventListener', 'removeEventListener', 'devicePixelRatio', 'self', 'location', 'history'];
-for (const k of keys) { try { if (w[k] !== undefined) Object.defineProperty(globalThis, k, { value: k === 'window' || k === 'self' ? w : (typeof w[k] === 'function' && !/^[A-Z]/.test(k) ? w[k].bind(w) : w[k]), configurable: true, writable: true }); } catch (e) { /* ignore */ } }
-globalThis.PointerEvent = w.PointerEvent || class extends w.MouseEvent { constructor(t, o = {}) { super(t, o); this.pointerId = o.pointerId || 1; this.pointerType = 'mouse'; } };
-w.PointerEvent = globalThis.PointerEvent;
-globalThis.ResizeObserver = w.ResizeObserver = class { constructor(cb) { this.cb = cb; } observe() { setTimeout(() => this.cb([]), 0); } disconnect() {} unobserve() {} };
-globalThis.Worker = w.Worker = FakeWorker;
-w.matchMedia ||= () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-globalThis.matchMedia = w.matchMedia;
-globalThis.fetch = w.fetch = async (u) => {
-  const url = new URL(u, w.location.href);
-  const path = REPO + decodeURIComponent(url.pathname);
-  const bytes = readFileSync(path);
-  return { ok: true, status: 200, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), text: async () => bytes.toString('utf8'), json: async () => JSON.parse(bytes) };
-};
-globalThis.ImageData = w.ImageData = class { constructor(d, a, b) { if (typeof d === 'number') { this.width = d; this.height = a; this.data = new Uint8ClampedArray(d * a * 4); } else { this.data = d; this.width = a; this.height = b ?? d.length / 4 / a; } } };
-globalThis.createImageBitmap = async () => ({ width: 1, height: 1, close() {} });
-w.HTMLImageElement.prototype.decode = async function () {};
-// Fire image onload for data URLs.
-const imgSrc = Object.getOwnPropertyDescriptor(w.HTMLImageElement.prototype, 'src');
-Object.defineProperty(w.HTMLImageElement.prototype, 'src', { get() { return imgSrc.get.call(this); }, set(v) { imgSrc.set.call(this, v); setTimeout(() => { this.onload && this.onload(); this.dispatchEvent(new w.Event('load')); }, 0); } });
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const $ = (id) => w.document.getElementById(id);
-const click = (el) => { if (!el) throw new Error('click target missing'); el.dispatchEvent(new w.MouseEvent('click', { bubbles: true })); };
-const key = (k, opts = {}) => w.document.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, ...opts }));
-const step = async (name, fn) => { const before = errors.length; try { await fn(); } catch (e) { errors.push(`[${name}] threw: ${e.stack}`); } console.log(`${errors.length > before ? 'FAIL' : ' ok '} ${name}`); };
+async function awaitCompiler(n) { for (let i = 0; i < 200 && compiler.opened.length < n; i++) { await sleep(25); if ($('Compile').getAttribute('src')) attachCompiler(); } }
+async function awaitFrameClosed() { for (let i = 0; i < 200 && !$('Compile').hidden; i++) await sleep(25); }
 
 await import(pathToFileURL(ROOT + 'Main.js'));
 for (let i = 0; i < 100 && !$('Boot').classList.contains('done') && !$('Boot').classList.contains('failed'); i++) await sleep(100);
@@ -246,34 +161,22 @@ await step('details edits (vec3, range, toggle, select)', async () => {
   console.log('   inputs touched:', n);
 });
 await step('root details', async () => { click($('ComponentTree').querySelector('.comp-row')); await sleep(10); console.log('   root sections:', $('Details').querySelectorAll('.panel').length); });
-await step('content tab + sample → Geometry Compile', async () => {
+await step('content tab + sample → Geometry Compiler frame', async () => {
   click(w.document.querySelector('[data-left=content]')); await sleep(10);
   console.log('   content:', $('ContentCount').textContent, '| samples:', $('SampleList').children.length, '| formats:', $('ImportFormats').textContent.slice(0, 60));
-  const sample = $('SampleList').querySelector('button');
-  click(sample); await sleep(50);
-  for (let i = 0; i < 100 && /…|ing/.test($('CompileStatus').textContent); i++) await sleep(50);
-  console.log('   compile hidden:', $('Compile').hidden, '| status:', $('CompileStatus').textContent, '| steps:', $('StepList').children.length, '| count:', $('CompileStepCount').textContent);
+  click($('SampleList').querySelector('button'));
+  await awaitCompiler(1);
+  const src = $('Compile').getAttribute('src') || '';
+  console.log('   frame open:', !$('Compile').hidden, '| src:', src.replace(/^.*\/Experimental\//, ''), '| sent:', compiler.opened[0]?.asset?.name);
+  if (!/GeometryCompiler\/Compile\.html/.test(src)) throw new Error('frame does not load the Geometry Compiler page');
+  if (!compiler.opened.length) throw new Error('no open message reached the compiler');
 });
-await step('compile: visit every step + preview modes', async () => {
-  const steps = [...$('StepList').querySelectorAll('.step-row')];
-  for (const s of steps) {
-    click(s); await sleep(10);
-    const modes = [...$('PreviewModes').querySelectorAll('button')];
-    for (const m of modes) { click(m); await sleep(5); }
-    console.log(`   ${s.querySelector('b')?.textContent}: settings panels ${$('StepSettings').querySelectorAll('.panel').length}, modes ${modes.length}`);
-  }
-});
-await step('compile all + open', async () => {
-  click($('CompileRunAll'));
-  for (let i = 0; i < 200; i++) { await sleep(50); if (/compiled|ready|done/i.test($('CompileStatus').textContent)) break; }
-  console.log('   status:', $('CompileStatus').textContent, '| total:', $('CompileTotal').textContent, '| mem:', $('CompileMemory').textContent);
-  for (const s of $('StepList').querySelectorAll('.step-row')) {
-    click(s); await sleep(5);
-    for (const b of $('StepSettings').querySelectorAll('button')) if (/export|download|obj|svg|r32|png/i.test(b.textContent)) { click(b); await sleep(5); }
-  }
-  console.log('   downloads:', downloads.join(', '));
-  click($('CompileOpen')); await sleep(200);
-  console.log('   compile hidden:', $('Compile').hidden, '| title:', $('BpTitle').textContent, '| tabs:', $('BlueprintTabs').children.length, '| content:', $('ContentCount').textContent);
+await step('compiler finish → opened as Blueprint', async () => {
+  await awaitFrameClosed(); await sleep(100);
+  const sent = compiler.opened[0].asset;
+  console.log('   frame hidden:', $('Compile').hidden, '| title:', $('BpTitle').textContent, '| tabs:', $('BlueprintTabs').children.length, '| content:', $('ContentCount').textContent);
+  if (!$('Compile').hidden) throw new Error('frame stayed open after finish');
+  if (!$('BpTitle').textContent.includes(sent.name.replace(/[^\w]+/g, ''))) throw new Error('compiled asset did not open as a Blueprint');
 });
 await step('content row actions', async () => {
   const row = $('ContentList').querySelector('.content-row');
@@ -281,7 +184,14 @@ await step('content row actions', async () => {
   console.log('   actions:', acts.map((b) => b.textContent).join(','));
   if (acts[0]) { click(acts[0]); await sleep(20); }
   console.log('   comps:', $('StatComponents').textContent);
-  if (acts[2]) { click(acts[2]); await sleep(100); console.log('   recompile open:', !$('Compile').hidden); click($('CompileCancel')); await sleep(50); }
+  if (acts[2]) {
+    compiler.reply = 'cancel';
+    const n = compiler.opened.length;
+    click(acts[2]); await awaitCompiler(n + 1);
+    console.log('   recompile sent:', compiler.opened.length > n, '| recompile flag:', compiler.opened.at(-1).recompile);
+    await awaitFrameClosed();
+    console.log('   cancelled → frame hidden:', $('Compile').hidden);
+  }
 });
 await step('switch tabs and close', async () => {
   const tabs = [...$('BlueprintTabs').querySelectorAll('.document-tab')];
@@ -292,20 +202,18 @@ await step('switch tabs and close', async () => {
   console.log('   tabs:', $('BlueprintTabs').children.length);
 });
 await step('import file (OBJ via FileInput)', async () => {
+  compiler.reply = 'cancel';
+  const n = compiler.opened.length;
   const obj = 'v -1 0 -1\nv 1 0 -1\nv 1 0 1\nv -1 0 1\nv 0 1.5 0\nf 1 2 3 4\nf 1 5 2\nf 2 5 3\nf 3 5 4\nf 4 5 1\n';
   const file = new w.File([obj], 'Pyramid.obj');
   file.arrayBuffer = async () => new TextEncoder().encode(obj).buffer;
   Object.defineProperty($('FileInput'), 'files', { value: [file], configurable: true });
   $('FileInput').dispatchEvent(new w.Event('change', { bubbles: true }));
-  await sleep(500);
-  console.log('   compile open:', !$('Compile').hidden, '| file:', $('CompileFile').textContent, '| status:', $('CompileStatus').textContent);
-  key('Escape'); await sleep(50);
-  console.log('   after esc hidden:', $('Compile').hidden);
+  await awaitCompiler(n + 1);
+  console.log('   sent:', compiler.opened.at(-1)?.asset?.fileName, '| format:', compiler.opened.at(-1)?.asset?.format);
+  await awaitFrameClosed();
+  console.log('   cancelled → frame hidden:', $('Compile').hidden);
+  if (compiler.opened.length !== n + 1) throw new Error('import did not reach the compiler');
 });
 
-await sleep(200);
-console.error = origError;
-console.log(`\n${errors.length} errors · downloads ${downloads.length}`);
-const seen = new Set();
-for (const e of errors) { const k = e.replace(/console.error: Error: Uncaught \[/, 'window error: ').split('\n').slice(0, 3).join(' | '); if (k.startsWith('console.error: Error: Uncaught')) continue; if (seen.has(k)) continue; seen.add(k); console.log('-', e.split('\n').slice(0, 4).join('\n    ').slice(0, 700)); }
-process.exit(errors.length ? 1 : 0);
+await finish();

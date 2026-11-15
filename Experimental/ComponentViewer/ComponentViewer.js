@@ -2,19 +2,19 @@
 // components with transforms, then actor components) and the Content tray of compiled assets. Centre: one tab per
 // open blueprint with the Viewport (inspection channels, simulate) or the Construction Script graph, plus a drawer
 // with the compiled data of the selected mesh and Vehicle Lab's response curves. Right: Details for the selection.
-import { $, el, iconEl, section, panel, rangeField, segmented, segmentedField, toggle, selectField, vec3Field, colorField, textField, rows, metrics, toast, download } from './Ui.js';
-import { icon, hydrateIcons } from './Icons.js';
+import { $, el, iconEl, section, panel, rangeField, segmented, segmentedField, toggle, selectField, vec3Field, colorField, textField, rows, metrics, toast, download } from '../Shared/Studio/Ui.js';
+import { icon, hydrateIcons } from '../Shared/Studio/Icons.js';
 import {
   COMPONENT_CLASSES, SCENE_PROPS, COMMON_PROPS, findComponent, childrenOf, actorComponents, addComponent, removeComponent,
   attachComponent, duplicateComponent, renameComponent, walkScene, touch, validateBlueprint, sampleCurve, stepDrive, createDriveState, VEHICLE_SHEET,
 } from './Blueprint.js';
-import { STEPS, isCompiled, fmt, formatMs } from './CompileSteps.js';
-import { THREE, Stage, meshObject, collisionObject, assetSlots } from './Render.js';
-import { fieldShell, beam, glowSprite, solidArrow, anchorMark, addHalo, cameraModel } from './Visuals.js';
-import { createCameraHud } from './Camera.js';
+import { STEPS, isCompiled, fmt, formatMs } from '../Shared/GeometryCompile/CompileSteps.js';
+import { THREE, Stage, meshObject, collisionObject, assetSlots } from '../Shared/Studio/Render.js';
+import { fieldShell, beam, glowSprite, solidArrow, anchorMark, addHalo, cameraModel } from '../Shared/Studio/Visuals.js';
+import { createCameraHud } from '../Shared/Studio/Camera.js';
 import { SOCKET_KINDS, SOCKET_KIND, SOCKET_FIELDS, SOCKET_PARAMS, DRIVES, socketDefaults, createSocketState, stepSocket, socketPose, socketReadout, rotateVector, dockAccepts, poseLabel } from './Sockets.js';
 import { socketVisual } from './SocketVisuals.js';
-import { IMPORT_FORMATS } from './Engine/ImportFormats.js';
+import { IMPORT_FORMATS } from '../Shared/GeometryCompile/Engine/ImportFormats.js';
 
 const CHANNELS = [
   { id: 'lit', label: 'Lit', key: '1' }, { id: 'unlit', label: 'Unlit', key: '2' }, { id: 'density', label: 'Density', key: '3' },

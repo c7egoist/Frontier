@@ -1,65 +1,45 @@
-// Boot: workers, the icon baker, the asset library, the ControlVehicle sample (Vehicle Lab's FCT1 meshes compiled
-// through the same pipeline as any import) and the import paths (file picker, drag-and-drop, sample sources).
-import { $, toast } from './Ui.js';
-import { hydrateIcons } from './Icons.js';
-import { createAsset, compileAll, workerChannel, fmt } from './CompileSteps.js';
-import { readGeometry, formatOf, readFacet } from './Engine/ImportFormats.js';
-import { SOURCE_PRESETS, constructSource } from './Engine/SourceGeometry.js';
+// Boot: the compile context (workers + icon baker, used headlessly for the ControlVehicle sample), the asset library,
+// the import paths (file picker, drag-and-drop, sample sources) and the Geometry Compiler hand-off. The compiler is a
+// separate workspace (Experimental/GeometryCompiler/Compile.html) framed full-window; see CompileExchange.js.
+import { $, toast } from '../Shared/Studio/Ui.js';
+import { hydrateIcons } from '../Shared/Studio/Icons.js';
+import { createAsset, compileAll, fmt } from '../Shared/GeometryCompile/CompileSteps.js';
+import { readFacet } from '../Shared/GeometryCompile/Engine/ImportFormats.js';
+import { createCompileContext } from '../Shared/GeometryCompile/CompileContext.js';
+import { COMPILE_SAMPLES, assetFromFile, fetchModel } from '../Shared/GeometryCompile/CompileSources.js';
+import { hostCompiler } from '../Shared/GeometryCompile/CompileExchange.js';
 import { createBlueprint, addComponent, findComponent, VEHICLE_SHEET } from './Blueprint.js';
-import { IconRenderer, VEHICLE_PALETTE, meshObject, assetSlots } from './Render.js';
-import { createGeometryCompile } from './GeometryCompile.js';
+import { VEHICLE_PALETTE } from '../Shared/Studio/Render.js';
 import { createComponentViewer } from './ComponentViewer.js';
 
 const assets = new Map();
-const iconRenderer = new IconRenderer();
-const sdfWorker = workerChannel(new URL('./Engine/SdfWorker.js', import.meta.url));
-const lodWorker = workerChannel(new URL('./Engine/LodWorker.js', import.meta.url));
-
-const ctx = {
-  sdfWorker, lodWorker,
-  async renderIcon(asset) {
-    const s = asset.settings.icon;
-    const channel = s.shading === 'normals' ? 'normals' : 'lit';
-    const overrides = s.shading === 'clay' ? Object.fromEntries(assetSlots(asset).map((x) => [x.family, '#c3c7cf'])) : {};
-    return iconRenderer.render(meshObject(asset, { channel, overrides, castShadow: false }), s);
-  },
-};
+const { ctx, iconRenderer } = createCompileContext();
 
 // ------------------------------------------------------------------------------------------------- import paths
-const compile = createGeometryCompile({
-  ctx,
+// Sessions run in the Geometry Compiler page; it hands back a compiled copy of the asset (or a cancel).
+const compiler = hostCompiler($('Compile'), {
   onFinish(asset, { cancelled, open, existing }) {
-    if (cancelled) {
-      if (!existing && assets.has(asset.id) && !asset.out.geometry) assets.delete(asset.id);
-      if (!existing && !asset.compiledAt) assets.delete(asset.id);
-      viewer.refresh();
-      return;
-    }
+    if (cancelled) { viewer.refresh(); return; }
     assets.set(asset.id, asset);
     if (existing) { viewer.refresh(); toast(`${asset.name} recompiled · placed meshes updated`); return; }
+    viewer.refresh();
     if (open) {
       const bp = createBlueprintFor(asset);
       viewer.open(bp);
       toast(`${asset.name} compiled · opened as ${bp.name}`);
     }
   },
+  onError(error) { $('Compile').hidden = true; toast(`Geometry Compiler: ${error.message || error}`); },
 });
 
 function openCompile(asset, options = {}) {
-  if (!assets.has(asset.id)) assets.set(asset.id, asset);
-  compile.open(asset, options);
+  compiler.open(asset, options);
 }
 
 async function importFiles(files) {
   for (const file of files) {
-    const fmtInfo = formatOf(file.name);
-    if (!fmtInfo) { toast(`Unknown file type: ${file.name}`); continue; }
     try {
-      const raw = readGeometry(file.name, await file.arrayBuffer());
-      const name = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-      const settings = fmtInfo.ext === 'facet' ? { source: { up: 'z' } } : {};
-      const asset = createAsset({ name, fileName: file.name, fileSize: file.size, raw, settings, palette: fmtInfo.ext === 'facet' ? VEHICLE_PALETTE : null });
-      openCompile(asset);
+      openCompile(await assetFromFile(file));
       return; // one compile session at a time; the rest can be imported after
     } catch (error) {
       toast(String(error.message || error));
@@ -88,23 +68,7 @@ function createBlueprintFor(asset) {
 window.FrontierComponentViewer = { createBlueprintFor, assets };
 
 // ------------------------------------------------------------------------------------------------------ samples
-const samples = [
-  ...SOURCE_PRESETS.map((p) => ({
-    label: p.label, note: `${p.note} · Frontier-1 preset`, icon: p.id === 'terrain' ? 'grid' : 'sparkle',
-    open() {
-      const src = constructSource(p.id, 24000);
-      const raw = { positions: src.positions, indices: src.indices, families: null, format: 'Procedural', notes: [`Frontier-1 Cluster LOD preset “${p.label}” (24k triangle budget)`] };
-      openCompile(createAsset({ name: p.label, fileName: `${p.id}.preset`, raw, settings: { meta: { category: 'Prop', tags: 'preset, frontier-1' } } }));
-    },
-  })),
-  {
-    label: 'ControlVehicle Body (FCT1)', note: 'Vehicle Lab mesh · Z-up · re-import', icon: 'vehicle',
-    async open() {
-      const raw = readFacet(await (await fetch('./Models/ControlVehicleBody.facet')).arrayBuffer());
-      openCompile(createAsset({ name: 'ControlVehicle Body Copy', fileName: 'ControlVehicleBody.facet', fileSize: 64736, raw, palette: VEHICLE_PALETTE, settings: { source: { up: 'z' }, geometry: { centre: 'none' }, meta: { category: 'Vehicle part' } } }));
-    },
-  },
-];
+const samples = COMPILE_SAMPLES.map((s) => ({ ...s, async open() { openCompile(await s.source()); } }));
 
 // ---------------------------------------------------------------------------------------------- vehicle sample
 const VEHICLE_PARTS = [
@@ -150,7 +114,7 @@ async function loadVehicle(report) {
   let i = 0;
   for (const part of VEHICLE_PARTS) {
     report(`Reading ${part.file}`, i / VEHICLE_PARTS.length);
-    const bytes = part.build ? null : await (await fetch(`./Models/${part.file}`)).arrayBuffer();
+    const bytes = part.build ? null : await fetchModel(part.file);
     const raw = part.build ? part.build() : readFacet(bytes);
     const asset = createAsset({
       name: part.name, fileName: part.file || `${part.key}.procedural`, fileSize: bytes ? bytes.byteLength : 0, raw, origin: 'sample', palette: VEHICLE_PALETTE,

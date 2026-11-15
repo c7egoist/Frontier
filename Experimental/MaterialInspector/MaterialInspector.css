@@ -1,8 +1,8 @@
 /* Material Inspector — Project Zero visual language (charcoal card on a dock, pill sliders, white active segments, green
    toggles, amber focus) shared with the Component Viewer and the Fracture Editor. */
-@font-face { font-family: "DM Sans"; font-weight: 300; src: url("../ComponentViewer/Fonts/dm-sans-latin-300-normal.woff2") format("woff2"); font-display: swap; }
-@font-face { font-family: "DM Sans"; font-weight: 400; src: url("../ComponentViewer/Fonts/dm-sans-latin-400-normal.woff2") format("woff2"); font-display: swap; }
-@font-face { font-family: "DM Sans"; font-weight: 500; src: url("../ComponentViewer/Fonts/dm-sans-latin-500-normal.woff2") format("woff2"); font-display: swap; }
+@font-face { font-family: "DM Sans"; font-weight: 300; src: url("../Shared/Studio/Fonts/dm-sans-latin-300-normal.woff2") format("woff2"); font-display: swap; }
+@font-face { font-family: "DM Sans"; font-weight: 400; src: url("../Shared/Studio/Fonts/dm-sans-latin-400-normal.woff2") format("woff2"); font-display: swap; }
+@font-face { font-family: "DM Sans"; font-weight: 500; src: url("../Shared/Studio/Fonts/dm-sans-latin-500-normal.woff2") format("woff2"); font-display: swap; }
 
 :root { --amber: #ffb238; --green: #46d267; --blue: #4d9bff; --red: #ff6b5e; --dock: #121212; --seam: #262626; }
 * { box-sizing: border-box; }
