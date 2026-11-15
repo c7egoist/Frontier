@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0b0d10" />
+  <title>Frontier · Component Viewer</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body data-workspace="prep">
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-cluster">
+        <button class="frontier-mark" aria-label="Frontier home">F</button>
+        <div class="crumbs"><span>FRONTIER</span><i>/</i><span>ASSET STUDIO</span><i>/</i><b id="crumbAsset">CONTROL VEHICLE</b></div>
+      </div>
+
+      <nav class="workspace-tabs" aria-label="Workspace">
+        <button class="workspace-tab active" data-workspace-target="prep"><span class="tab-dot"></span>Asset Prep</button>
+        <button class="workspace-tab" data-workspace-target="viewer"><span class="tab-dot"></span>Component Viewer</button>
+      </nav>
+
+      <div class="top-actions">
+        <span class="engine-status"><i></i>Local session</span>
+        <button class="icon-button help-button" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
+        <button class="avatar" aria-label="Open profile">MK</button>
+      </div>
+    </header>
+
+    <aside class="left-rail" aria-label="Asset navigation">
+      <div class="project-switcher">
+        <span class="project-cube">◇</span>
+        <div><b>Project Zero</b><small>Sandbox / Main</small></div>
+        <span class="chevron">⌄</span>
+      </div>
+
+      <div class="rail-scroll">
+        <button class="import-button" id="openImport"><span>＋</span> Import asset <kbd>I</kbd></button>
+
+        <section class="rail-section asset-section">
+          <div class="section-label"><span>ASSET</span><button class="tiny-plus" aria-label="Add asset">＋</button></div>
+          <button class="asset-row selected" id="assetRow">
+            <span class="asset-thumb vehicle-thumb"><svg viewBox="0 0 48 34" aria-hidden="true"><path d="M6 23 10 16 20 10h13l7 7 3 8v3H5z"/><path d="M21 11v8h17l-5-6z"/><circle cx="14" cy="26" r="5"/><circle cx="35" cy="26" r="5"/></svg></span>
+            <span class="asset-row-copy"><b id="assetNameRail">ControlVehicle</b><small id="assetMetaRail">Mesh · 124,812 tris</small></span>
+            <span class="asset-ready-dot" title="Ready"></span>
+          </button>
+        </section>
+
+        <section class="rail-section prep-nav" data-rail-mode="prep">
+          <div class="section-label"><span>PREP PIPELINE</span><span class="stage-count" id="stageCount">4 / 4</span></div>
+          <button class="pipeline-nav selected" data-jump="source"><span class="stage-icon import-icon">↓</span><span>Source</span><small>01</small></button>
+          <button class="pipeline-nav" data-jump="geometry"><span class="stage-icon geometry-icon">◇</span><span>Geometry compiler</span><small>02</small></button>
+          <button class="pipeline-nav" data-jump="uv"><span class="stage-icon uv-icon">⌗</span><span>UV workspace</span><small>03</small></button>
+          <button class="pipeline-nav" data-jump="bake"><span class="stage-icon bake-icon">✦</span><span>Icon &amp; SDF bake</span><small>04</small></button>
+        </section>
+
+        <section class="rail-section component-nav" data-rail-mode="viewer" hidden>
+          <div class="section-label"><span>COMPONENTS</span><button class="tiny-plus" id="addComponent" aria-label="Add component">＋</button></div>
+          <button class="component-row selected" data-component="VehicleRoot"><span class="component-glyph root-glyph">◇</span><span>VehicleRoot</span><span class="eye">◉</span></button>
+          <div class="component-branch">
+            <button class="component-row" data-component="BodyMesh"><span class="component-glyph mesh-glyph">◆</span><span>BodyMesh</span><span class="eye">◉</span></button>
+            <button class="component-row" data-component="WheelRig"><span class="component-glyph rig-glyph">◎</span><span>WheelRig</span><span class="eye">◉</span></button>
+            <button class="component-row" data-component="DriveController"><span class="component-glyph logic-glyph">▣</span><span>DriveController</span><span class="eye">◉</span></button>
+            <button class="component-row" data-component="IconAnchor"><span class="component-glyph camera-glyph">◉</span><span>IconAnchor</span><span class="eye">◉</span></button>
+          </div>
+        </section>
+
+        <section class="rail-section collection-section">
+          <div class="section-label"><span>COLLECTIONS</span><button class="tiny-plus" aria-label="Add collection">＋</button></div>
+          <button class="collection-row"><span class="folder-icon">□</span> Recently baked <small>12</small></button>
+          <button class="collection-row"><span class="folder-icon">□</span> Vehicle library <small>08</small></button>
+        </section>
+      </div>
+
+      <footer class="rail-footer"><span class="sync-mark">↻</span><span>All changes saved locally</span></footer>
+    </aside>
+
+    <main class="canvas-area">
+      <section class="prep-workspace workspace-view" data-view="prep">
+        <div class="document-strip">
+          <div class="document-tab"><span class="file-mark">◇</span><span id="documentTitle">ControlVehicle.asset</span><button aria-label="Close document">×</button></div>
+          <div class="document-context"><span class="context-live"><i></i>Artifact ready</span><span>v1.4</span></div>
+        </div>
+
+        <div class="viewport-toolbar">
+          <div class="tool-set">
+            <button class="viewport-tool selected" data-camera="orbit"><span>◌</span> Orbit</button>
+            <button class="viewport-tool" data-camera="inspect"><span>⌖</span> Inspect</button>
+            <button class="viewport-tool" data-camera="wire"><span>╱</span> Wireframe</button>
+          </div>
+          <div class="tool-set centered-tools">
+            <button class="view-chip active">Perspective</button>
+            <button class="view-chip">Lit</button>
+          </div>
+          <div class="tool-set">
+            <button class="viewport-tool icon-only" id="fitAsset" title="Frame asset">⊙</button>
+            <button class="viewport-tool icon-only" id="toggleGrid" title="Toggle grid">#</button>
+            <button class="viewport-tool icon-only" title="Viewport settings">⋯</button>
+          </div>
+        </div>
+
+        <div class="asset-viewport" id="assetViewport">
+          <div class="viewport-grid"></div>
+          <div class="viewport-glow"></div>
+          <div class="axis-widget" aria-label="Viewport axes"><span class="axis-z">Z</span><span class="axis-y">Y</span><span class="axis-x">X</span><i></i></div>
+          <div class="viewport-label top-left"><b>GEOMETRY PREVIEW</b><span>LOD 0 · 124,812 triangles</span></div>
+          <div class="viewport-label top-right"><b>2.91 M</b><span>Bounds diagonal</span></div>
+
+          <svg class="hero-vehicle" viewBox="0 0 900 560" role="img" aria-label="Stylized 3D ControlVehicle preview">
+            <defs>
+              <linearGradient id="bodyPaint" x1="0" y1="0" x2="0.86" y2="1"><stop stop-color="#7effcf"/><stop offset="0.42" stop-color="#18b789"/><stop offset="0.8" stop-color="#066454"/><stop offset="1" stop-color="#033932"/></linearGradient>
+              <linearGradient id="bodySide" x1="0" y1=".1" x2="1" y2=".9"><stop stop-color="#0b8a70"/><stop offset=".42" stop-color="#075a50"/><stop offset="1" stop-color="#022f2d"/></linearGradient>
+              <linearGradient id="glass" x1=".1" y1="0" x2=".9" y2="1"><stop stop-color="#bdf5f4" stop-opacity=".92"/><stop offset=".28" stop-color="#51939b" stop-opacity=".75"/><stop offset=".74" stop-color="#193a47" stop-opacity=".94"/><stop offset="1" stop-color="#0d1c2a"/></linearGradient>
+              <linearGradient id="wheel" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#65737a"/><stop offset=".28" stop-color="#18242c"/><stop offset=".63" stop-color="#080e14"/><stop offset="1" stop-color="#384b50"/></linearGradient>
+              <radialGradient id="rim"><stop stop-color="#e1f7eb"/><stop offset=".22" stop-color="#7cc5b4"/><stop offset=".52" stop-color="#31565e"/><stop offset="1" stop-color="#101c26"/></radialGradient>
+              <filter id="vehicleShadow" x="-30%" y="-50%" width="160%" height="200%"><feGaussianBlur stdDeviation="22"/></filter>
+              <filter id="vehicleGlow" x="-30%" y="-50%" width="160%" height="200%"><feGaussianBlur stdDeviation="9"/></filter>
+              <clipPath id="vehicleClip"><path d="M137 350 164 259 283 199 568 181 716 229 789 326 763 407 661 449 260 452 161 415z"/></clipPath>
+            </defs>
+            <ellipse class="vehicle-shadow" cx="445" cy="442" rx="290" ry="38" fill="#000" opacity=".68" filter="url(#vehicleShadow)"/>
+            <ellipse cx="463" cy="435" rx="237" ry="11" fill="#48ecc1" opacity=".32" filter="url(#vehicleGlow)"/>
+            <path d="M137 350 164 259 283 199 568 181 716 229 789 326 763 407 661 449 260 452 161 415z" fill="url(#bodyPaint)" stroke="#91f4d0" stroke-opacity=".55" stroke-width="2"/>
+            <path d="M137 350 164 259 283 199 568 181 716 229 656 273 334 284 175 368z" fill="#3fe4b1" opacity=".65"/>
+            <path d="M175 368 334 284 656 273 789 326 763 407 661 449 260 452 161 415z" fill="url(#bodySide)"/>
+            <path d="M274 207 567 190 687 232 646 268 338 278 190 258z" fill="url(#glass)" stroke="#c5ffff" stroke-opacity=".56" stroke-width="2"/>
+            <path d="M369 203 380 276M523 193 538 271M275 210 338 278" stroke="#b9f6e7" stroke-opacity=".48" stroke-width="3"/>
+            <path d="M161 415 260 452 661 449 763 407 735 425 653 472 266 476 177 444z" fill="#012d2a"/>
+            <path d="M148 349 186 338 205 356 169 372z" fill="#e9fff2"/><path d="M750 316 779 329 759 350 724 343z" fill="#eafff1"/>
+            <path d="M150 355 183 347" stroke="#b9fff0" stroke-width="5" opacity=".95" filter="url(#vehicleGlow)"/><path d="M741 332 768 335" stroke="#b9fff0" stroke-width="5" opacity=".95" filter="url(#vehicleGlow)"/>
+            <path d="M209 350 300 335 565 328 719 348" fill="none" stroke="#8cf4d2" stroke-opacity=".45" stroke-width="2"/>
+            <path d="M315 287 298 348M622 275 651 338" stroke="#8cf4d2" stroke-opacity=".28" stroke-width="2"/>
+            <g class="wheel wheel-back"><circle cx="254" cy="411" r="66" fill="url(#wheel)" stroke="#0a1319" stroke-width="12"/><circle cx="254" cy="411" r="39" fill="url(#rim)" stroke="#8edacb" stroke-opacity=".62" stroke-width="2"/><circle cx="254" cy="411" r="13" fill="#0b2930"/><path d="m254 374 0 74m-37-37h74m-63-26 52 52m0-52-52 52" stroke="#baf5df" stroke-opacity=".55" stroke-width="4"/></g>
+            <g class="wheel wheel-front"><circle cx="669" cy="403" r="72" fill="url(#wheel)" stroke="#0a1319" stroke-width="12"/><circle cx="669" cy="403" r="43" fill="url(#rim)" stroke="#8edacb" stroke-opacity=".62" stroke-width="2"/><circle cx="669" cy="403" r="14" fill="#0b2930"/><path d="m669 363 0 80m-40-40h80m-68-28 56 56m0-56-56 56" stroke="#baf5df" stroke-opacity=".55" stroke-width="4"/></g>
+            <path d="M219 360c-28 7-39 34-37 57M699 349c34 7 48 34 43 63" fill="none" stroke="#61d8b5" stroke-opacity=".76" stroke-width="8"/>
+            <g clip-path="url(#vehicleClip)" opacity=".24" stroke="#d1fff5" stroke-width="1"><path d="M98 408 762 125M155 488 819 205M259 491 816 252M152 280 611 476M227 205 697 452"/></g>
+            <path d="M286 199 568 181 716 229" fill="none" stroke="#d6fff1" stroke-opacity=".84" stroke-width="2"/>
+          </svg>
+
+          <div class="vehicle-callout callout-body"><i></i><span>BodyMesh</span><b>82,416 tri</b></div>
+          <div class="vehicle-callout callout-wheel"><i></i><span>WheelRig</span><b>4 components</b></div>
+          <div class="viewport-bottom-readout"><span><i class="dot cyan"></i>Compilable source</span><span>m <b>0.00</b> · cm</span></div>
+        </div>
+
+        <div class="compile-ribbon" id="compileRibbon">
+          <div class="ribbon-copy"><span class="ribbon-index">02</span><div><b>Geometry compiler</b><small id="compileNote">Source is normalized and ready to compile.</small></div></div>
+          <div class="compile-actions"><span class="compile-stats" id="compileStats">124,812 tris · 0 warnings</span><button class="secondary-action" id="resetCompile">Reset</button><button class="primary-action" id="compileGeometry"><span>✦</span> Compile geometry</button></div>
+        </div>
+      </section>
+
+      <section class="viewer-workspace workspace-view" data-view="viewer" hidden>
+        <div class="document-strip">
+          <div class="document-tab"><span class="file-mark blueprint-mark">▣</span><span>ControlVehicle.component</span><span class="unsaved-dot"></span><button aria-label="Close document">×</button></div>
+          <div class="document-context"><span>Component class</span><span>v1.4</span></div>
+        </div>
+        <div class="viewer-toolbar">
+          <div class="tool-set"><button class="viewport-tool selected" data-preview="component"><span>◌</span> Component preview</button><button class="viewport-tool" data-preview="class"><span>▦</span> Class graph</button></div>
+          <div class="tool-set"><button class="viewport-tool" id="compileClass"><span>▶</span> Compile class</button><button class="primary-compact" id="saveComponent">Save</button></div>
+        </div>
+        <div class="viewer-split">
+          <section class="component-preview-pane">
+            <div class="pane-heading"><div><b>COMPONENT PREVIEW</b><span>ControlVehicle · assembled asset</span></div><div class="preview-toggles"><button class="mini-toggle active">Lit</button><button class="mini-toggle">Collision</button></div></div>
+            <div class="component-stage">
+              <div class="preview-grid"></div><div class="preview-floor"></div>
+              <svg class="component-car" viewBox="0 0 900 560" aria-label="ControlVehicle component preview" role="img">
+                <use href="#"></use>
+                <defs><linearGradient id="miniBody" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#9ef9d8"/><stop offset=".4" stop-color="#26ae87"/><stop offset="1" stop-color="#043f3b"/></linearGradient><linearGradient id="miniGlass" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#bdf5f4"/><stop offset="1" stop-color="#17304a"/></linearGradient><radialGradient id="miniRim"><stop stop-color="#e6fbef"/><stop offset=".35" stop-color="#6ec2ae"/><stop offset="1" stop-color="#152b35"/></radialGradient></defs>
+                <ellipse cx="444" cy="450" rx="262" ry="30" fill="#000" opacity=".52"/>
+                <path d="M152 350 179 265 292 210 563 191 708 235 780 327 754 406 652 445 265 448 175 414z" fill="url(#miniBody)" stroke="#b9fce2" stroke-opacity=".55" stroke-width="2"/>
+                <path d="M284 216 562 200 680 238 641 273 342 282 202 264z" fill="url(#miniGlass)" stroke="#c5ffff" stroke-opacity=".55" stroke-width="2"/>
+                <path d="M343 282 641 273 780 327 754 406 652 445 265 448 175 414 206 363z" fill="#07594f" opacity=".79"/>
+                <g><circle cx="260" cy="407" r="61" fill="#111c22" stroke="#091015" stroke-width="11"/><circle cx="260" cy="407" r="37" fill="url(#miniRim)"/><circle cx="260" cy="407" r="10" fill="#0c2930"/><path d="m260 373v68m-34-34h68m-58-24 48 48m0-48-48 48" stroke="#b9f5df" stroke-width="3" opacity=".64"/></g>
+                <g><circle cx="662" cy="401" r="66" fill="#111c22" stroke="#091015" stroke-width="11"/><circle cx="662" cy="401" r="40" fill="url(#miniRim)"/><circle cx="662" cy="401" r="11" fill="#0c2930"/><path d="m662 364v74m-37-37h74m-63-26 52 52m0-52-52 52" stroke="#b9f5df" stroke-width="3" opacity=".64"/></g>
+                <path d="M178 413 264 448 652 445 754 406 728 426 646 465 268 468 190 440z" fill="#032e2b"/>
+                <path d="M212 353 299 339 565 329 718 348" fill="none" stroke="#a5f8dc" stroke-opacity=".4" stroke-width="2"/>
+              </svg>
+              <div class="selected-component-outline" id="previewSelection"><span>VehicleRoot</span></div>
+              <div class="scene-badge"><i></i>Live preview</div>
+              <div class="component-axes"><b>Z</b><i></i><span>X</span></div>
+            </div>
+          </section>
+
+          <section class="blueprint-pane">
+            <div class="pane-heading"><div><b>CLASS GRAPH</b><span>Assembly flow · inherited components shown in muted tone</span></div><button class="graph-fit" id="fitGraph" title="Fit graph">⊙</button></div>
+            <div class="graph-stage" id="graphStage">
+              <div class="graph-grid"></div>
+              <svg class="graph-links" viewBox="0 0 1000 260" preserveAspectRatio="none" aria-hidden="true"><path d="M232 117 C 292 117, 302 64, 367 64"/><path d="M232 132 C 298 132, 302 132, 367 132"/><path d="M232 148 C 294 148, 311 204, 367 204"/><path d="M582 64 C 647 64, 653 91, 720 91"/><path d="M582 132 C 647 132, 653 122, 720 122"/><path d="M582 204 C 648 204, 654 153, 720 153"/></svg>
+              <button class="graph-node root-node component-graph-node" data-component="VehicleRoot"><span class="node-flag">ROOT</span><b>VehicleRoot</b><small>Scene component</small><i class="node-port port-a"></i><i class="node-port port-b"></i><i class="node-port port-c"></i></button>
+              <button class="graph-node mesh-node component-graph-node" data-component="BodyMesh"><span class="node-flag">MESH</span><b>BodyMesh</b><small>ControlVehicle.fmesh</small><i class="node-port left"></i><i class="node-port right"></i></button>
+              <button class="graph-node rig-node component-graph-node" data-component="WheelRig"><span class="node-flag">RIG</span><b>WheelRig</b><small>4 wheel instances</small><i class="node-port left"></i><i class="node-port right"></i></button>
+              <button class="graph-node controller-node component-graph-node" data-component="DriveController"><span class="node-flag">LOGIC</span><b>DriveController</b><small>Vehicle input map</small><i class="node-port left"></i><i class="node-port right"></i></button>
+              <button class="graph-node output-node"><span class="node-flag">CLASS</span><b>Vehicle runtime</b><small>Ready for scene</small><i class="node-port left a"></i><i class="node-port left b"></i><i class="node-port left c"></i></button>
+              <div class="graph-legend"><span><i class="legend-mesh"></i>Geometry</span><span><i class="legend-rig"></i>Rig</span><span><i class="legend-logic"></i>Logic</span></div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <aside class="right-inspector" aria-label="Inspector">
+      <div class="inspector-tabs"><button class="inspector-tab active">Inspector</button><button class="inspector-tab">Details</button></div>
+      <div class="inspector-scroll" data-inspector="prep">
+        <div class="inspector-crumb"><span>ASSET</span><i>/</i><b>CONTROL VEHICLE</b></div>
+        <div class="inspector-heading"><div class="inspector-asset-mark"><svg viewBox="0 0 48 34" aria-hidden="true"><path d="M6 23 10 16 20 10h13l7 7 3 8v3H5z"/><circle cx="14" cy="26" r="5"/><circle cx="35" cy="26" r="5"/></svg></div><div><h1 id="inspectorAssetName">ControlVehicle</h1><p>Static mesh · imported object</p></div><button class="more-button" aria-label="More asset options">⋯</button></div>
+
+        <section class="inspector-section" id="source">
+          <div class="section-heading"><span>01</span><h2>Source</h2><button class="section-link" id="changeSource">Change</button></div>
+          <div class="source-card"><span class="source-file-icon">◇</span><div><b id="sourceFilename">control_vehicle.fbx</b><small id="sourceSubline">FBX · 18.4 MB · imported today</small></div><span class="source-ok">✓</span></div>
+          <div class="stats-pair"><div><span>Vertices</span><b id="vertexCount">62,448</b></div><div><span>Triangles</span><b id="triangleCount">124,812</b></div></div>
+        </section>
+
+        <section class="inspector-section" id="geometry">
+          <div class="section-heading"><span>02</span><h2>Geometry compiler</h2><button class="collapse-toggle" aria-label="Collapse geometry settings">⌃</button></div>
+          <div class="setting-row"><label>Preset</label><button class="select-control">Production <span>⌄</span></button></div>
+          <div class="setting-row stack"><div><label>Target triangle budget</label><output id="budgetOutput">125k</output></div><input type="range" id="triangleBudget" min="50" max="300" value="125" /></div>
+          <div class="setting-row switch-row"><div><label>Generate collision</label><small>Convex hulls</small></div><button class="switch is-on" aria-label="Toggle collision generation"><i></i></button></div>
+          <div class="compile-summary"><span class="status-indicator ready" id="compileIndicator"></span><div><b id="compileState">Ready to compile</b><small id="compileDetail">Bounds, normals &amp; hierarchy check passed</small></div></div>
+        </section>
+
+        <section class="inspector-section" id="uv">
+          <div class="section-heading"><span>03</span><h2>UV workspace</h2><button class="section-link" id="openUv">Open</button></div>
+          <div class="uv-card"><div class="uv-map"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><b>18 islands · Channel 0</b><small>92.6% utilization · 4 px padding</small></div></div>
+          <div class="setting-row switch-row"><div><label>Normalize texel density</label><small>2,048 px / meter</small></div><button class="switch is-on" aria-label="Toggle normalized texel density"><i></i></button></div>
+        </section>
+
+        <section class="inspector-section" id="bake">
+          <div class="section-heading"><span>04</span><h2>Icon &amp; SDF bake</h2><button class="section-link" id="focusBake">Configure</button></div>
+          <div class="bake-card"><div class="bake-preview"><span class="sdf-orb"></span><span class="tiny-vehicle">◆</span></div><div class="bake-content"><div><b id="bakeResult">No bake artifact</b><small id="bakeNote">Capture icon and signed distance field.</small></div><div class="bake-tags"><span>256 px icon</span><span>64³ SDF</span></div></div></div>
+          <button class="wide-action" id="bakeAsset"><span>✦</span> Bake icon &amp; SDF</button>
+          <div class="bake-progress" id="bakeProgress" hidden><i></i></div>
+        </section>
+      </div>
+
+      <div class="inspector-scroll" data-inspector="viewer" hidden>
+        <div class="inspector-crumb"><span>COMPONENT CLASS</span><i>/</i><b id="componentCrumb">VEHICLE ROOT</b></div>
+        <div class="component-inspector-title"><span class="large-component-icon" id="largeComponentIcon">◇</span><div><h1 id="componentTitle">VehicleRoot</h1><p id="componentType">Scene component · root transform</p></div><button class="more-button" aria-label="More component options">⋯</button></div>
+        <section class="inspector-section component-overview"><div class="section-heading"><span>COMPONENT</span><h2>Overview</h2></div><p id="componentDescription">Owns the assembled vehicle and defines its transform in a scene.</p><div class="component-status"><span><i></i>Active in preview</span><span id="componentSummary">4 children</span></div></section>
+        <section class="inspector-section"><div class="section-heading"><span>TRANSFORM</span><h2>Local transform</h2><button class="section-link" id="resetTransform">Reset</button></div><div class="transform-table"><label>Location <span><input value="0.00" aria-label="X Location" /><input value="0.00" aria-label="Y Location" /><input value="0.00" aria-label="Z Location" /></span></label><label>Rotation <span><input value="0.00" aria-label="X Rotation" /><input value="0.00" aria-label="Y Rotation" /><input value="0.00" aria-label="Z Rotation" /></span></label><label>Scale <span><input value="1.00" aria-label="X Scale" /><input value="1.00" aria-label="Y Scale" /><input value="1.00" aria-label="Z Scale" /></span></label></div></section>
+        <section class="inspector-section"><div class="section-heading"><span>ASSEMBLY</span><h2>Component settings</h2></div><div class="viewer-setting" id="viewerSettingOne"><label>Mobility</label><button class="select-control">Static <span>⌄</span></button></div><div class="viewer-setting switch-row"><div><label>Visible</label><small>Show in viewport and render</small></div><button class="switch is-on" aria-label="Toggle component visibility"><i></i></button></div><div class="viewer-setting switch-row"><div><label>Inherit transform</label><small>Follow parent component</small></div><button class="switch is-on" aria-label="Toggle transform inheritance"><i></i></button></div></section>
+        <section class="inspector-section"><div class="section-heading"><span>ARTIFACT</span><h2>Assigned asset</h2></div><div class="assigned-asset"><span class="asset-thumb vehicle-thumb"><svg viewBox="0 0 48 34" aria-hidden="true"><path d="M6 23 10 16 20 10h13l7 7 3 8v3H5z"/><circle cx="14" cy="26" r="5"/><circle cx="35" cy="26" r="5"/></svg></span><div><b id="assignedAsset">ControlVehicle.asset</b><small id="assignedAssetDetail">Compiled geometry · v1.4</small></div></div></section>
+      </div>
+      <footer class="inspector-footer"><span>⌘ S</span><span>Save component</span></footer>
+    </aside>
+  </div>
+
+  <div class="import-modal-backdrop" id="importModal" hidden>
+    <section class="import-modal" role="dialog" aria-modal="true" aria-labelledby="importTitle">
+      <button class="modal-close" id="closeImport" aria-label="Close import dialog">×</button>
+      <div class="modal-kicker"><span>NEW ASSET</span><i></i><span>STEP 01 OF 04</span></div>
+      <h2 id="importTitle">Bring an object into Frontier.</h2>
+      <p>Every imported object enters a non-destructive pipeline: geometry compiler, UV workspace, then icon and SDF bake.</p>
+      <label class="drop-zone" id="dropZone" for="assetFile"><input id="assetFile" type="file" accept=".fbx,.obj,.gltf,.glb,.usd,.usdz,.stl,.ply" hidden /><span class="drop-icon">↓</span><b>Drop an asset here</b><small>FBX, OBJ, glTF, USD, STL or PLY · up to 2 GB</small><span class="browse-file">Browse files</span></label>
+      <div class="file-picked" id="filePicked" hidden><span class="source-file-icon">◇</span><div><b id="pickedFileName">—</b><small id="pickedFileInfo">Ready to import</small></div><button id="clearFile" aria-label="Remove selected file">×</button></div>
+      <div class="modal-divider"><span>OR START WITH A SOURCE</span></div>
+      <button class="sample-source" id="useSample"><span class="sample-vehicle"><svg viewBox="0 0 48 34" aria-hidden="true"><path d="M6 23 10 16 20 10h13l7 7 3 8v3H5z"/><circle cx="14" cy="26" r="5"/><circle cx="35" cy="26" r="5"/></svg></span><span><b>ControlVehicle</b><small>Preconfigured mesh · compile ready</small></span><span>→</span></button>
+      <footer><button class="secondary-action" id="cancelImport">Cancel</button><button class="primary-action" id="confirmImport" disabled>Import asset <span>→</span></button></footer>
+    </section>
+  </div>
+
+  <div class="uv-overlay" id="uvOverlay" hidden>
+    <section class="uv-window" role="dialog" aria-modal="true" aria-labelledby="uvTitle">
+      <header><div><span class="file-mark">⌗</span><div><b id="uvTitle">UV Workspace</b><small id="uvAssetName">ControlVehicle · Channel 0</small></div></div><div class="uv-toolbar"><button class="view-chip active">Islands</button><button class="view-chip">Seams</button><button class="view-chip">Checker</button><button class="modal-close" id="closeUv" aria-label="Close UV Workspace">×</button></div></header>
+      <div class="uv-body"><aside><b>ISLANDS <span>18</span></b><button class="island active"><i></i>Body shell <small>31.4%</small></button><button class="island"><i></i>Cabin glass <small>13.2%</small></button><button class="island"><i></i>Wheel instances <small>18.6%</small></button><button class="island"><i></i>Undercarriage <small>9.7%</small></button><div class="uv-info"><span>UTILIZATION</span><b>92.6%</b><small>4 px padding · 2K target</small></div></aside><div class="uv-canvas"><div class="uv-square"><span class="uv-shape shape-one"></span><span class="uv-shape shape-two"></span><span class="uv-shape shape-three"></span><span class="uv-shape shape-four"></span><span class="uv-shape shape-five"></span><span class="uv-shape shape-six"></span><span class="uv-shape shape-seven"></span><span class="uv-shape shape-eight"></span></div><span class="uv-corner top">V 1.0</span><span class="uv-corner bottom">V 0.0</span><span class="uv-corner left">U 0.0</span><span class="uv-corner right">U 1.0</span></div></div>
+      <footer><span>Drag island · <b>R</b> Rotate · <b>M</b> Mirror · <b>P</b> Pack</span><button class="primary-action" id="applyUv">Apply layout</button></footer>
+    </section>
+  </div>
+
+  <div class="shortcut-panel" id="shortcutPanel" hidden><b>Keyboard shortcuts</b><span><kbd>I</kbd> Import asset</span><span><kbd>G</kbd> Compile geometry</span><span><kbd>U</kbd> Open UV workspace</span><span><kbd>B</kbd> Bake icon &amp; SDF</span><span><kbd>⌘ S</kbd> Save component</span></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="./app.js"></script>
+</body>
+</html>
