@@ -37,6 +37,10 @@ This page attaches no host. **Bake** runs a clearly labelled dry run that walks 
   - These are orders of magnitude for comparing settings, not promises.
 - Settings persist in `localStorage["Frontier.BakeInspector.v1"]`. Preset files use `frontier.bake.v1`; request files use `frontier.bake-request.v1`.
 
+## Outliner
+
+The page also shows a **Queue outliner** (`BakeOutliner.js`) with this tree: study → map groups → maps. Its stat tiles are Queued and Unbaked. Each row has a status disc that queues or skips the map, and a badge that shows its queue position or its READY / STALE state. See the outliner notes in `../MaterialInspector/README.md`. Add `?outliner=0` to the URL to hide it.
+
 ## Checks
 
 ```

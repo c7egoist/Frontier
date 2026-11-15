@@ -6,13 +6,18 @@
 <title>Pattern / Stamp Studio · Frontier</title>
 <link rel="stylesheet" href="../MaterialInspector/MaterialInspector.css">
 <link rel="stylesheet" href="./ArtworkInspector.css">
+<link rel="stylesheet" href="../MaterialInspector/Outliner.css">
 </head>
 <body>
-<!-- One card, nothing else: TextureStudio's Pattern Studio / Stamp Studio inspector, redesigned in the Project Zero style.
-     ?mode=pattern (default) or ?mode=stamp.  The dock column only gives the card the width it has inside the editor. -->
+<!-- TextureStudio's Pattern Studio / Stamp Studio inspector, redesigned in the Project Zero style, with its layer outliner
+     docked beside it (one shared document through the inspector Hub).  ?mode=pattern (default) or ?mode=stamp;
+     ?outliner=0 shows the inspector card alone. -->
 <main class="mi-dock">
   <div id="Nav"></div>
-  <div id="Card" class="mi-host"></div>
+  <div class="mi-pair">
+    <aside id="Outliner" class="ol-host"></aside>
+    <div id="Card" class="mi-host"></div>
+  </div>
 </main>
 <script type="module">
   import { Mount } from "./ArtworkInspector.js";
@@ -20,7 +25,11 @@
   const Mode = new URLSearchParams(location.search).get("mode") === "stamp" ? "stamp" : "pattern";
   document.getElementById("Nav").outerHTML = DockNav(Mode);
   document.title = `${Mode === "stamp" ? "Stamp" : "Pattern"} Studio · Frontier`;
-  globalThis.ArtworkInspector = Mount(document.getElementById("Card"), { mode: Mode });
+  import { MountArtworkOutliner } from "./ArtworkOutliner.js";
+  const Docked = new URLSearchParams(location.search).get("outliner") !== "0";
+  globalThis.ArtworkInspector = Mount(document.getElementById("Card"), { mode: Mode, docked: Docked });
+  if (Docked) globalThis.ArtworkOutliner = MountArtworkOutliner(document.getElementById("Outliner"), globalThis.ArtworkInspector);
+  else document.getElementById("Outliner").remove();
 </script>
 </body>
 </html>

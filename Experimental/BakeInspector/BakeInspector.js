@@ -18,7 +18,10 @@ const S = {
   P: null, Open: null, Groups: {}, Folds: {}, Status: "", StatusTimer: 0,
   Run: null,      // { Progress, Text, Index, Total, Controller } while baking
   Result: null,   // { Fingerprint, Ms, Device, Maps, Dry, At }
+  Docked: false,  // an outliner card owns the map checklist (the card keeps only the open map's editor)
 };
+const Peers = new Set();   // outliner re-render hooks: Fn(Live)
+const Notify = (Live) => { for (const Fn of Peers) Fn(Live); };
 const H = History();
 let Root = null, Host = {};
 const Store = (() => { try { return globalThis.localStorage; } catch { return null; } })();
@@ -130,6 +133,13 @@ function MapGroups() {
   }).join("");
 }
 
+// With the outliner docked, the queue checklist lives there; the card shows only the map being inspected.
+function DockedMap() {
+  const M = S.Open && B.MAP[S.Open];
+  if (!M) return `<p class="mi-empty">Pick a map in the bake queue to see the settings that shape it.</p>`;
+  return MapRow(M);
+}
+
 function Source(Slot, Label) {
   const Src = S.P[Slot];
   return `<label class="bi-source ${Src ? "custom" : ""}" title="${Src ? `${Esc(Src.name)} · click to replace` : `Use a custom ${Label.toLowerCase()} mesh (.obj / .stl)`}">
@@ -196,7 +206,7 @@ function CardHtml() {
 
     <section class="mi-channels">
       <div class="mi-section-title"><h3>Maps</h3><small>${E.Maps} OF ${B.BAKE_MAP_CATALOG.length} QUEUED</small></div>
-      <div class="mi-list">${MapGroups()}</div>
+      <div class="mi-list">${S.Docked ? DockedMap() : MapGroups()}</div>
     </section>
 
     ${OutputFold()}
@@ -212,7 +222,7 @@ function CardHtml() {
   </article>`;
 }
 
-function Render() { Rebuild(Root, CardHtml(), ".bi-card"); }
+function Render() { Rebuild(Root, CardHtml(), ".bi-card"); Notify(false); }
 
 function RefreshLive() {
   const M = Root.querySelector("[data-metrics]");
@@ -223,6 +233,7 @@ function RefreshLive() {
     const Cost = Row.querySelector(".bi-cost");
     if (Cost) Cost.textContent = `${B.Bytes(C.Bytes)}${C.Rays ? ` · ${B.Count(C.Rays)} rays` : ""}`;
   }
+  Notify(true);
 }
 
 function UpdateProgress() {
@@ -235,6 +246,7 @@ function UpdateProgress() {
     Row.classList.toggle("running", At > -1 && At === S.Run.Index);
     Row.classList.toggle("done", At > -1 && At < S.Run.Index);
   }
+  Notify(true);
 }
 
 // ------------------------------------------------------------------------------------------------ bake
@@ -380,6 +392,7 @@ function OnKey(Event) {
 export function Mount(El, Options = {}) {
   Root = El;
   Host = Options;
+  S.Docked = !!Options.docked;
   let Stored = null;
   try { Stored = Store?.getItem(B.STORAGE_KEY); } catch { Stored = null; }
   try { S.P = Stored ? B.Normalise(JSON.parse(Stored)) : B.Create(); } catch { S.P = B.Create(); }
@@ -388,6 +401,15 @@ export function Mount(El, Options = {}) {
   Root.addEventListener("change", OnChange);
   Root.addEventListener("toggle", (E) => { const F = E.target.closest?.("[data-fold]"); if (F) S.Folds[F.dataset.fold] = F.open; }, true);
   document.addEventListener("keydown", OnKey);
+  if (S.Docked && !S.Open) S.Open = S.P.selected[0] || null;
   Render();
-  return { State: S, Render, Model: B, History: H, Bake: RunBake };
+  return Hub;
 }
+
+// What the outliner (or a host) drives the card through — edits go Apply → Render so undo and storage stay whole.
+const Hub = {
+  State: S, Model: B, History: H, Render, Apply, Settle, Flash, Step, Bake: RunBake, ResultState,
+  Cancel: () => S.Run?.Controller.abort(),
+  Subscribe(Fn) { Peers.add(Fn); return () => Peers.delete(Fn); },
+  OpenMap(Id) { S.Open = Id; Render(); Root.querySelector(`[data-fid="row:${CSS.escape(Id)}"]`)?.scrollIntoView?.({ block: "nearest" }); },
+};

@@ -1,0 +1,132 @@
+/* Outliner card — Project Zero's outliner (ProjectZeroEditor Editor.css · .outliner*) as a standalone card that docks beside
+   the Material, Pattern / Stamp and Map Baking cards.  Shared by all three. */
+
+/* ---------------------------------------------------------------- pair layout */
+.mi-pair { display: flex; align-items: flex-start; justify-content: center; gap: 14px; width: 100%; }
+.mi-pair > .mi-host { flex: 0 0 432px; width: 432px; min-width: 0; }
+.ol-host { flex: 0 0 316px; width: 316px; min-width: 0; position: sticky; top: 16px; max-height: calc(100vh - 32px); display: flex; }
+@media (max-width: 800px) { .mi-pair { flex-direction: column; align-items: center; } .mi-pair > .mi-host { flex-basis: auto; width: 100%; } .ol-host { position: static; flex-basis: auto; width: 100%; max-width: 432px; max-height: 560px; } }
+
+/* ---------------------------------------------------------------- card */
+.ol-card { width: 100%; min-width: 0; display: flex; flex-direction: column; min-height: 0; background: linear-gradient(135deg, #1e1e1e, #171717); border: 1px solid #2c2c2c; border-radius: 22px; box-shadow: 0 24px 60px #0008; overflow: hidden; }
+.ol-head { display: flex; align-items: baseline; gap: 10px; padding: 18px 14px 10px 18px; }
+.ol-head h1 { margin: 0; white-space: nowrap; font-size: 20px; font-weight: 300; letter-spacing: 1px; }
+.ol-head > small { color: #5c5c5c; font-size: 10px; letter-spacing: .4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ol-head-tools { margin-left: auto; display: flex; gap: 6px; align-self: center; }
+.ol-round { width: 29px; height: 29px; min-height: 29px; padding: 0; border-radius: 50%; background: #262626; border-color: #333; color: #ddd; }
+.ol-round:hover { background: #303030; }
+.ol-round.on { background: #e8e8e8; color: #111; }
+
+/* stats — two 64 px tiles, status disc + large number */
+.ol-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 14px 10px; }
+.ol-stat { height: 64px; border-radius: 20px; background: #191919; border: 1px solid #2c2c2c; display: grid; grid-template: "disc label" auto "disc value" auto / 30px 1fr; align-content: center; justify-items: start; column-gap: 8px; padding: 0 14px; text-align: left; }
+.ol-stat:hover { background: #1f1f1f; }
+.ol-stat:disabled { opacity: 1; cursor: default; background: #191919; }
+.ol-stat small { grid-area: label; color: #6a6a6a; font-size: 10px; letter-spacing: .5px; text-transform: uppercase; }
+.ol-stat strong { grid-area: value; font-size: 24px; font-weight: 300; line-height: 1.05; letter-spacing: .5px; font-variant-numeric: tabular-nums; }
+.ol-disc { grid-area: disc; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: #34c759; color: #062c11; }
+.ol-disc.muted { background: #2c2c2c; color: #8a8a8a; }
+.ol-disc.warn { background: var(--amber); color: #2a1b00; }
+
+/* search — 40 px pill + filter menu */
+.ol-search { display: flex; gap: 6px; padding: 0 14px 8px; }
+.ol-search label { flex: 1; min-width: 0; height: 40px; border-radius: 22px; background: #191919; border: 1px solid #2c2c2c; display: flex; align-items: center; gap: 8px; padding: 0 14px; color: #6b6b6b; }
+.ol-search label:focus-within { outline: 1px solid var(--amber); outline-offset: 0; }
+.ol-search input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: #e6e6e6; font-size: 12px; }
+.ol-search input::placeholder { color: #5c5c5c; }
+.ol-search input::-webkit-search-cancel-button { filter: invert(.6); }
+.ol-filter-wrap { position: relative; }
+.ol-filter { height: 40px; border-radius: 22px; background: #191919; border-color: #2c2c2c; font-size: 11px; color: #a8a8a8; padding: 0 12px; }
+.ol-filter > svg:last-child { transform: rotate(90deg); opacity: .6; }
+.ol-filter.active { color: #111; background: #e8e8e8; }
+.ol-menu { position: absolute; right: 0; top: 44px; z-index: 30; min-width: 186px; padding: 6px; border-radius: 16px; background: #1b1b1b; border: 1px solid #333; box-shadow: 0 18px 40px #000a; display: flex; flex-direction: column; gap: 2px; }
+.ol-menu button { justify-content: flex-start; background: none; border: 0; border-radius: 10px; min-height: 30px; font-size: 12px; color: #bababa; }
+.ol-menu button:hover { background: #262626; color: #fff; }
+.ol-menu button i { width: 16px; height: 16px; border-radius: 5px; border: 1px solid #3a3a3a; display: grid; place-items: center; font-style: normal; }
+.ol-menu button.on i { background: #34c759; border-color: #34c759; color: #062c11; }
+.ol-menu-clear { margin-top: 4px; border-top: 1px solid #2a2a2a !important; border-radius: 0 0 10px 10px !important; color: var(--amber) !important; }
+
+.ol-chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 14px 8px; }
+.ol-chips > button { min-height: 22px; padding: 2px 10px; border-radius: 11px; font-size: 10px; background: #2a2414; border-color: #4a3a17; color: var(--amber); }
+.ol-chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
+.ol-chip-row button { min-height: 24px; padding: 2px 10px; font-size: 10px; border-radius: 12px; background: #1b1b1b; border-color: #2c2c2c; color: #a8a8a8; }
+.ol-chip-row button:hover { color: #fff; background: #262626; }
+.ol-chip-row button.on { background: #e8e8e8; color: #111; }
+.ol-chip-row button i { width: 14px; height: 8px; border-radius: 4px; }
+
+/* ---------------------------------------------------------------- rows */
+.ol-rows { flex: 1; min-height: 120px; overflow-y: auto; padding: 4px 8px 10px; display: flex; flex-direction: column; gap: 1px; border-top: 1px solid #ffffff08; }
+.ol-empty { margin: 24px 0; text-align: center; color: #5c5c5c; font-size: 11px; }
+.ol-row { position: relative; flex: none; height: 39px; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 calc(4px + var(--depth, 0) * 13px); border-radius: 8px; border: 1px solid transparent; color: #bababa; cursor: default; user-select: none; outline: none; }
+.ol-row:hover { background: #1c1c1c; }
+.ol-row:focus-visible { border-color: #5a4a2a; }
+.ol-row.selected { background: #262626; border-color: #444; color: #f0f0f0; }
+.ol-row.selected::before { content: ""; position: absolute; left: -1px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--amber); }
+.ol-row.muted > :not(.ol-status):not(.ol-eye):not(.ol-tools) { opacity: .4; }
+.ol-row.kind-group .ol-name { color: #cfcfcf; }
+.ol-row.kind-root .ol-name, .ol-row.root .ol-name { font-weight: 400; color: #e8e8e8; }
+.ol-row.dragging { opacity: .35; }
+.ol-row.drop-before { box-shadow: inset 0 2px 0 var(--amber); }
+.ol-row.drop-after { box-shadow: inset 0 -2px 0 var(--amber); }
+.ol-row.drop-inside { background: #2a2414; border-color: #6b5222; }
+.ol-row[draggable="true"] { cursor: grab; }
+
+.ol-caret { flex: none; width: 16px; height: 16px; min-height: 16px; padding: 0; border: 0; border-radius: 5px; background: none; color: #6b6b6b; }
+.ol-caret:hover { background: #2a2a2a; color: #ddd; }
+.ol-caret svg { transition: transform .14s; }
+.ol-caret.open svg { transform: rotate(90deg); }
+.ol-caret.empty { visibility: hidden; }
+.ol-icon { flex: none; width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; color: #9a9a9a; background: #1d1d1d; overflow: hidden; }
+.ol-row.selected .ol-icon { color: var(--amber); background: #2a2414; }
+.ol-icon .mi-swatch { width: 24px; height: 24px; border-radius: 7px; margin: 0; }
+.ol-icon img, .ol-icon canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ol-identity { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.15; }
+.ol-name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ol-identity small { font-size: 9.5px; color: #626262; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .2px; }
+.ol-row.selected .ol-identity small { color: #8a8a8a; }
+.ol-rename { flex: 1; min-width: 0; height: 26px; border-radius: 8px; border: 1px solid var(--amber); background: #111; padding: 0 8px; font-size: 12px; outline: none; }
+
+.ol-badge { flex: none; font-size: 8px; letter-spacing: .8px; padding: 2px 6px; border-radius: 6px; background: #2a2414; color: var(--amber); }
+.ol-badge.blue { background: #13223a; color: var(--blue); }
+.ol-badge.green { background: #13291a; color: var(--green); }
+.ol-badge.grey { background: #222; color: #8a8a8a; }
+.ol-kind { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--k); box-shadow: 0 0 0 3px color-mix(in srgb, var(--k) 18%, transparent); }
+.ol-field-dot { width: 10px; height: 10px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ffd27a, #ffb238 60%, #6b4a10); }
+.ol-chip-swatch { width: 100%; height: 100%; display: block; }
+
+.ol-tools { display: none; gap: 1px; flex: none; }
+.ol-row:hover .ol-tools, .ol-row.selected .ol-tools, .ol-row:focus-within .ol-tools { display: flex; }
+.ol-tool { width: 20px; height: 20px; min-height: 20px; padding: 0; border: 0; border-radius: 6px; background: none; color: #7a7a7a; }
+.ol-tool:hover { background: #333; color: #fff; }
+.ol-tool:disabled { background: none; opacity: .25; }
+
+.ol-status { flex: none; width: 16px; height: 16px; min-height: 16px; padding: 0; border-radius: 50%; border: 1px solid #3a3a3a; background: #1a1a1a; color: #062c11; }
+.ol-status.on { background: #34c759; border-color: #34c759; }
+.ol-status:hover { border-color: #6a6a6a; }
+.ol-status.on:hover { background: #3fd866; }
+.ol-eye { flex: none; width: 22px; height: 22px; min-height: 22px; padding: 0; border: 0; border-radius: 6px; background: none; color: #7a7a7a; visibility: hidden; }
+.ol-row:hover .ol-eye, .ol-row.selected .ol-eye, .ol-eye.off { visibility: visible; }
+.ol-eye.off { color: #4a4a4a; }
+.ol-eye:hover { color: #fff; background: #2c2c2c; }
+
+/* ---------------------------------------------------------------- footer — 45 px readout strip */
+.ol-foot { flex: none; height: 45px; display: flex; align-items: center; gap: 0; padding: 0 16px; background: #151515; border-top: 1px solid #222; }
+.ol-foot > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ol-foot small { font-size: 7.5px; letter-spacing: 1px; text-transform: uppercase; color: #555; }
+.ol-foot b { font-size: 11px; font-weight: 400; color: #cfcfcf; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.ol-foot em { font-style: normal; color: #6a6a6a; font-size: 9px; }
+.ol-foot .tone-warn b { color: var(--amber); }
+.ol-foot .tone-good b { color: var(--green); }
+.mi-pair { max-width: 776px; }
+.ol-group-strip { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; width: 100%; height: 100%; }
+.ol-group-strip .mi-swatch { width: 100%; height: 100%; border-radius: 0; min-width: 0; }
+.ol-layer-chip { width: 100%; height: 100%; display: grid; place-items: center; background: color-mix(in srgb, var(--c) 26%, #161616); color: color-mix(in srgb, var(--c) 70%, #fff); box-shadow: inset 0 -3px 0 var(--c); }
+.ol-thumb { width: 100%; height: 100%; display: block; background: #111 center / cover; }
+.ol-lock { flex: none; color: #777; display: grid; place-items: center; }
+.ol-row.kind-folder .ol-icon { color: #d8b56a; }
+.ol-group-glyph { width: 100%; height: 100%; display: grid; place-items: center; color: var(--c); background: color-mix(in srgb, var(--c) 14%, #161616); }
+.ol-map-preview { width: 100%; height: 100%; display: block; }
+.ol-partial { flex: none; width: 10px; height: 2px; border-radius: 2px; background: #34c759; margin-right: -2px; }
+.ol-row.running { background: linear-gradient(90deg, #2a2414, transparent 70%); }
+.ol-row.running .ol-badge { animation: ol-pulse 1s ease-in-out infinite alternate; }
+@keyframes ol-pulse { from { opacity: .45; } to { opacity: 1; } }

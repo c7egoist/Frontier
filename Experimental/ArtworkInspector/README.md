@@ -39,6 +39,10 @@ Keyboard: ↑ / ↓ move between property rows. Esc closes popovers, then the op
 - Documents are stored per starter under `localStorage["Frontier.ArtworkInspector.v1:<mode>:<starter>"]` and sync live between windows. `?starter=<id>` opens a specific starter.
 - The thumbnail is the document's own SVG export, passed as a Blob URL. A 1 000-instance layer exports about 1 MB of SVG, too much to re-encode as a data URI on every render.
 
+## Outliner
+
+The page also shows a **Layers outliner** (`ArtworkOutliner.js`) with this tree: canvas → layers → modifiers. Its stat tiles are Visible and Modifiers. Rows have tools to reorder, duplicate, lock and hide, and you can rename a row inline or drag it to reorder. See the outliner notes in `../MaterialInspector/README.md`. Add `?outliner=0` to the URL to hide it.
+
 ## Checks
 
 ```

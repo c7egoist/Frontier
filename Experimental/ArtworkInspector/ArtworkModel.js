@@ -161,6 +161,55 @@ export function MoveLayer(Doc, Id, Delta) {
   });
 }
 
+// ------------------------------------------------------------------------------------------------ outliner edits
+// Groups are TextureStudio "folder" layers: children point at them through parentId; the draw order stays doc.layers.
+export function AddFolder(Doc) {
+  const Count = Doc.layers.filter((L) => L.kind === "folder").length + 1;
+  const F = createArtworkLayer("folder", { name: `Group ${Count}` });
+  const Next = Edit(Doc, (D) => {
+    const Sel = D.layers.find((E) => E.id === D.selectedLayerId);
+    const At = Sel ? D.layers.indexOf(Sel) : D.layers.length - 1;
+    D.layers.splice(At + 1, 0, F);
+    // The selected layer (if it is loose) moves into the new group, the way "Group selection" works in TextureStudio.
+    if (Sel && Sel.kind !== "folder" && !Sel.parentId) Sel.parentId = F.id;
+  });
+  return { Doc: Next, Id: F.id };
+}
+
+// Folders never nest; a folder moves together with its children.
+export const CanNest = (Doc, DragId, TargetId) => FindLayer(Doc, TargetId)?.kind === "folder" && FindLayer(Doc, DragId)?.kind !== "folder";
+
+// Drop DragId relative to TargetId in the *visual* (top → bottom) order: "before" = above, "after" = below,
+// "inside" = top of a folder.
+export function PlaceLayer(Doc, DragId, TargetId, Where) {
+  const Drag = FindLayer(Doc, DragId), Target = FindLayer(Doc, TargetId);
+  if (!Drag || !Target || DragId === TargetId) return Doc;
+  if (Where === "inside" && !CanNest(Doc, DragId, TargetId)) Where = "before";
+  if (Drag.kind === "folder" && Target.parentId === DragId) return Doc;
+  return Edit(Doc, (D) => {
+    const Ids = new Set([DragId, ...(Drag.kind === "folder" ? D.layers.filter((L) => L.parentId === DragId).map((L) => L.id) : [])]);
+    const Block = D.layers.filter((L) => Ids.has(L.id));
+    D.layers = D.layers.filter((L) => !Ids.has(L.id));
+    const Anchor = D.layers.find((L) => L.id === TargetId);
+    let At = D.layers.indexOf(Anchor);
+    const Moved = Block.find((L) => L.id === DragId);
+    if (Where === "inside") { Moved.parentId = TargetId; }
+    else {
+      Moved.parentId = Drag.kind === "folder" ? null : Anchor.parentId || null;
+      if (Where === "before") {
+        At += 1;
+        // Above a folder means above its whole block: past every child that sits later in the array.
+        if (Anchor.kind === "folder") D.layers.forEach((L, I) => { if (L.parentId === Anchor.id && I >= At) At = I + 1; });
+      } else if (Anchor.kind === "folder") {
+        D.layers.forEach((L, I) => { if (L.parentId === Anchor.id && I < At) At = I; });
+      }
+    }
+    D.layers.splice(At, 0, ...Block);
+  });
+}
+
+export const SetLocked = (Doc, Id, Locked) => EditLayer(Doc, Id, (E) => { E.locked = !!Locked; });
+
 export function AddModifier(Doc, LayerId, Type) {
   const M = createDefaultModifier(Type);
   return { Doc: EditLayer(Doc, LayerId, (L) => { L.modifiers = [...(L.modifiers || []), M]; }), Id: M.id };

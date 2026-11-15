@@ -308,6 +308,21 @@ export function RemoveLayer(P, Identity) {
   return Next;
 }
 
+// Reorder detail strata among themselves.  Coats / flakes stay on top and the surface body stays at the bottom, so a detail
+// stratum only ever swaps with an adjacent detail stratum.
+export function MoveLayer(P, Identity, Delta) {
+  const Layers = P.Authoring.Layers, At = Layers.findIndex((L) => L.Identity === Identity), To = At + Math.sign(Delta);
+  if (At < 0 || Layers[At].Model !== "detail" || Layers[To]?.Model !== "detail") return P;
+  const Next = structuredClone(P);
+  [Next.Authoring.Layers[At], Next.Authoring.Layers[To]] = [Next.Authoring.Layers[To], Next.Authoring.Layers[At]];
+  return Next;
+}
+
+export const CanMoveLayer = (P, Identity, Delta) => {
+  const Layers = P.Authoring.Layers, At = Layers.findIndex((L) => L.Identity === Identity);
+  return At >= 0 && Layers[At].Model === "detail" && Layers[At + Math.sign(Delta)]?.Model === "detail";
+};
+
 export function ApplyDetailPreset(P, Identity, PresetId) {
   const L = FindLayer(P, Identity), Preset = DETAIL_PRESETS.find((E) => E.Id === PresetId);
   if (!L || !Preset) return P;

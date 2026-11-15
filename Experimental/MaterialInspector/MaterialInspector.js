@@ -19,7 +19,9 @@ const S = {
   P: null, LayerId: null, Channel: null, Query: "",
   Groups: {}, Folds: {}, AddOpen: false, Renaming: null,
   History: [], Future: [], Pending: null, Status: "", StatusTimer: 0,
+  Docked: false,   // true when an outliner card owns the strata list (the strip is then left out of this card)
 };
+const Peers = new Set();   // outliner (or any other view) re-render hooks: Fn(Live)
 
 let Root = null;
 const Store = (() => { try { return globalThis.localStorage; } catch { return null; } })();
@@ -287,7 +289,7 @@ function CardHtml() {
 
     <section class="mi-metrics" data-metrics>${MetricsHtml()}</section>
 
-    <section class="mi-strata">
+    ${S.Docked ? "" : `<section class="mi-strata">
       <div class="mi-section-title"><h3>Strata</h3><small>TOP → BOTTOM</small>
         <button type="button" class="mi-text-btn" data-act="add-detail" ${P.Authoring.Layers.length >= 16 ? "disabled" : ""}>${icon("plus", 11)}Detail</button></div>
       <div class="mi-strata-strip" role="tablist" aria-label="Strata">
@@ -299,7 +301,7 @@ function CardHtml() {
           ${E.Model === "detail" && E.Identity === L.Identity ? `<button type="button" class="mi-x" data-act="remove-layer" data-layer="${E.Identity}" aria-label="Remove ${Esc(E.Name)}">${icon("close", 10)}</button>` : ""}
         </div>`).join("")}
       </div>
-    </section>
+    </section>`}
 
     <section class="mi-channels">
       <div class="mi-section-title"><h3>Channels</h3><small>${L.Channels.length} ON ${Esc(M.MODELS[L.Model].Label.toUpperCase())}</small>
@@ -379,6 +381,7 @@ function Render() {
     if (El) { El.focus({ preventScroll: true }); if (Sel) try { El.setSelectionRange(...Sel); } catch { /* number inputs */ } }
   }
   if (document.scrollingElement) document.scrollingElement.scrollTop = Scroll;
+  for (const Fn of Peers) Fn(false);
 }
 
 // Cheap refresh during drags: metrics, the open row's head and its previews; inputs being dragged keep their own state.
@@ -408,6 +411,7 @@ function RefreshLive() {
     Bar.querySelectorAll(".mi-stop").forEach((S, I) => { S.style.background = Colours[I]; });
   }
   DrawPreviews();
+  for (const Fn of Peers) Fn(true);
 }
 
 // ------------------------------------------------------------------------------------------------ bindings
@@ -686,6 +690,7 @@ function OnStorage(Event) {
 // ------------------------------------------------------------------------------------------------ boot
 export function Mount(Host, Options = {}) {
   Root = Host;
+  S.Docked = !!Options.docked;
   const Wanted = Options.material || new URLSearchParams(location.search).get("material") || Store?.getItem(M.STORAGE_CURRENT) || M.CATALOG[0].id;
   Select(LoadStored(M.CATALOG.some((E) => E.id === Wanted) ? Wanted : M.CATALOG[0].id));
   Root.addEventListener("click", OnClick);
@@ -706,5 +711,27 @@ export function Mount(Host, Options = {}) {
   document.addEventListener("click", (E) => { if (S.AddOpen && E.target.isConnected && !Root.contains(E.target)) { S.AddOpen = false; Render(); } });
   globalThis.addEventListener?.("storage", OnStorage);
   Render();
-  return { State: S, Render, Model: M };
+  return Hub;
 }
+
+// What an outliner (or a host) drives the card through.  Everything mutates via Apply → Render, so undo, storage and the
+// card stay in step whichever view made the change.
+const Hub = {
+  State: S, Model: M, Render, Apply, Settle, Flash, Step, Layer, SwatchHtml,
+  Subscribe(Fn) { Peers.add(Fn); return () => Peers.delete(Fn); },
+  Load(Id) { Settle(); Select(LoadStored(Id)); Render(); Flash(`Loaded ${S.P.name}`); },
+  SelectLayer(Id) {
+    if (!M.FindLayer(S.P, Id)) return;
+    if (S.LayerId !== Id) {
+      S.LayerId = Id; S.Query = ""; S.AddOpen = false;
+      if (!Layer().Channels.includes(S.Channel)) S.Channel = Layer().Channels.includes("colour") ? "colour" : Layer().Channels[0];
+    }
+    Render();
+  },
+  OpenChannel(LayerId, Key) {
+    S.LayerId = LayerId; S.Query = ""; SetChannel(Key);
+    S.Groups[`${LayerId}:${M.CHANNEL[Key].Group}`] = true;
+    Render();
+    Root.querySelector(`[data-fid="row:${CSS.escape(Key)}"]`)?.scrollIntoView?.({ block: "nearest" });
+  },
+};

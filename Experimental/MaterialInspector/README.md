@@ -54,11 +54,32 @@ The same card language is reused by the [Pattern / Stamp Studio](../ArtworkInspe
 - `?material=<id>` opens a specific catalog entry.
 - The catalog is a short slice of the TextureStudio library: Derez Lattice Dissolve, Candy Crimson, Brushed Titanium, Molten Magma Crust and Woodland Camouflage · Smooth. Together they cover every stratum model and source kind.
 
+## Outliners
+
+Each studio page shows its card next to a matching **outliner card**. The outliner follows the Project Zero editor's Outliner layout:
+
+1. A heading with a round action button.
+2. Two statistic tiles, which also act as filters.
+3. A search pill with a filter menu, and the active filters shown as chips.
+4. 39 px tree rows with a disclosure arrow, icon, name and metadata, a status disc and an amber selection bar.
+5. A footer of readouts.
+
+`OutlinerKit.js` holds the shared plumbing: search, filters, expand / collapse, keyboard navigation (arrows, Home / End, Enter, F2, Delete, Space), inline rename and drag reorder. Each outliner supplies only its rows and actions:
+
+| Page | Outliner | Tree |
+| --- | --- | --- |
+| Material | `MaterialOutliner.js` | material → strata layers → driven channels (field / pattern / ramp / texture) |
+| Pattern / Stamp | `../ArtworkInspector/ArtworkOutliner.js` | canvas → layers (motif / text / gradient…) → modifiers |
+| Map Baking | `../BakeInspector/BakeOutliner.js` | study → map groups → maps, plus the study set |
+
+The outliner and the card share one hub, so changes made in either one show up in the other. Add `?outliner=0` to the URL to show the card on its own.
+
 ## Checks
 
 ```
 node Experimental/MaterialInspector/Scripts/CheckMaterialInspector.mjs
 JSDOM_DIR=/tmp/smoke node Experimental/MaterialInspector/Scripts/SmokeMaterialInspector.mjs   # npm i --prefix /tmp/smoke jsdom@25
+JSDOM_DIR=/tmp/smoke node Experimental/MaterialInspector/Scripts/SmokeOutliners.mjs           # all three outliners
 ```
 
 If `TS_DIR` points at a TextureStudio checkout (`…/Experimental/TextureStudio`), the check script also confirms two things:

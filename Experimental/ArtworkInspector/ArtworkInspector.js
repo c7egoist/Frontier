@@ -16,7 +16,9 @@ import { Esc, Knob, ColourField, Stops, Toggle, SwitchRow, Segments, Chips, Stat
 const S = {
   Mode: "pattern", Doc: null, Open: null, AddLayer: false, AddMod: false, Renaming: null, Folds: {},
   Status: "", StatusTimer: 0, Stats: null, StatsKey: "", Thumb: "", ThumbKey: "", ThumbBlob: "",
+  Docked: false,   // true when an outliner card owns the layer stack (the strip is then left out of this card)
 };
+const Peers = new Set();   // outliner re-render hooks: Fn(Live)
 const H = History();
 let Root = null, LiveFrame = 0;
 const Store = (() => { try { return globalThis.localStorage; } catch { return null; } })();
@@ -353,7 +355,7 @@ function CardHtml() {
 
     <section class="mi-metrics" data-metrics>${StatsHtml()}</section>
 
-    <section class="mi-strata">
+    ${S.Docked ? "" : `<section class="mi-strata">
       <div class="mi-section-title"><h3>Layers</h3><small>TOP → BOTTOM</small>
         <div class="mi-add-wrap">
           <button type="button" class="mi-text-btn" data-act="add-layer-toggle" aria-expanded="${S.AddLayer}">${icon("plus", 11)}Layer</button>
@@ -361,7 +363,7 @@ function CardHtml() {
         </div>
       </div>
       <div class="mi-strata-strip" role="tablist" aria-label="Layers">${LayerList()}</div>
-    </section>
+    </section>`}
 
     <section class="mi-channels">
       <div class="mi-section-title"><h3>${Esc(L.name)}</h3><small>${Esc(A.LayerCaption(L))}</small></div>
@@ -394,6 +396,7 @@ function CardHtml() {
 // ------------------------------------------------------------------------------------------------ render
 function Render() {
   Rebuild(Root, CardHtml(), ".ai-card");
+  for (const Fn of Peers) Fn(false);
 }
 
 // Cheap refresh while a slider or colour drags: readouts, captions, stats + thumbnail (one frame later), ramp bars.
@@ -422,6 +425,7 @@ function RefreshLive() {
     const Metrics = Root.querySelector("[data-metrics]"), Thumb = Root.querySelector("[data-thumb]");
     if (Metrics) Metrics.innerHTML = StatsHtml();
     if (Thumb) Thumb.style.backgroundImage = ThumbUrl();
+    for (const Fn of Peers) Fn(true);
   });
 }
 
@@ -609,6 +613,7 @@ function OnStorage(Event) {
 // ------------------------------------------------------------------------------------------------ boot
 export function Mount(Host, Options = {}) {
   Root = Host;
+  S.Docked = !!Options.docked;
   const Params = new URLSearchParams(globalThis.location?.search || "");
   S.Mode = Options.mode || (Params.get("mode") === "stamp" ? "stamp" : "pattern");
   const Cat = A.Catalog(S.Mode);
@@ -623,5 +628,21 @@ export function Mount(Host, Options = {}) {
   document.addEventListener("click", (E) => { if ((S.AddLayer || S.AddMod) && E.target.isConnected && !Root.contains(E.target)) { S.AddLayer = S.AddMod = false; Render(); } });
   globalThis.addEventListener?.("storage", OnStorage);
   Render();
-  return { State: S, Render, Model: A, History: H };
+  return Hub;
 }
+
+// What the outliner (or a host) drives the card through — every edit goes Apply → Render, so undo and storage stay whole.
+const Hub = {
+  State: S, Model: A, History: H, Render, Apply, Settle, Flash, Step, Layer, CurrentStats, ThumbUrl,
+  Subscribe(Fn) { Peers.add(Fn); return () => Peers.delete(Fn); },
+  Load(Id) { Settle(); Select(LoadStored(Id)); Render(); Flash(`Loaded ${S.Doc.name}`); },
+  // Select a layer and optionally open one of its property / modifier rows ("fill", "mask", "mod:<id>", …).
+  SelectLayer(Id, Open) {
+    if (!A.FindLayer(S.Doc, Id)) return;
+    if (S.Doc.selectedLayerId !== Id) { S.Doc = { ...S.Doc, selectedLayerId: Id }; S.Open = null; Save(); }
+    S.AddLayer = S.AddMod = false;
+    if (Open !== undefined) S.Open = Open;
+    Render();
+    if (Open) Root.querySelector(`[data-fid="row:${CSS.escape(Open)}"]`)?.scrollIntoView?.({ block: "nearest" });
+  },
+};

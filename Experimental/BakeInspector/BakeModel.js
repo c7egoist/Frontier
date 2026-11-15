@@ -91,6 +91,16 @@ export function SetGroup(S, Group, On) {
   return Normalise({ ...S, selected: On ? [...S.selected, ...Ids] : S.selected.filter((E) => !Ids.includes(E)) });
 }
 
+// Queue presets (BakingWorkspace's quick chips).
+export const PRESETS = Object.freeze([
+  { Id: "core", Label: "PBR Core", Maps: ["normalTangent", "ao", "curvature", "height", "thickness"] },
+  { Id: "volume", Label: "PBR + Volume", Maps: ["normalTangent", "ao", "curvature", "height", "thickness", "volumeSdf"] },
+  { Id: "normals", Label: "Normals", Maps: BAKE_MAP_CATALOG.filter((M) => M.group === "Normals").map((M) => M.id) },
+  { Id: "all", Label: "All", Maps: BAKE_MAP_CATALOG.map((M) => M.id) },
+]);
+export const ApplyPreset = (S, Id) => Normalise({ ...S, selected: [...(PRESETS.find((P) => P.Id === Id)?.Maps || S.selected)] });
+export const PresetMatch = (S) => PRESETS.find((P) => P.Maps.length === S.selected.length && P.Maps.every((M) => S.selected.includes(M)))?.Id || null;
+
 export function ExportPreset(S) {
   const { lowSource, highSource, ...Settings } = S;
   return JSON.stringify({ schema: "frontier.bake.v1", savedAt: new Date().toISOString(), settings: Settings }, null, 2);
