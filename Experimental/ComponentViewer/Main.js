@@ -114,8 +114,12 @@ const VEHICLE_PARTS = [
   { key: 'wing', build: buildWing, name: 'Rear Wing', tags: 'vehicle, wing, aero', collision: 'box', normals: 'angle' },
 ];
 
-// A small rear wing built from boxes (Y-up, metres, origin at the mounting point): carbon main plane at 8° with a
-// gurney flap, body-colour endplates and blue pylons, using the Vehicle Lab material families.
+// A rear wing built from boxes (Y-up, metres, origin at the mounting point; +X is the car's forward direction): carbon
+// main plane with a gurney flap, body-colour endplates and blue pylons, using the Vehicle Lab material families.
+//   Angle: 8° angle of attack for downforce — the leading edge (front, +X) sits LOW and the trailing edge (rear, −X)
+//   HIGH, and the gurney flap stands up off the trailing edge.  (It was tilted the other way, which is a lift wing.)
+//   Span: endplate outer faces line up with the body's sides (ControlVehicleBody is 2.4996 m wide, ±1.2498 m).
+const WING = { aoa: 8, bodyHalfWidth: 1.2498, chordHalf: 0.17, planeHalfThick: 0.016, plateHalfThick: 0.008, planeY: 0.25 };
 function buildWing() {
   const pos = [], idx = [], fam = [];
   const box = (c, h, family, tilt = 0) => {
@@ -127,10 +131,17 @@ function buildWing() {
     const quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
     for (const [a, b, c2, d] of quads) { idx.push(base + a, base + b, base + c2, base + a, base + c2, base + d); fam.push(family, family); }
   };
-  box([0, 0.25, 0], [0.17, 0.016, 0.8], 8, 8 * Math.PI / 180);
-  box([-0.165, 0.29, 0], [0.008, 0.022, 0.8], 6);
-  for (const z of [-0.81, 0.81]) box([-0.01, 0.23, z], [0.2, 0.1, 0.008], 6);
-  for (const z of [-0.36, 0.36]) box([0.02, 0.11, z], [0.05, 0.11, 0.01], 10);
+  const { aoa, bodyHalfWidth, chordHalf, planeHalfThick, plateHalfThick, planeY } = WING;
+  const tilt = -aoa * Math.PI / 180;                       // negative about Z: front edge down, rear edge up
+  const plateZ = bodyHalfWidth - plateHalfThick;            // endplate centres, outer faces flush with the body sides
+  const span = plateZ - plateHalfThick;                     // main plane meets the endplates' inner faces
+  box([0, planeY, 0], [chordHalf, planeHalfThick, span], 8, tilt);
+  // Gurney flap: a 44 mm lip standing on the trailing edge's top surface, square to the plane.
+  const te = [-chordHalf * Math.cos(tilt) - planeHalfThick * Math.sin(tilt), planeY - chordHalf * Math.sin(tilt) + planeHalfThick * Math.cos(tilt)];
+  box([te[0] + 0.008 * Math.cos(tilt) - 0.022 * Math.sin(tilt), te[1] + 0.008 * Math.sin(tilt) + 0.022 * Math.cos(tilt), 0], [0.008, 0.022, span], 6, tilt);
+  for (const z of [-plateZ, plateZ]) box([-0.01, 0.23, z], [0.2, 0.1, plateHalfThick], 6);
+  // Pylons spread with the wider span (about 45 % out from the centre line), so the plane is not cantilevered too far.
+  for (const z of [-0.56, 0.56]) box([0.02, 0.11, z], [0.05, 0.11, 0.01], 10);
   return { positions: new Float32Array(pos), indices: new Uint32Array(idx), families: new Uint32Array(fam), format: 'Procedural', notes: ['Rear wing built in Main.js for the Dock socket demo'] };
 }
 
