@@ -6,11 +6,20 @@
 //
 //   MountViewport(Host, { Title, Meta, Views: [[Label, Id]], View, Chips: [Label], Hint, OnView }) → { Body, SetMeta, SetView }
 //   Body is an empty element renderers (or overlays such as the paint tool rail) can mount into.
+//
+// Workspaces that own a real stage (Pattern / Stamp's SVG canvas, Map Baking's split view) pass `Head` and `Foot` HTML
+// instead: the card then becomes header bar · body · footer bar (`vp-card bars`), the decluttered Project Zero take on
+// TextureStudio's two-band viewport header and stage footer.  Their controller owns everything inside those bars.
 
 import { Esc } from "./CardKit.js";
 import { icon } from "./Icons.js";
 
 export function ViewportHtml(O) {
+  if (O.Head != null || O.Foot != null) return `<section class="vp-card bars" aria-label="${Esc(O.Title || "Viewport")}">
+    <header class="vp-bar vp-top" data-vp-head>${O.Head || ""}</header>
+    <div class="vp-stage"><div class="vp-body" data-vp-body></div></div>
+    <footer class="vp-bar vp-bottom" data-vp-foot>${O.Foot || ""}</footer>
+  </section>`;
   return `<section class="vp-card" aria-label="${Esc(O.Title || "Viewport")}">
     <div class="vp-body" data-vp-body></div>
     <header class="vp-head">
@@ -30,6 +39,8 @@ export function MountViewport(Host, O = {}) {
   Host.innerHTML = ViewportHtml({ ...O, View: St.View });
   const Api = {
     Body: Host.querySelector("[data-vp-body]"),
+    Head: Host.querySelector("[data-vp-head]"),
+    Foot: Host.querySelector("[data-vp-foot]"),
     get View() { return St.View; },
     SetMeta: (Text) => { const El = Host.querySelector("[data-vp-meta]"); if (El) El.textContent = Text; },
     SetView: (Id) => {

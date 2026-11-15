@@ -31,11 +31,8 @@
   globalThis.BakeInspector = Mount(document.getElementById("Card"), { docked: Docked });
   if (Docked) globalThis.BakeOutliner = MountBakeOutliner(document.getElementById("Outliner"), globalThis.BakeInspector);
   else { document.getElementById("Outliner").remove(); document.querySelector(".mi-trio").classList.add("solo"); }
-  import { MountViewport } from "../MaterialInspector/Viewport.js";
-  const Hub = globalThis.BakeInspector;
-  const Meta = () => { const St = Hub.Model.Study(Hub.State.P); return `${St.name} · ${St.complexity}`; };
-  globalThis.Viewport = MountViewport(document.getElementById("Viewport"), { Title: "Viewport", Meta: Meta(), Views: [["Low", "low"], ["High", "high"], ["Cage", "cage"], ["Result", "result"]], Chips: ["Map Baking"] });
-  Hub.Subscribe(() => globalThis.Viewport.SetMeta(Meta()));
+  import { MountBakeStage } from "./BakeStage.js";
+  globalThis.Viewport = MountBakeStage(document.getElementById("Viewport"), globalThis.BakeInspector);
 </script>
 </body>
 </html>

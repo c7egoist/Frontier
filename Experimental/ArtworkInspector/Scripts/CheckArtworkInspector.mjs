@@ -143,6 +143,18 @@ await Check("palette counts distinct authored colours and contrast", () => {
   return `carbon ${Carbon.Contrast.toFixed(2)} · hex ${Hex.Contrast.toFixed(2)}`;
 });
 
+await Check("workspace stage draws the engine's own SVG, every visible layer hit-testable", async () => {
+  const Src = readFileSync(ROOT + "ArtworkStage.js", "utf8");
+  Expect(/import \{[^}]*artworkDocumentLayersSvg[^}]*\} from "\.\/Engine\/Patterns\/ArtworkStackEngine\.js"/.test(Src), "imports the engine renderer (no re-implementation)");
+  const { artworkDocumentLayersSvg } = await import(pathToFileURL(ROOT + "Engine/Patterns/ArtworkStackEngine.js"));
+  let Layers = 0;
+  for (const Mode of ["pattern", "stamp"]) for (const E of A.Catalog(Mode)) {
+    const D = A.Create(Mode, E.Id), { body } = artworkDocumentLayersSvg(D, { idPrefix: "vp" });
+    for (const L of D.layers.filter((X) => X.kind !== "folder" && X.visible !== false)) { Expect(body.includes(`data-layer-id="${L.id}"`), `${E.Id} ${L.id}`); Layers++; }
+  }
+  return `${Layers} layers across both catalogues`;
+});
+
 const TS = process.env.TS_DIR;
 if (TS && existsSync(TS)) {
   await Check("copied engine files are byte-identical to TextureStudio", () => {

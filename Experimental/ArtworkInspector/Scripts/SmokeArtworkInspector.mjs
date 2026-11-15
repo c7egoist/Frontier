@@ -212,6 +212,60 @@ await step("storage sync + escape", async () => {
   open("blend"); key("Escape"); expect(St.Open === null, "escape");
 });
 
+await step("workspace stage: header · live SVG · footer", async () => {
+  const { MountArtworkStage } = await import(pathToFileURL(ROOT + "ArtworkStage.js"));
+  const host = w.document.getElementById("Viewport");
+  const Vp = MountArtworkStage(host, App, "pattern");
+  const pd = (el, type, x = 400, y = 300, extra = {}) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, clientX: x, clientY: y, pointerId: 1, ...extra }));
+  expect(q(".vp-card.bars .vp-top", host) && q(".vp-bottom", host), "header + footer bars");
+  const svg = () => q("[data-art]", host);
+  expect(svg().querySelectorAll("[data-layer-id]").length > 0, "document drawn as SVG");
+  expect(q('[data-vp="name"]', host).value === St.Doc.name, "header name");
+  expect(q('[data-vp="sel"]', host).textContent.includes(A.Selected(St.Doc).name), "footer selection");
+  expect(q('[data-vp="send-material"]', host) && q('[data-vp="send-paint"]', host), "pattern CTAs");
+  // live: a card edit redraws the artboard
+  const before = svg().innerHTML;
+  App.Apply(A.EditLayer(St.Doc, A.Selected(St.Doc).id, (L) => { L.shape.color = "#123456"; })); App.Render(); await sleep(40);
+  expect(svg().innerHTML !== before && svg().innerHTML.includes("#123456"), "live redraw");
+  click(q('[data-vp-view="repeat"]', host)); await sleep(5);
+  expect(Vp.View === "repeat" && svg().querySelectorAll("use.art-ghost").length === 8, "repeat 3×3");
+  click(q('[data-vp-view="tile"]', host));
+  setVal(q('[data-vp="name"]', host), "Header Name"); expect(St.Doc.name === "Header Name", "rename from header");
+  setVal(q('[data-vp="res"]', host), "2048"); expect(St.Doc.resolution === 2048, "resolution");
+  // place a shape
+  const n = St.Doc.layers.length, stage = q(".vp-stage", host);
+  click(q('[data-tool="shape"]', host)); expect(q("[data-fly]", host).classList.contains("open"), "shape flyout");
+  click(q('[data-shape="star"]', host)); expect(Vp.State.Tool === "shape" && Vp.State.Shape === "star", "pick star");
+  pd(stage, "pointerdown"); await sleep(40);
+  expect(St.Doc.layers.length === n + 1 && A.Selected(St.Doc).shape.motifType === "star" && Vp.State.Tool === "select", "star placed");
+  // drag the selected layer
+  const L = A.Selected(St.Doc), x0 = L.transform.x, past = App.History.Past.length;
+  const g = svg().querySelector(`[data-layer-id="${L.id}"] *`) || svg().querySelector(`[data-layer-id="${L.id}"]`);
+  pd(g, "pointerdown", 400, 300); pd(stage, "pointermove", 460, 300); pd(stage, "pointermove", 480, 300); pd(stage, "pointerup", 480, 300); await sleep(40);
+  expect(A.FindLayer(St.Doc, L.id).transform.x > x0 && App.History.Past.length === past + 1, "drag = one undo step");
+  click(q('[data-vp="undo"]', host)); expect(A.FindLayer(St.Doc, L.id).transform.x === x0, "header undo");
+  click(q('[data-vp="redo"]', host));
+  // keys, zoom
+  key("t"); expect(Vp.State.Tool === "text", "T key"); key("Escape"); expect(Vp.State.Tool === "select", "Esc → select");
+  key("r"); key("r"); expect(Vp.State.Shape !== "star" || Vp.State.Tool === "shape", "R cycles shapes");
+  key("v");
+  const z = Vp.State.Zoom; click(q('[data-vp="zoom-in"]', host)); expect(Vp.State.Zoom > z && q('[data-vp="zoom"]', host).textContent.endsWith("%"), "zoom in");
+  click(q('[data-vp="fit"]', host)); expect(Vp.State.Fitted, "fit");
+  // save menu + CTAs
+  click(q('[data-vp="menu"]', host)); expect(q("[data-menu]", host).classList.contains("open"), "menu open");
+  downloads = [];
+  click(q('[data-vp="save-project"]', host)); click(q('[data-vp="export-svg"]', host));
+  expect(downloads.some((d) => d.endsWith(".pattern.json")) && downloads.some((d) => d.endsWith(".svg")), "save + svg");
+  click(q('[data-vp="copy-svg"]', host)); await sleep(5); expect(clip.startsWith("<svg"), "copy svg");
+  click(q('[data-vp="send-paint"]', host));
+  expect(JSON.parse(w.localStorage.getItem("Frontier.Handoff")).To === "paint", "send to paint");
+  // open project from the menu
+  const proj = A.ExportProject(A.Create("pattern", A.Catalog("pattern")[1].Id)), inp = q('[data-vp="open"]', host);
+  Object.defineProperty(inp, "files", { value: [{ name: "x.pattern.json", text: async () => proj }], configurable: true });
+  fire(inp, "change"); await sleep(30);
+  expect(St.Doc.starterId === A.Catalog("pattern")[1].Id, "open project");
+});
+
 await step("every starter renders (both modes)", async () => {
   for (const mode of ["pattern", "stamp"]) {
     St.Mode = mode;

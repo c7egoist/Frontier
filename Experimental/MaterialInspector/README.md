@@ -16,7 +16,14 @@ Other workspaces: [Pattern / Stamp](../ArtworkInspector/README.md#screenshots), 
 
 ## Workspace viewport
 
-`Viewport.js` and `Workspace.css` give Pattern, Stamp, Map Baking and Texture Painting the Project Zero workspace layout: outliner · **viewport** · card. The viewport is left **blank on purpose**, because no renderer is attached. It provides the frame a renderer would mount into: a title chip with live meta, view modes, a hint, chips and a zoom readout. `MountViewport(Host, { Title, Meta, Views, Chips, Hint, OnView })` returns `{ Body, SetMeta, SetView }`. The Material workspace has no viewport.
+`Viewport.js` and `Workspace.css` give Pattern, Stamp, Map Baking and Texture Painting the Project Zero workspace layout: outliner · **viewport** · card. The Material workspace has no viewport.
+
+`MountViewport(Host, { Title, Meta, Views, View, Chips, Hint, OnView, Head, Foot })` returns `{ Body, Head, Foot, View, SetMeta, SetView }`. It has two forms:
+
+- **Blank frame** (Texture Painting): floating title chip, view modes, hint and zoom readout over an empty body that a renderer mounts into.
+- **Header · stage · footer** (pass `Head` / `Foot` HTML): Pattern / Stamp (`ArtworkInspector/ArtworkStage.js`, live SVG artboard) and Map Baking (`BakeInspector/BakeStage.js`, 3D / 2D / split).
+  - `Workspace.css` holds the shared bar parts: doc identity, icon buttons, segments, pills, source chips and menus.
+  - Labels collapse to icons through a container query when the viewport is narrow.
 
 Layout breakpoints:
 

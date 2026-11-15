@@ -179,6 +179,40 @@ await step("export + copy + import", async () => {
   expect(q('[data-status]').textContent.includes("Import failed"), "rejects");
 });
 
+await step("workspace stage: header · split · footer", async () => {
+  const { MountBakeStage } = await import(pathToFileURL(ROOT + "BakeStage.js"));
+  const host = w.document.getElementById("Viewport");
+  const Vp = MountBakeStage(host, App);
+  expect(q(".vp-card.bars .vp-top", host) && q(".vp-bottom", host), "header + footer bars");
+  expect(Vp.View === "split" && qa("[data-pane]", host).length === 2, "split view");
+  expect(qa("[data-map]", host).length === St.P.selected.length, "one tile per queued map");
+  const s = q('[data-vp="study"]', host); s.value = "box"; fire(s, "change");
+  expect(St.P.studyId === "box" && q(".bi-name").textContent.includes("Chamfer"), "study from header");
+  const f = q('[data-vp="source"][data-slot="lowSource"]', host);
+  Object.defineProperty(f, "files", { value: [{ name: "crate_low.obj", size: 99 }], configurable: true });
+  fire(f, "change"); expect(St.P.lowSource?.name === "crate_low.obj" && q(".vp-src.custom", host), "low source");
+  expect(q('[data-vp="gpu"]', host).textContent.length > 2, "device pill");
+  click(q('[data-map]', host)); expect(St.Open === q('[data-map]', host).dataset.map, "tile opens the map in the card");
+  click(q('[data-vp-view="3d"]', host)); expect(qa("[data-pane]", host).length === 1 && !q("[data-map]", host), "3D only");
+  click(q('[data-vp-view="2d"]', host)); expect(q('[data-pane="2d"]', host) && !q('[data-pane="3d"]', host), "2D only");
+  click(q('[data-vp="send-paint"]', host)); expect(q('[data-vp="status"]', host).textContent.includes("first"), "send needs a fresh bake");
+  click(q('[data-vp="bake"]', host)); await sleep(30);
+  expect(St.Run && q('[data-vp="bake"]', host).textContent.includes("Cancel"), "bake from header");
+  expect(q('[data-vp="undo"]', host).disabled, "undo locked while baking");
+  for (let i = 0; i < 100 && St.Run; i++) await sleep(100);
+  expect(!St.Run && qa(".bk-tile.done", host).length === St.P.selected.length, "tiles baked");
+  click(q('[data-vp="send-paint"]', host));
+  expect(JSON.parse(w.localStorage.getItem("Frontier.Handoff")).To === "paint", "send to paint");
+  click(q('[data-vp="menu"]', host)); expect(q("[data-menu]", host).classList.contains("open"), "export menu");
+  expect(q('[data-vp="export-map"]', host).disabled, "map PNG waits for a real engine");
+  downloads = [];
+  click(q('[data-vp="export-preset"]', host)); click(q('[data-vp="export-request"]', host));
+  expect(downloads.some((d) => d.endsWith(".bake.json")) && downloads.some((d) => d.endsWith(".bake-request.json")), "exports");
+  click(q('[data-vp="compiler"]', host)); expect(JSON.parse(w.localStorage.getItem("Frontier.Handoff")).To === "geometry-compiler", "GeometryCompiler hand-off");
+  key("b"); await sleep(50); expect(St.Run, "B bakes"); key("Escape"); await sleep(300); expect(!St.Run, "Esc cancels");
+  App.Apply(B.SetValue(St.P, "lowSource", null)); App.Render();
+});
+
 await step("persistence + host bake", async () => {
   const stored = JSON.parse(w.localStorage.getItem("Frontier.BakeInspector.v1"));
   expect(stored.samples === 22, "saved");

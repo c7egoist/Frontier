@@ -32,13 +32,8 @@
   globalThis.ArtworkInspector = Mount(document.getElementById("Card"), { mode: Mode, docked: Docked });
   if (Docked) globalThis.ArtworkOutliner = MountArtworkOutliner(document.getElementById("Outliner"), globalThis.ArtworkInspector);
   else { document.getElementById("Outliner").remove(); document.querySelector(".mi-trio").classList.add("solo"); }
-  import { MountViewport } from "../MaterialInspector/Viewport.js";
-  const Hub = globalThis.ArtworkInspector;
-  const Meta = () => `${Hub.State.Doc?.name || (Mode === "stamp" ? "Stamp" : "Pattern")} · ${Mode === "stamp" ? "decal" : "seamless tile"}`;
-  globalThis.Viewport = MountViewport(document.getElementById("Viewport"), Mode === "stamp"
-    ? { Title: "Viewport", Meta: Meta(), Views: [["Decal", "decal"], ["On mesh", "mesh"], ["UV", "uv"]], Chips: ["Stamp Studio"] }
-    : { Title: "Viewport", Meta: Meta(), Views: [["Tile", "tile"], ["Repeat 3×3", "repeat"], ["On mesh", "mesh"]], Chips: ["Pattern Studio"] });
-  Hub.Subscribe(() => globalThis.Viewport.SetMeta(Meta()));
+  import { MountArtworkStage } from "./ArtworkStage.js";
+  globalThis.Viewport = MountArtworkStage(document.getElementById("Viewport"), globalThis.ArtworkInspector, Mode);
 </script>
 </body>
 </html>

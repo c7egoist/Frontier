@@ -91,6 +91,13 @@ await Check("formatters", () => {
   Expect(B.Bytes(1048576) === "1.0 MB" && B.Bytes(2048) === "2 KB" && B.Count(6.7e6) === "6.7 M" && B.Duration(0.141) === "141 ms" && B.Duration(75) === "1 m 15 s", "format");
 });
 
+await Check("workspace stage: every map group has a 2D tile fill, every study a header option", async () => {
+  const Src = readFileSync(ROOT + "BakeStage.js", "utf8");
+  for (const G of B.GROUPS) Expect(Src.includes(`${/[^A-Za-z]/.test(G) ? `"${G}"` : G}:`), `fill for ${G}`);
+  Expect(Src.includes("B.BAKE_STUDY_SHAPES.map"), "study options come from the catalogue");
+  return `${B.GROUPS.length} groups · ${B.BAKE_STUDY_SHAPES.length} studies`;
+});
+
 const TS = process.env.TS_DIR;
 if (TS && existsSync(TS)) {
   await Check("catalog copy matches TextureStudio's BakingEngine.js", () => {

@@ -1,6 +1,6 @@
 # Map Baking card
 
-This is the inspector of TextureStudio's **Baking** workspace, rebuilt as a **single card** in the Project Zero style, alongside the [Material](../MaterialInspector/README.md) and [Pattern / Stamp](../ArtworkInspector/README.md) cards. It contains no three.js and no baker: it edits bake settings, estimates their cost, and hands a request to whatever host bakes.
+This is the inspector of TextureStudio's **Baking** workspace, rebuilt as a **single card** in the Project Zero style, with a workspace viewport beside it, alongside the [Material](../MaterialInspector/README.md) and [Pattern / Stamp](../ArtworkInspector/README.md) cards. It contains no three.js and no baker: it edits bake settings, estimates their cost, and hands a request to whatever host bakes.
 
 ```
 python3 Experimental/BakeInspector/Serve.py        # http://0.0.0.0:8099/
@@ -8,9 +8,34 @@ python3 Experimental/BakeInspector/Serve.py        # http://0.0.0.0:8099/
 
 ## Screenshots
 
-![Map Baking — queue outliner, blank viewport, decluttered card](Screenshots/baking.png)
+![Map Baking — queue outliner, viewport with header / split stage / footer, decluttered card](Screenshots/baking.png)
 
-The workspace is the queue outliner · **viewport** (blank; views Low / High / Cage / Result) · card.
+The workspace is the queue outliner · **viewport** · card.
+
+## Workspace viewport (`BakeStage.js`)
+
+TextureStudio's `BakingWorkspace` header had:
+
+- an eyebrow, a status, the study title and a badge;
+- a resolution combo and a three-way view select;
+- undo / redo and a save menu;
+- three CTAs (GeometryCompiler · Send to Paint · Bake Targets);
+- a second group with the study select, Low Target / High Source uploads and a GPU pill.
+
+A HUD hint floated over the stage. Here that is one header bar and one footer bar.
+
+| Bar | Contents |
+| --- | --- |
+| **Header** | Bake glyph · **study ▾** · BAKING badge · **Low / High** mesh sources (`.obj` / `.stl`; dashed until a file is loaded) · **GPU ready / CPU fallback** pill. Then undo · redo │ **Export ▾** (current map `.png` and Volume SDF `.fvol`, both enabled once a real bake engine returns data; bake preset; bake request; copy request; *Open in GeometryCompiler*) │ **Send to Paint** · **Bake N maps**, which becomes *Cancel %* while baking. |
+| **Footer** | Key hints (B bake, Esc cancel) · a progress meter with the estimate or live progress (maps · resolution · time · memory · fresh / stale / unbaked) │ **3D · 2D · Split** view segment. |
+
+The stage:
+
+- **3D pane:** left blank on purpose; no renderer is attached, and the pane shows the study or source names.
+- **2D pane:** a map sheet with one tile per queued map. Tiles are tinted by group and go queued → running → baked live during a bake. Clicking a tile opens that map in the card.
+- **Split** (the default) shows both panes.
+
+Resolution stays in the card's *Output & cage* fold, because it is a bake setting rather than a view setting. GeometryCompiler moved from a header CTA into the Export menu.
 
 The docked card is decluttered:
 
@@ -60,3 +85,5 @@ The page also shows a **Queue outliner** (`BakeOutliner.js`) with this tree: stu
 node Experimental/BakeInspector/Scripts/CheckBakeInspector.mjs
 JSDOM_DIR=/tmp/smoke node Experimental/BakeInspector/Scripts/SmokeBakeInspector.mjs   # npm i --prefix /tmp/smoke jsdom@25
 ```
+
+The smoke test also mounts `BakeStage.js` and drives it: study and sources from the header, tile → card, the 3D / 2D / Split views, Bake / Cancel from the header and the B / Esc keys, live tiles, the Export menu, Send to Paint (fresh results only) and the GeometryCompiler hand-off.
