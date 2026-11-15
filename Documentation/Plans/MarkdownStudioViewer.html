@@ -1,0 +1,2674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Frontier — Markdown Studio</title>
+<style>
+  @font-face {
+    font-family: "FrontierDMSans";
+    src: url("fonts/DMSans/DMSans-Regular.ttf") format("truetype");
+    font-weight: 400;
+    font-style: normal;
+  }
+  @font-face {
+    font-family: "FrontierDMSans";
+    src: url("fonts/DMSans/DMSans-Medium.ttf") format("truetype");
+    font-weight: 500;
+    font-style: normal;
+  }
+  @font-face {
+    font-family: "FrontierDMSans";
+    src: url("fonts/DMSans/DMSans-SemiBold.ttf") format("truetype");
+    font-weight: 600;
+    font-style: normal;
+  }
+  @font-face {
+    font-family: "FrontierDMSans";
+    src: url("fonts/DMSans/DMSans-Bold.ttf") format("truetype");
+    font-weight: 700;
+    font-style: normal;
+  }
+  @font-face {
+    font-family: "FrontierMono";
+    src: url("fonts/JetBrainsMono/JetBrainsMono-Regular.ttf") format("truetype");
+    font-weight: 400;
+    font-style: normal;
+  }
+  @font-face {
+    font-family: "FrontierMono";
+    src: url("fonts/JetBrainsMono/JetBrainsMono-SemiBold.ttf") format("truetype");
+    font-weight: 600;
+    font-style: normal;
+  }
+
+  :root {
+    --fr-root-gap: #262626;
+    --fr-tabbar: #0a0a0a;
+    --fr-dock: #121212;
+    --fr-canvas: #0e0f12;
+    --fr-footer: #151515;
+    --fr-well: #191919;
+    --fr-well-border: #2c2c2c;
+    --fr-recess: #090909;
+    --fr-deep-input: #111111;
+    --fr-section: #202020;
+    --fr-tile: #1a1a1a;
+    --fr-row-hover: #1e1e1e;
+    --fr-row-selected: #262626;
+    --fr-row-selected-border: #3d4f6b;
+    --fr-hairline: rgba(255, 255, 255, 0.065);
+
+    /* Frontier Blue Accent (#3B82F6) */
+    --fr-blue: #3b82f6;
+    --fr-blue-hover: #2563eb;
+    --fr-blue-light: #60a5fa;
+    --fr-blue-pale: #93c5fd;
+    --fr-blue-wash: rgba(59, 130, 246, 0.14);
+    --fr-blue-stroke: rgba(59, 130, 246, 0.45);
+    --fr-green: #34d399;
+
+    --fr-ink: #ebebeb;
+    --fr-ink-bright: #f7f8fa;
+    --fr-ink-secondary: #b0b0b0;
+    --fr-ink-muted: #8a8a8a;
+    --fr-ink-faint: #5c5c5c;
+
+    --syn-h: #60a5fa;
+    --syn-bold: #f3f4f6;
+    --syn-code: #93c5fd;
+    --syn-quote: #34d399;
+    --syn-table: #38bdf8;
+    --syn-link: #60a5fa;
+
+    --doc-scale: 1;
+    --left-w: 308px;
+    --right-w: 392px;
+    --font-sans: "FrontierDMSans", "DM Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "FrontierMono", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  }
+
+  /* Hide ALL scrollbar sliders globally + zero drop shadows */
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    box-shadow: none !important;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+  }
+
+  *::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--fr-root-gap);
+    color: var(--fr-ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 3-Pane Docked Workspace Grid with smooth animated open/close transitions */
+  .workspace-grid {
+    display: grid;
+    grid-template-columns: var(--left-w) minmax(0, 1fr) var(--right-w);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 2px;
+    width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    background: var(--fr-root-gap);
+    transition: grid-template-columns 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .workspace-grid.left-closed {
+    --left-w: 0px;
+  }
+
+  .workspace-grid.right-closed {
+    --right-w: 0px;
+  }
+
+  .workspace-grid.right-wide:not(.right-closed) {
+    --right-w: 520px;
+  }
+
+  .workspace-grid.left-closed.right-closed {
+    gap: 0px;
+  }
+
+  .dock-pane {
+    background: var(--fr-dock);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    max-height: 100vh;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Trapezoidal Tab Strip (#0A0A0A, borderless panel-matched #121212 tabs, NO top notch) */
+  .tab-strip {
+    height: 30px;
+    background: var(--fr-tabbar);
+    display: flex;
+    align-items: flex-end;
+    padding: 0 6px;
+    gap: 2px;
+    position: relative;
+    user-select: none;
+    flex-shrink: 0;
+    overflow-x: auto;
+  }
+
+  .trap-tab {
+    height: 27px;
+    padding: 0 14px 0 17px;
+    background: #0e0e0e;
+    color: var(--fr-ink-muted);
+    font-size: 12px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    border: none;
+    outline: none;
+    clip-path: polygon(9px 0, calc(100% - 9px) 0, 100% 100%, 0 100%);
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+
+  .trap-tab:hover {
+    background: #161616;
+    color: var(--fr-ink);
+  }
+
+  .trap-tab.active {
+    background: var(--fr-dock);
+    color: var(--fr-ink-bright);
+  }
+
+  .trap-tab .tab-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--fr-blue);
+    flex-shrink: 0;
+  }
+
+  .trap-tab .tab-x {
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    line-height: 1;
+    color: var(--fr-ink-muted);
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+
+  .trap-tab .tab-x:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+  }
+
+  .tab-add-disc {
+    width: 21px;
+    height: 21px;
+    margin: 0 0 3px 3px;
+    border-radius: 50%;
+    border: none;
+    background: #171717;
+    color: var(--fr-ink-secondary);
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+
+  .tab-add-disc:hover {
+    background: var(--fr-blue);
+    color: #ffffff;
+  }
+
+  /* =========================================================================
+     LEFT PANE — DOCUMENTS BROWSER
+     ========================================================================= */
+  .pane-header {
+    padding: 12px 14px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .pane-title-group {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .pane-title {
+    font-size: 15.5px;
+    font-weight: 600;
+    color: var(--fr-ink-bright);
+    letter-spacing: -0.01em;
+  }
+
+  .pane-count {
+    font-size: 11.5px;
+    color: var(--fr-ink-muted);
+  }
+
+  .round-disc-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .round-disc {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--fr-well-border);
+    background: var(--fr-well);
+    color: var(--fr-ink-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  }
+
+  .round-disc:hover {
+    background: #252528;
+    color: #ffffff;
+    border-color: #3c3c42;
+  }
+
+  .round-disc.active {
+    background: var(--fr-blue-wash);
+    border-color: var(--fr-blue-stroke);
+    color: var(--fr-blue-light);
+  }
+
+  .stat-wells {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 0 14px 10px;
+    flex-shrink: 0;
+  }
+
+  .stat-well {
+    background: var(--fr-well);
+    border: 1px solid var(--fr-well-border);
+    border-radius: 16px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 0.14s ease, background 0.14s ease;
+  }
+
+  .stat-well:hover {
+    background: #1f1f22;
+  }
+
+  .stat-well.selected {
+    border-color: var(--fr-blue);
+    background: rgba(59, 130, 246, 0.08);
+  }
+
+  .stat-well-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .token-disc-blue {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--fr-blue);
+    color: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .token-disc-muted {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #252528;
+    border: 1px solid #38383d;
+    color: var(--fr-ink-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+  }
+
+  .stat-well-bottom {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+
+  .stat-caption {
+    font-size: 11.5px;
+    color: var(--fr-ink-muted);
+  }
+
+  .stat-value {
+    font-size: 19px;
+    font-weight: 600;
+    color: var(--fr-ink-bright);
+    line-height: 1;
+  }
+
+  .filter-strip {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    padding: 0 14px 12px;
+    border-bottom: 1px solid var(--fr-hairline);
+    flex-shrink: 0;
+  }
+
+  .search-capsule {
+    height: 34px;
+    background: var(--fr-well);
+    border: 1px solid var(--fr-well-border);
+    border-radius: 17px;
+    padding: 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .search-capsule:focus-within {
+    border-color: var(--fr-blue);
+    background: var(--fr-deep-input);
+  }
+
+  .search-capsule input {
+    width: 100%;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--fr-ink-bright);
+    font-family: var(--font-sans);
+    font-size: 12.5px;
+  }
+
+  .search-capsule input::placeholder {
+    color: var(--fr-ink-faint);
+  }
+
+  .studio-dropdown-wrap {
+    position: relative;
+  }
+
+  .studio-dropdown-btn {
+    height: 34px;
+    padding: 0 12px;
+    border-radius: 17px;
+    background: var(--fr-well);
+    border: 1px solid var(--fr-well-border);
+    color: var(--fr-ink);
+    font-size: 12px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .studio-dropdown-btn:hover {
+    background: #222226;
+    border-color: #3a3a42;
+  }
+
+  .studio-dropdown-sheet {
+    position: absolute;
+    top: 38px;
+    right: 0;
+    min-width: 176px;
+    background: #0c0c0e;
+    border: 1px solid var(--fr-well-border);
+    border-radius: 12px;
+    padding: 5px;
+    z-index: 40;
+  }
+
+  .studio-dropdown-option {
+    padding: 7px 10px;
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--fr-ink-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .studio-dropdown-option:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+  }
+
+  .studio-dropdown-option.active {
+    background: var(--fr-blue-wash);
+    color: var(--fr-blue-light);
+    font-weight: 600;
+  }
+
+  .tree-scroll {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 10px 10px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .folder-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .folder-row {
+    height: 30px;
+    padding: 0 10px;
+    background: var(--fr-section);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .folder-row:hover {
+    background: #262629;
+  }
+
+  .folder-row-left {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fr-ink-bright);
+    min-width: 0;
+  }
+
+  .folder-icon {
+    width: 14px;
+    height: 11px;
+    border-radius: 2px;
+    background: var(--fr-blue);
+    display: inline-block;
+    flex-shrink: 0;
+  }
+
+  .folder-badge {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--fr-ink-muted);
+  }
+
+  .folder-entries {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-left: 8px;
+    margin-top: 2px;
+  }
+
+  .folder-entries.collapsed {
+    display: none;
+  }
+
+  /* Square 0px corner radius on ALL Outliner entry rows */
+  .entry-row {
+    min-height: 32px;
+    padding: 5px 10px 5px 11px;
+    border-radius: 0px;
+    background: #161618;
+    border: 1px solid rgba(255, 255, 255, 0.035);
+    border-left: 3px solid transparent;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s ease, border-color 0.12s ease;
+  }
+
+  .entry-row:hover {
+    background: var(--fr-row-hover);
+    border-color: #2e2e34;
+  }
+
+  .entry-row.active {
+    background: var(--fr-row-selected);
+    border-color: var(--fr-row-selected-border);
+    border-left: 3px solid var(--fr-blue);
+  }
+
+  .entry-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .entry-square-icon {
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    background: var(--fr-blue-wash);
+    border: 1px solid var(--fr-blue-stroke);
+    color: var(--fr-blue-light);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .entry-name {
+    font-size: 12.5px;
+    color: var(--fr-ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .entry-row.active .entry-name {
+    color: #ffffff;
+    font-weight: 500;
+  }
+
+  .entry-size {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--fr-ink-faint);
+    flex-shrink: 0;
+  }
+
+  /* =========================================================================
+     CENTER PANE — VIEWPORT READER & SOURCE
+     ========================================================================= */
+  .viewport-top-strip {
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--fr-hairline);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-shrink: 0;
+  }
+
+  .doc-identity {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    min-width: 0;
+  }
+
+  .doc-glyph {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: var(--fr-blue-wash);
+    border: 1px solid var(--fr-blue-stroke);
+    color: var(--fr-blue-light);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .doc-titles {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .doc-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .doc-heading {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--fr-ink-bright);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mode-tag {
+    padding: 2px 7px;
+    border-radius: 5px;
+    background: var(--fr-blue-wash);
+    border: 1px solid var(--fr-blue-stroke);
+    color: var(--fr-blue-light);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+
+  .doc-subpath {
+    font-size: 11.5px;
+    color: var(--fr-ink-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mode-recess {
+    background: var(--fr-recess);
+    border: 1px solid var(--fr-well-border);
+    border-radius: 20px;
+    padding: 3px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+  }
+
+  .mode-pill {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--fr-ink-secondary);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 500;
+    height: 26px;
+    padding: 0 13px;
+    border-radius: 14px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.14s ease, color 0.14s ease;
+  }
+
+  .mode-pill:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .mode-pill.active {
+    background: var(--fr-blue);
+    color: #ffffff;
+    font-weight: 600;
+  }
+
+  .viewport-subbar {
+    padding: 8px 18px;
+    border-bottom: 1px solid var(--fr-hairline);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+
+  .subbar-left, .subbar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .capsule-primary {
+    height: 30px;
+    padding: 0 13px;
+    border-radius: 15px;
+    border: 1px solid var(--fr-blue);
+    background: var(--fr-blue);
+    color: #ffffff;
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease;
+  }
+
+  .capsule-primary:hover {
+    background: var(--fr-blue-hover);
+    border-color: var(--fr-blue-hover);
+  }
+
+  .capsule-secondary {
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 15px;
+    border: 1px solid var(--fr-well-border);
+    background: var(--fr-well);
+    color: var(--fr-ink);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  }
+
+  .capsule-secondary:hover {
+    background: #232328;
+    border-color: var(--fr-blue-stroke);
+    color: #ffffff;
+  }
+
+  /* Reopen Pills shown whenever Documents / Notepad / Inspector is closed via X */
+  .reopen-pill {
+    height: 28px;
+    padding: 0 11px;
+    border-radius: 14px;
+    border: 1px solid var(--fr-blue-stroke);
+    background: var(--fr-blue-wash);
+    color: var(--fr-blue-light);
+    font-family: var(--font-sans);
+    font-size: 11.5px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+
+  .reopen-pill:hover {
+    background: var(--fr-blue);
+    color: #ffffff;
+  }
+
+  .zoom-capsule {
+    height: 30px;
+    border-radius: 15px;
+    border: 1px solid var(--fr-well-border);
+    background: var(--fr-well);
+    display: inline-flex;
+    align-items: center;
+    overflow: hidden;
+  }
+
+  .zoom-step {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--fr-ink-secondary);
+    height: 100%;
+    padding: 0 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .zoom-step:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+  }
+
+  .zoom-readout {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--fr-ink-bright);
+    padding: 0 8px;
+    border-left: 1px solid var(--fr-well-border);
+    border-right: 1px solid var(--fr-well-border);
+    cursor: pointer;
+  }
+
+  .document-stage {
+    flex: 1 1 0;
+    min-height: 0;
+    height: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    background: var(--fr-canvas);
+    overflow: hidden;
+  }
+
+  .document-stage.mode-split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .raw-editor-pane {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: auto;
+    overscroll-behavior: contain;
+    background: #0b0c0f;
+    border-right: 1px solid var(--fr-well-border);
+    font-family: var(--font-mono);
+    font-size: calc(12.5px * var(--doc-scale));
+    line-height: 1.62;
+    padding: 14px 0 48px;
+  }
+
+  .source-line {
+    display: grid;
+    grid-template-columns: 54px 1fr;
+    padding-right: 18px;
+  }
+
+  .source-line:hover {
+    background: rgba(59, 130, 246, 0.06);
+  }
+
+  .line-num {
+    text-align: right;
+    padding-right: 16px;
+    color: #525866;
+    user-select: none;
+    font-size: 0.9em;
+  }
+
+  .line-code {
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #d6dae3;
+  }
+
+  .rendered-pane {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    background: var(--fr-canvas);
+    padding: 28px 34px 72px;
+  }
+
+  @keyframes docReveal {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .md-sheet {
+    max-width: 920px;
+    margin: 0 auto;
+    background: var(--fr-dock);
+    border: 1px solid var(--fr-well-border);
+    border-radius: 20px;
+    padding: 32px 36px 40px;
+    font-size: calc(14px * var(--doc-scale));
+    line-height: 1.66;
+    color: #dadde5;
+    animation: docReveal 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .md-sheet h1 {
+    font-size: 1.68em;
+    font-weight: 700;
+    color: #ffffff;
+    padding-bottom: 12px;
+    margin: 0 0 16px;
+    border-bottom: 1px solid var(--fr-well-border);
+    letter-spacing: -0.015em;
+  }
+
+  .md-sheet h2 {
+    font-size: 1.26em;
+    font-weight: 600;
+    color: #f4f6fa;
+    padding-bottom: 7px;
+    margin: 28px 0 12px;
+    border-bottom: 1px solid var(--fr-hairline);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .md-sheet h2::before {
+    content: "";
+    width: 4px;
+    height: 15px;
+    border-radius: 2px;
+    background: var(--fr-blue);
+    display: inline-block;
+    flex-shrink: 0;
+  }
+
+  .md-sheet h3 {
+    font-size: 1.06em;
+    font-weight: 600;
+    color: var(--fr-blue-pale);
+    margin: 20px 0 8px;
+  }
+
+  .md-sheet p {
+    margin: 10px 0;
+  }
+
+  .md-sheet ul, .md-sheet ol {
+    margin: 8px 0 14px 22px;
+  }
+
+  .md-sheet li {
+    margin: 5px 0;
+  }
+
+  .md-sheet strong {
+    color: #ffffff;
+    font-weight: 600;
+  }
+
+  .md-sheet hr {
+    border: none;
+    border-top: 1px solid var(--fr-well-border);
+    margin: 24px 0;
+  }
+
+  .md-sheet blockquote {
+    background: var(--fr-well);
+    border: 1px solid var(--fr-well-border);
+    border-left: 3px solid var(--fr-blue);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin: 14px 0;
+    color: var(--fr-ink-secondary);
+  }
+
+  .md-sheet code {
+    font-family: var(--font-mono);
+    font-size: 0.87em;
+    background: #171b24;
+    border: 1px solid rgba(59, 130, 246, 0.28);
+    color: var(--fr-blue-pale);
+    padding: 1.5px 6px;
+    border-radius: 6px;
+  }
+
+  .md-sheet pre {
+    background: #0b0d11;
+    border: 1px solid var(--fr-well-border);
+    border-radius: 14px;
+    padding: 16px 18px;
+    margin: 14px 0;
+    overflow-x: auto;
+    line-height: 1.52;
+  }
+
+  .md-sheet pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: #d8dee9;
+    font-size: 0.85em;
+  }
+
+  .md-sheet .table-scroll {
+    overflow-x: auto;
+    margin: 14px 0;
+    border: 1px solid var(--fr-well-border);
+    border-radius: 14px;
+    background: #15161a;
+  }
+
+  .md-sheet table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92em;
+  }
+
+  .md-sheet th {
+    background: #1b1d24;
+    color: #f1f5f9;
+    font-size: 0.84em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 13px;
+    border-bottom: 1px solid var(--fr-well-border);
+    border-right: 1px solid rgba(255, 255, 255, 0.04);
+    text-align: left;
+  }
+
+  .md-sheet th:last-child, .md-sheet td:last-child {
+    border-right: none;
+  }
+
+  .md-sheet td {
+    padding: 9px 13px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-right: 1px solid rgba(255, 255, 255, 0.04);
+    vertical-align: top;
+    color: #c9ced8;
+  }
+
+  .md-sheet tr:last-child td {
+    border-bottom: none;
+  }
+
+  .md-sheet tr:hover td {
+    background: rgba(59, 130, 246, 0.05);
+  }
+
+  .md-sheet a {
+    color: var(--fr-blue-light);
+    text-decoration: none;
+  }
+
+  .md-sheet a:hover {
+    text-decoration: underline;
+  }
+
+  .md-sheet mark {
+    background: rgba(59, 130, 246, 0.35);
+    color: #ffffff;
+    border-radius: 3px;
+    padding: 0 3px;
+  }
+
+  @keyframes sectionFlash {
+    0% { background: rgba(59, 130, 246, 0.24); }
+    100% { background: transparent; }
+  }
+
+  .section-highlight {
+    border-radius: 6px;
+    animation: sectionFlash 1.1s ease-out;
+  }
+
+  /* =========================================================================
+     RIGHT PANE — SESSION NOTEPAD + INSPECTOR
+     ========================================================================= */
+  .notepad-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .notepad-toolbar {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--fr-hairline);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .notepad-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .note-filename-capsule {
+    flex: 1;
+    height: 30px;
+    background: var(--fr-deep-input);
+    border: 1px solid var(--fr-well-border);
+    border-radius: 15px;
+    padding: 0 11px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .note-filename-capsule:focus-within {
+    border-color: var(--fr-blue);
+  }
+
+  .note-filename-input {
+    width: 100%;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--fr-ink-bright);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+  }
+
+  .notepad-editor-surface {
+    flex: 1;
+    min-height: 0;
+    margin: 10px 12px;
+    background: #0b0d11;
+    border: 1px solid var(--fr-well-border);
+    border-radius: 16px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: border-color 0.14s ease;
+  }
+
+  .notepad-editor-surface:focus-within {
+    border-color: var(--fr-blue);
+  }
+
+  .notepad-textarea {
+    flex: 1 1 0;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border: none;
+    outline: none;
+    resize: none;
+    background: transparent;
+    color: var(--fr-ink-bright);
+    font-family: var(--font-sans);
+    font-size: 13.5px;
+    line-height: 1.62;
+    padding: 14px 16px 28px;
+  }
+
+  .notepad-textarea.mono-mode {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+  }
+
+  .notepad-textarea::placeholder {
+    color: var(--fr-ink-faint);
+  }
+
+  .notepad-hint-strip {
+    padding: 7px 14px;
+    background: #13151b;
+    border-top: 1px solid var(--fr-hairline);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--fr-ink-muted);
+    flex-shrink: 0;
+  }
+
+  .status-saved {
+    color: var(--fr-blue-light);
+    font-weight: 600;
+  }
+
+  .status-pushed {
+    color: var(--fr-green);
+    font-weight: 600;
+  }
+
+  .inspector-scroll {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .inspector-eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fr-ink-muted);
+  }
+
+  .inspector-card {
+    background: var(--fr-tile);
+    border: 1px solid var(--fr-well-border);
+    border-radius: 16px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .inspector-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--fr-hairline);
+  }
+
+  .inspector-card-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--fr-ink-bright);
+  }
+
+  .inspector-pill {
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--fr-blue-wash);
+    border: 1px solid var(--fr-blue-stroke);
+    color: var(--fr-blue-light);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .kv-grid {
+    display: grid;
+    grid-template-columns: 74px 1fr;
+    gap: 6px 8px;
+    font-size: 12px;
+  }
+
+  .kv-key {
+    color: var(--fr-ink-muted);
+  }
+
+  .kv-val {
+    color: var(--fr-ink-bright);
+    font-family: var(--font-mono);
+    font-size: 11.2px;
+    word-break: break-all;
+  }
+
+  .outline-items {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .outline-row {
+    padding: 6px 9px;
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--fr-ink-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-left: 2px solid transparent;
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+
+  .outline-row:hover {
+    background: rgba(59, 130, 246, 0.10);
+    border-left-color: var(--fr-blue);
+    color: #ffffff;
+  }
+
+  .outline-row.lvl-1 {
+    font-weight: 600;
+    color: var(--fr-ink-bright);
+  }
+
+  .outline-row.lvl-2 {
+    padding-left: 16px;
+  }
+
+  .outline-row.lvl-3 {
+    padding-left: 26px;
+    font-size: 11.5px;
+    color: var(--fr-ink-muted);
+  }
+
+  .pane-footer {
+    height: 28px;
+    background: var(--fr-footer);
+    border-top: 1px solid var(--fr-hairline);
+    padding: 0 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--fr-ink-muted);
+    user-select: none;
+    flex-shrink: 0;
+  }
+
+  .footer-blue {
+    color: var(--fr-blue-light);
+    font-weight: 600;
+  }
+
+  .hidden {
+    display: none !important;
+  }
+
+  .tok-h { color: var(--syn-h); font-weight: 600; }
+  .tok-q { color: var(--syn-quote); }
+  .tok-t { color: var(--syn-table); }
+  .tok-c { color: var(--syn-code); }
+  .tok-b { color: var(--syn-bold); font-weight: 600; }
+  .tok-l { color: var(--syn-link); }
+</style>
+</head>
+<body>
+
+<input type="file" id="localFileInput" accept=".md,.markdown,.txt" multiple class="hidden">
+
+<div class="workspace-grid" id="workspaceGrid">
+
+  <!-- =======================================================================
+       LEFT PANE: DOCUMENTS (WITH X TO CLOSE & REOPEN)
+       ======================================================================= -->
+  <aside class="dock-pane" id="leftPane">
+    <div class="tab-strip">
+      <div class="trap-tab active">
+        <span class="tab-dot"></span>
+        <span>Documents</span>
+        <span class="tab-x" id="btnCloseDocumentsTab" title="Close Documents Pane">×</span>
+      </div>
+      <button class="tab-add-disc" id="btnAddTabLeft" title="Open local .md file">+</button>
+    </div>
+
+    <div class="pane-header">
+      <div class="pane-title-group">
+        <span class="pane-title">Documents</span>
+        <span class="pane-count" id="headerTotalLabel">0 files</span>
+      </div>
+      <div class="round-disc-group">
+        <button class="round-disc" id="btnRefreshTree" title="Refresh live files from disk">↻</button>
+        <button class="round-disc" id="btnOpenLocalIcon" title="Open local .md file">+</button>
+      </div>
+    </div>
+
+    <div class="stat-wells">
+      <div class="stat-well" id="wellPlans" onclick="setFolderScope('plans')">
+        <div class="stat-well-top">
+          <span class="token-disc-blue">✓</span>
+        </div>
+        <div class="stat-well-bottom">
+          <span class="stat-caption">Plans</span>
+          <span class="stat-value" id="statPlansCount">0</span>
+        </div>
+      </div>
+
+      <div class="stat-well selected" id="wellAll" onclick="setFolderScope('all')">
+        <div class="stat-well-top">
+          <span class="token-disc-muted">≡</span>
+        </div>
+        <div class="stat-well-bottom">
+          <span class="stat-caption">All Docs</span>
+          <span class="stat-value" id="statAllCount">0</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="filter-strip">
+      <div class="search-capsule">
+        <span style="color:var(--fr-ink-muted);font-size:12px;">⌕</span>
+        <input type="text" id="searchInput" placeholder="Search .md files...">
+      </div>
+
+      <div class="studio-dropdown-wrap" id="dropdownWrap">
+        <button class="studio-dropdown-btn" id="dropdownBtn">
+          <span id="dropdownLabel">All Folders</span>
+          <span style="color:var(--fr-ink-muted);font-size:10px;">▾</span>
+        </button>
+        <div class="studio-dropdown-sheet hidden" id="dropdownSheet">
+          <div class="studio-dropdown-option active" data-scope="all">All Folders</div>
+          <div class="studio-dropdown-option" data-scope="plans">Plans Only</div>
+          <div class="studio-dropdown-option" data-scope="docs">Governance Docs</div>
+          <div class="studio-dropdown-option" data-scope="skills">Agentic Skills</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tree-scroll smooth-scroll-surface" id="treeContainer"></div>
+
+    <div class="pane-footer">
+      <span class="footer-blue" id="serverModeFooter">● EMBEDDED</span>
+      <span id="leftFooterSummary">0 VISIBLE</span>
+    </div>
+  </aside>
+
+  <!-- =======================================================================
+       CENTER PANE: MARKDOWN VIEWPORT (CLEAN TAB STRIP — NO TOP NOTCH)
+       ======================================================================= -->
+  <main class="dock-pane" id="centerPane">
+    <div class="tab-strip" id="tabsStrip"></div>
+
+    <div class="viewport-top-strip">
+      <div class="doc-identity">
+        <span class="doc-glyph">MD</span>
+        <div class="doc-titles">
+          <div class="doc-title-row">
+            <span class="doc-heading" id="activeDocTitle">Select a document</span>
+            <span class="mode-tag" id="activeGroupBadge">PLANS</span>
+          </div>
+          <span class="doc-subpath" id="activeDocPath">—</span>
+        </div>
+      </div>
+
+      <div class="mode-recess">
+        <button class="mode-pill active" data-mode="preview" onclick="setViewMode('preview', this)">Preview</button>
+        <button class="mode-pill" data-mode="split" onclick="setViewMode('split', this)">Split</button>
+        <button class="mode-pill" data-mode="source" onclick="setViewMode('source', this)">Raw .md</button>
+      </div>
+    </div>
+
+    <div class="viewport-subbar">
+      <div class="subbar-left">
+        <!-- Reopen pills appear here whenever Documents / Notepad / Inspector is closed -->
+        <button class="reopen-pill hidden" id="btnReopenDocuments" title="Reopen Documents Pane">+ Documents</button>
+
+        <button class="capsule-primary" id="btnOpenLocalMain">
+          <span>+</span>
+          <span>Open .md</span>
+        </button>
+
+        <div class="zoom-capsule">
+          <button class="zoom-step" onclick="adjustZoom(-0.08)" title="Decrease Font Scale">−</button>
+          <span class="zoom-readout" id="zoomLabel" onclick="resetZoom()" title="Reset Scale">100%</span>
+          <button class="zoom-step" onclick="adjustZoom(0.08)" title="Increase Font Scale">+</button>
+        </div>
+
+        <button class="round-disc" id="btnScrollTop" title="Smooth Scroll to Top">↑</button>
+        <span id="matchInfo" style="font-family:var(--font-mono);font-size:11.5px;color:var(--fr-blue-light);"></span>
+      </div>
+
+      <div class="subbar-right">
+        <button class="reopen-pill hidden" id="btnReopenNotepad" title="Reopen Session Notepad">+ Notepad</button>
+        <button class="reopen-pill hidden" id="btnReopenInspector" title="Reopen Document Inspector">+ Inspector</button>
+      </div>
+    </div>
+
+    <div class="document-stage" id="documentStage">
+      <div class="raw-editor-pane smooth-scroll-surface hidden" id="sourcePane"></div>
+      <div class="rendered-pane smooth-scroll-surface" id="previewPane">
+        <article class="md-sheet" id="mdBody"></article>
+      </div>
+    </div>
+
+    <div class="pane-footer">
+      <span><span class="footer-blue">READY</span> &nbsp;—&nbsp; <span id="footerMetrics">LINES 0 · WORDS 0 · 0.0 KB</span></span>
+      <span>UTF-8 · LF · SMOOTH SCROLL</span>
+    </div>
+  </main>
+
+  <!-- =======================================================================
+       RIGHT PANE: SESSION NOTEPAD + INSPECTOR (EACH WITH X TO CLOSE & REOPEN)
+       ======================================================================= -->
+  <aside class="dock-pane" id="rightPane">
+    <div class="tab-strip" id="rightTabStrip"></div>
+
+    <!-- NOTEPAD VIEW -->
+    <div class="notepad-wrap" id="notepadView">
+      <div class="notepad-toolbar">
+        <div class="notepad-row">
+          <div class="note-filename-capsule" title="Saved directly into Documentation/Plans/ inside the live workspace">
+            <span style="color:var(--fr-blue-light);font-size:11px;">✎</span>
+            <input type="text" class="note-filename-input" id="noteFilenameInput" value="SessionNotes.md" spellcheck="false">
+          </div>
+          <button class="round-disc" id="btnNewNote" title="Create new note in Documentation/Plans/">+</button>
+          <button class="round-disc" id="btnToggleMonoNote" title="Toggle Monospace / Sans Font">M</button>
+          <button class="round-disc" id="btnWideNotepad" title="Expand / Narrow Notepad Width">⤢</button>
+        </div>
+
+        <div class="notepad-row">
+          <button class="capsule-primary" id="btnPushGithub" title="Save & Push note to GitHub (origin/arena/429d7dc7-frontier)">
+            <span>↑</span>
+            <span>Push to GitHub</span>
+          </button>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <button class="capsule-secondary" id="btnSaveSession" title="Save immediately to live session workspace (Ctrl+S)">Save</button>
+            <button class="capsule-secondary" id="btnCopyNote" title="Copy note to clipboard">Copy</button>
+            <button class="round-disc" id="btnDownloadNote" title="Download note as .md file">⇩</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="notepad-editor-surface">
+        <textarea
+          id="notepadTextarea"
+          class="notepad-textarea smooth-scroll-surface"
+          placeholder="Write or paste notes, feedback, or snippets here while reviewing plans...&#10;&#10;• Auto-saves directly into Documentation/Plans/SessionNotes.md in this session&#10;• Click 'Push to GitHub' above to commit & push to GitHub anytime"
+        ></textarea>
+        <div class="notepad-hint-strip">
+          <span id="noteSaveStatus" class="status-saved">● Ready</span>
+          <span id="noteMetrics">0 words</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- INSPECTOR VIEW -->
+    <div class="inspector-scroll smooth-scroll-surface hidden" id="inspectorView">
+      <div class="inspector-eyebrow">Markdown Inspector</div>
+
+      <div class="inspector-card">
+        <div class="inspector-card-header">
+          <span class="inspector-card-title">Document Properties</span>
+          <span class="inspector-pill">BLUE ACCENT</span>
+        </div>
+        <div class="kv-grid">
+          <span class="kv-key">Folder</span>
+          <span class="kv-val" id="metaGroup">—</span>
+          <span class="kv-key">Lines</span>
+          <span class="kv-val" id="metaLines">0</span>
+          <span class="kv-key">Words</span>
+          <span class="kv-val" id="metaWords">0</span>
+          <span class="kv-key">Size</span>
+          <span class="kv-val" id="metaSize">0.0 KB</span>
+        </div>
+      </div>
+
+      <div class="inspector-card">
+        <div class="inspector-card-header">
+          <span class="inspector-card-title">Section Outline</span>
+          <span class="inspector-pill" id="outlineCountPill">0</span>
+        </div>
+        <div class="outline-items" id="outlineList"></div>
+      </div>
+    </div>
+
+    <div class="pane-footer">
+      <span id="rightFooterLeft">Documentation/Plans/SessionNotes.md</span>
+      <span>Frontier Studio</span>
+    </div>
+  </aside>
+
+</div>
+
+<script id="embeddedDocs" type="application/json">[{"path": "Documentation/Plans/ComponentViewerPortPlan.md", "name": "ComponentViewerPortPlan.md", "group": "Plans", "size": 17074, "mtime": 1794769109.892, "content": "# Component Viewer — C++20 Port Plan (Workspace 1 of 2)\n\n> **TL;DR:** Port `Experimental/ComponentViewer/` (c7egoist, `78a1375`) into the C++20 engine on `unassignedinbox/Frontier` @ `arena/6eeea758-frontier` (`7eb76ce`) as its own workspace, **`FrontierComponentViewer`**. The **Geometry Compile** import overlay moves out into the second workspace, **`FrontierGeometryCompiler`** ([GeometryCompilerPortPlan.md](GeometryCompilerPortPlan.md)). The two hand compiled assets to each other through `.GeometrySpace` files and a live `CompiledGeometryExchange`. The work runs in 6 milestones. It reuses the existing `OutlinerPanel` / `InspectorPanel` / `ViewportPanel` / `ContentBrowserPanel`, `TieredWorldRenderSequence`, `OrbitMode` and `ViewportPickQuery`. The new engine code is the articulation solver, the drivetrain, the component tree, and eight `.slang` overlay units. Every milestone ends in an `Exhibits/` validation with `.png` proofs. 🔴 Four decisions need your answer first (§1, marked 🚩).\n\n---\n\n## 1. 🏆 Key Decisions\n\n*(Legend — Fit / Parity / Maintainability: 🔴 = best, 🚩 = moderate, ✔️ = lowest · Effort: ✔️ = lowest/best)*\n\n### 1.1 🚩 Where the C++ code lands\n\n| Rank | Option | Fit | Effort | Summary |\n| :---: | :--- | :---: | :---: | :--- |\n| 🏆 🥇 | **A — Work directly on `unassignedinbox/Frontier`** (a new Arena session on that repo, or push access for this one) | 🔴 | ✔️ | The engine, CMake, Exhibits and governance all live there. There's zero duplication, which `ImportantNotes.md` §4 requires. |\n| 🥈 | B — Import the engine tree (`7eb76ce`) into `c7egoist/Frontier` and build here | 🚩 | 🚩 | Works today, but forks about 700 MB of history. Every engine fix then has to be merged in both directions. |\n| 🥉 | C — Keep the HTML here and send C++ patches as files | ✔️ | 🔴 | Can't build or capture `.png` proofs in CI. Not workable past M1. |\n\n🔴 **Blocker:** this session can **read** `unassignedinbox/Frontier`, but `gh` reports `push: false`. **Recommendation: A.** Until you answer, all C++ work stays planned. Only the HTML ground-truth split (M0) can start here.\n\n### 1.2 🚩 HTML ground truth before C++ (CLAUDE.md §2.5 \"zero UI invention\")\n\n| Rank | Option | Parity | Effort | Summary |\n| :---: | :--- | :---: | :---: | :--- |\n| 🏆 🥇 | **A — M0: split the HTML first.** `Experimental/ComponentViewer/` keeps only the Blueprint editor. Geometry Compile moves to `Experimental/GeometryCompiler/` (merged with the reference studio). | 🔴 | 🚩 | Each C++ workspace gets a 1:1 HTML mirror to screenshot and diff against. |\n| 🥈 | B — Port straight from today's merged prototype | 🚩 | ✔️ | The C++ split would be UI that exists in no HTML reference, which breaks the zero-invention rule. |\n\n### 1.3 Viewport renderer\n\n| Rank | Option | Fit | Parity | Summary |\n| :---: | :--- | :---: | :---: | :--- |\n| 🏆 🥇 | **A — `TieredWorldRenderSequence` (Tier 1 GTX) fed by a new `ComponentTreeScene` source** | 🔴 | 🔴 | This is the canonical World renderer (CLAUDE.md §2.5 ②). Channels and overlays plug in as `.slang` units. |\n| 🥈 | B — Reuse `MaterialPreviewRenderer` | 🚩 | 🚩 | It's built for single-specimen previews. There's no multi-instance scene, no picking and no overlays. |\n| 🥉 | C — A new forward renderer that mirrors three.js | ✔️ | 🔴 | 🔴 Forbidden: \"never invent replacement renderers\". |\n\n### 1.4 🚩 Socket physics (8 joint categories + dock)\n\n| Rank | Option | Determinism | Parity | Effort | Summary |\n| :---: | :--- | :---: | :---: | :---: | :--- |\n| 🏆 🥇 | **A — Port `Sockets.js` math into `SimulationSpace/Articulation/`** | 🔴 | 🔴 | ✔️ | Closed-form springs, the pendulum and the dock phases. The 3 socket checks carry over number for number. No vtables, plain structs. |\n| 🥈 | B — Jolt constraints (pinned, still unused in `Engine/`) | 🚩 | 🚩 | 🔴 | Adds the first Jolt integration under a viewer. The tuned numbers (1.2 kN break, squat ratio) would drift. |\n| 🥉 | C — A then B: port now, swap the dock and tether to Jolt in the Phase 5 physics work | 🔴 | 🔴 | 🚩 | Same as A for this port. Recorded as `BKL` follow-up. |\n\n💡 **Recommendation:** A now, with C noted in `Backlog.md`.\n\n### 1.5 🚩 Persistence of a Blueprint\n\n| Rank | Option | Fit | Summary |\n| :---: | :--- | :---: | :--- |\n| 🏆 🥇 | **A — New `ComponentCodec` → `.ComponentSpace` on `SpaceContainerCodec`** | 🔴 | Tier 1 PascalCase manifest (tree, properties, joint parameters, torque curve) + Tier 2 binary (icon). Meshes are referenced by `.GeometrySpace` path, never copied. |\n| 🥈 | B — Embed in `.ProjectSpace` | 🚩 | Couples every Blueprint save to the project file. Revision history becomes project-wide. |\n\n---\n\n## 2. 🔍 Ground Truth (HTML, captured 2026-11-15)\n\n| Workspace | Reference capture |\n| :--- | :--- |\n| Component Viewer (Components · Viewport · Details · Drawer) | ![Component Viewer](Images/ComponentViewerReference.png) |\n\n📝 These captures are 1560×980 and taken with headless Chromium. In M0 they're re-shot at 1600×980 (the size `FrontierParticle` launches at) and saved to `Exhibits/Images/ComponentViewer/Reference/`.\n\n---\n\n## 3. 🧩 Two-Workspace Split\n\n```text\n Experimental/ComponentViewer (today, one page)\n ├── Geometry Compile overlay ───────────────► FrontierGeometryCompiler   (Workspace 2, separate plan)\n │     8 compile steps, readers, LOD/SDF/UV         writes  <Name>.GeometrySpace  (+ ClusterPyramid, SDF, UV, collision, icon)\n │\n └── Blueprint editor ───────────────────────► FrontierComponentViewer    (Workspace 1, this plan)\n       Components · Viewport · Details · Drawer      reads   <Name>.GeometrySpace\n       Sockets · Simulate · Glide camera             writes  BP_<Name>.ComponentSpace\n\n FeatureSet (Frontier.exe): both docked as tabs; \"Compile\" in Component Viewer\n activates the Geometry Compiler tab and CompiledGeometryExchange returns the result live.\n Standalone: each executable boots alone; handoff is the .GeometrySpace file on disk.\n```\n\n| Concern | Component Viewer owns | Geometry Compiler owns |\n| :--- | :--- | :--- |\n| Import of OBJ / glTF / GLB / STL / PLY / FCT1 | ✔️ drops onto Content, forwards the file | 🔴 reads it, compiles it |\n| Cluster LOD, SDF, UV charts, collision fit, icon | Displays the results (LOD channel, collision volumes, drawer tiles) | 🔴 Builds them |\n| Component tree, sockets, drive preview | 🔴 | ✔️ |\n| `WorkspaceCategory` | `ComponentViewer = 11u` (new) | `GeometryCompiler = 12u` (new) |\n\n---\n\n## 4. 🔍 HTML → C++ Mapping (with naming compliance)\n\n### 4.1 Reused 1:1 (zero new UI)\n\n| HTML region / file | Existing C++ unit | Notes |\n| :--- | :--- | :--- |\n| Docks, trapezoid tabs, 2 px seam | `WorkspaceDockContainer` + `WorkspaceTabStrip` | Components · Viewport · Details panes |\n| Top notch | `PanelExpansionTab` + `ControlCentrePanel` | Shortcut list moves to a Control Centre page |\n| *Components* tree, eye toggle, drag to re-attach, warnings | `OutlinerPanel` (nested tree attachment, drag reorder, visibility counters) | The \"Movement components\" section becomes an Outliner folder |\n| **Add** list | `OutlinerPanel` `+` construct dropdown → `DropdownSelector` | Component categories + every compiled Content asset + Sockets group |\n| *Details* | `InspectorPanel` + `ScalarSlider` · `ExclusiveSelector` · `DropdownSelector` · `TextInputField` · `CapsuleButton` | Driven by `ComponentPropertyRegister` specs (§4.2) |\n| Joint category tiles | `InspectorPanel` capability tiles | Same 8 tiles. Parameters are kept when switching. |\n| *Drawer* (compiled-data tiles, torque curve) | `ContentBrowserPanel` drawer + `ScalarCurveEditor` | Linear / smooth / ease / step interpolation. C++ name `CompiledAssetShelfPanel` (`draw` is banned) |\n| Simulate strip | `ViewportPanel` Edit / Simulate / Play-Pause + `SimulationPlaybackControls` | Space toggles |\n| Glide camera | `CameraComponent` + `Modes/OrbitMode` (pivot, log-distance smoothing already present) | Adds: pivot slides to the depth under the cursor (from `ViewportPickQuery`), dolly zoom, eased flights, turntable |\n| Click select, drop asset on viewport | `ViewportPickQuery` (`R32G32B32A32_UINT`) | The returned component slot index selects the Outliner row |\n| Transform handles | `TransformGizmo` + `GizmoRasterization.slang` | Not in the HTML yet. Kept off unless asked. |\n| Toasts | `NotificationSequence` | — |\n\n### 4.2 New units (names checked against `BannedWordsVocabulary.md` + the 7 naming gates)\n\n| HTML source | Banned word avoided | New C++ unit | Location |\n| :--- | :--- | :--- | :--- |\n| `Blueprint.js` component tree | `Node`, `Parent`/`Child`, `Hierarchy` | `ComponentBlueprint` (contiguous slots with `EnclosingIndex` · `FirstNestedIndex` · `NextPeerIndex` · `DepthLevel`) | `Engine/Workspaces/ComponentViewer/` |\n| `COMPONENT_CLASSES` (13 classes) | `Kind`, `Actor` | `ComponentCategory` enum (`Origin`, `Scene`, `Socket`, `StaticGeometry`, `PointLight`, `SpotLight`, `Camera`, `BoxCollision`, `SphereCollision`, `CapsuleCollision`, `Arrow`, `VehicleMovement`, `RotatingMovement`) | same |\n| Property specs | `Info`, `Data`, `value` | `ComponentPropertyRegister` (+ `PropertySpecEntry`) | same |\n| Validation | — | `BlueprintValidation` | same |\n| `StaticMesh` | `mesh` | `StaticGeometry` (references a `GeometryInstance`) | same |\n| `Sockets.js` kinds | `Kind` | `JointCategory` (`Fixed`, `Hinge`, `Slider`, `Ball`, `Spring`, `Spin`, `Tether`, `Dock`) | `Engine/SimulationSpace/Articulation/` |\n| Socket step (springs, pendulum, sweeps) | `Update`, `state` | `ArticulatedJointSolver::Advance(Δt)` → `JointPose` | same |\n| \"Joint frame\" | `Frame` | `JointBasis` | same |\n| Dock state machine | `state` | `DockCouplingSolver` + `DockCouplingPhase` (`Connected`, `Seeking`, `Released`, `Rejected`) | same |\n| Torque curve + drive preview | — | `TorqueCurveSampler`, `DrivetrainIntegrator` | `Engine/SimulationSpace/Vehicle/` |\n| `Render.js` `Stage` | `stage` | `ComponentTreeScene` (scene source for `TieredWorldRenderSequence`) | `Engine/GeometricRaster/Component/` |\n| 7 channels (Lit … Collision) | `Pass` | `ComponentChannelCategory` + `ComponentChannelShading.slang` | `Engine/Shaders/GeometricRaster/` |\n| Construction Script node graph | `Node`, `Graph` | `ConstructionSequenceCanvas` (on `VectorCanvasRasterizer`) | `Engine/Workspaces/ComponentViewer/` |\n| `VEHICLE_PALETTE` | `palette` | `MaterialSlotSwatches` | same |\n| Debug looks, compile-step pipeline | `card`, `pipeline` | \"tiles\", `CompileStepSequence` (Workspace 2) | — |\n\n### 4.3 GPU overlay units (🔴 mandatory: `.slang` only, never CPU, never `ImDrawList`)\n\n| HTML look (`Visuals.js`, `SocketVisuals.js`, `Camera.js`) | `.slang` unit | Host |\n| :--- | :--- | :--- |\n| Collision field (fresnel rim, scan bands), SDF collider dots | `CollisionVolumeRasterization.slang` | `SpatialAnnotation` |\n| Spot / camera light volumes, point-light glow and radius | `LightVolumeRasterization.slang` | `SpatialAnnotation` |\n| 8 joint looks (puck, hinge fan, slider rail, ball cone, coil, spin arcs, tether, dock iris and flux) | `JointIndicatorRasterization.slang` (one unit, category passed as a push constant) | `AnnotationExtension` |\n| Selection glow (fresnel on the selected materials, no second instance) | branch inside `ComponentChannelShading.slang` | `ComponentTreeScene` |\n| Dot floor (metres / quarters, tinted axes) | `NavigationOverlay` grid shader variant | `EditorLifecycle` overlay hooks |\n| Orientation dial, lens readout, turntable switch | `NavigationOverlay` orientation indicator; chips stay ImGui chrome | `ViewportPanel` |\n| Pivot anchors, arrow, open-border beads, density heat | `SpatialAnnotation` / `VectorAnnotation` | — |\n| Pings, floating socket tag, x-ray of the selected socket | `TextAnnotation` + depth-ignored raster in `JointIndicatorRasterization` | — |\n| Cinema camera body | Static `PolygonNetwork` built from `AnalyticPrimitives` | `ComponentTreeScene` |\n\n### 4.4 Axis convention (🔴 differs from the HTML)\n\n| | Forward | Left | Up | HTML → engine |\n| :--- | :--- | :--- | :--- | :--- |\n| HTML (three.js after import) | `+X` | `−Z` | `+Y` | `(x, y, z) ↦ (x, −z, y)` |\n| Engine (`EngineConstants.h`, right-hand rule) | `+X` | `+Y` | `+Z` | identity |\n\n💡 The FCT1 vehicle files are authored Z-up with +X forward, so in C++ they load **without** conversion. Every constant in `Main.js` (dock at `[−2.9822, 0.8367, 0]`, wing span on the width axis) is remapped once in `VehicleBlueprintPreset`.\n\n---\n\n## 5. 🚧 Milestones\n\n| # | Milestone | Deliverables | Exit gate (Exhibit + `.png` → `Exhibits/Images/ComponentViewer/`) |\n| :---: | :--- | :--- | :--- |\n| **M0** | HTML ground-truth split | `Experimental/ComponentViewer` keeps only the Blueprint editor. Compile opens `Experimental/GeometryCompiler`. Reference captures. | Existing HTML Check (20) + Smoke pass on both pages. 6 reference `.png` (each pane, Simulate, Construction Script, sockets close-up). |\n| **M1** | Headless Blueprint | `ComponentBlueprint`, `ComponentCategory`, `ComponentPropertyRegister`, `BlueprintValidation`, `TorqueCurveSampler`, `DrivetrainIntegrator`, `ComponentCodec` (`.ComponentSpace`), `VehicleBlueprintPreset` (BP_ControlVehicle: 1300 kg, 520 N·m peak, 7200 rpm) | `ComponentBlueprintValidation`: ports checks 12–14 (tree add, attach, cycle refusal, delete lifts nested slots; validation flags; torque samples, acceleration, shifting) + `.ComponentSpace` round-trip. 📈 Proof: torque curve chart + drive timeline chart. |\n| **M2** | Articulation | `JointCategory`, `JointBasis`, `ArticulatedJointSolver`, `DockCouplingSolver` (key match, snap radius, 1.2 kN break, wrong-key bounce) | `ArticulatedJointValidation`: ports checks 18–20 with identical tolerances. 📈 Proof: spring settle and squat, pendulum period, dock force/phase timeline. |\n| **M3** | Viewport | `ComponentTreeScene` → `TieredWorldRenderSequence`, 7 channels, selection fresnel, picking, glide camera additions | `ComponentViewportValidation`: ports checks 15–17 (fitting the view, short-way flights, dolly-zoom size, density ramp, exact restore of the selection tint). Proof: 1 `.png` per channel through SwiftShader. |\n| **M4** | Overlays | The units in §4.3 | Proof: joint gallery (8 categories × idle and selected), light volumes, collision volumes. ≤ 5% pixel delta against the M0 references (`MaximumOptimizationPixelDelta`). |\n| **M5** | Panels + host | `ComponentOutlinerPanel`, `ComponentInspectorPanel`, `ComponentViewportHost`, `CompiledAssetShelfPanel`, `ConstructionSequenceCanvas`, `ComponentViewerWorkspaceHost`, `ComponentViewerSession` | `ComponentViewerWorkspaceUIValidation`: scripted clicks mirroring `SmokeComponentViewer.mjs` (select `RearWingSocket`, release at 1.2, Kick, Simulate). Side-by-side `.png` against the HTML. |\n| **M6** | Executable + FeatureSet | `Engine/Lifecycle/FrontierComponentViewerLaunch.cpp`, `frontier_register_desktop_app(FrontierComponentViewer …)`, `WorkspaceCategory::ComponentViewer`, `CompiledGeometryExchange` intake | CTest `FrontierComponentViewerExecutableSmoke --frames=3 --capture-png=…`. Updates to `FolderStructure.md`, `Tracker.md`, `Backlog.md`. |\n\n### 5.1 Order with Workspace 2\n\n```text\n Wave 1  M0 ─────────────── G0                     (HTML split, both workspaces)\n Wave 2  M1 · M2            G1 · G2                (headless, parallel; no GPU)\n Wave 3  M3 ── M4           G3 · G4 · G5 · G6      (GPU; M3 needs G2's compiled .GeometrySpace)\n Wave 4  M5                 G7                     (panels + hosts)\n Wave 5  M6 ◄──── CompiledGeometryExchange ────► G8 (executables, FeatureSet handoff)\n```\n\n---\n\n## 6. ⚠️ Risks\n\n| Risk | Rating | Mitigation |\n| :--- | :---: | :--- |\n| No push access to the engine repo (§1.1) | 🔴 | Decide before Wave 2. M0 runs here meanwhile. |\n| three.js look (fresnel tint, additive beams) vs Tier 1 GTX shading | 🚩 | M4 pixel-delta gate against the M0 captures. Tune in `.slang`, not in the HTML. |\n| Glide camera \"grab the surface\" depends on pick depth | 🚩 | `ViewportPickQuery` already returns depth. Fall back to the pivot plane on a miss (same as the HTML). |\n| Banned-word drift while porting (`mesh`, `Node`, `state`, `Frame`) | 🚩 | Naming map §4.2 is binding. Grep gate added to each Exhibit. |\n| Android touch for orbit / pan / dolly | ✔️ | Routed through `InputExchange` touch streams. Pinch recognizer is `BKL-007`. |\n\n---\n\n## 7. ✔️ Answers Needed\n\n1. **§1.1** — Can work move to `unassignedinbox/Frontier` (recommended), or should the engine be imported here?\n2. **§1.2** — OK to start with the M0 HTML split?\n3. **§1.4** — Port the socket math (recommended), or go straight to Jolt?\n4. **§1.5** — `.ComponentSpace` per Blueprint (recommended)?\n"}, {"path": "Documentation/Plans/GeometryCompilerPortPlan.md", "name": "GeometryCompilerPortPlan.md", "group": "Plans", "size": 12361, "mtime": 1794769098.224, "content": "# Geometry Compiler — C++20 Port Plan (Workspace 2 of 2)\n\n> **TL;DR:** **`FrontierGeometryCompiler`** is a separate workspace from the Component Viewer ([ComponentViewerPortPlan.md](ComponentViewerPortPlan.md)). It merges two HTML sources:\n> - the **Geometry Compile** step inspector from `c7egoist/Frontier` `Experimental/ComponentViewer/`: 8 steps, 6 readers, material-aware cluster LOD;\n> - the **Geometry Compiler studio** from `unassignedinbox/Frontier` `Experimental/GeometryCompiler/`: cluster LOD runtime views, sparse 8×8×8 SDF workspace, UV workspace, geometry editor, icon capture.\n>\n> Most of the engine already exists (`ClusterPyramid`, `SignedDistanceVolume`, `GpuSdfBaker`, UV `Solvers/`, `GeometryInterchange`, `ClusterCullEncoder`, `VisibilityClusterRasterization`). The port adds:\n> - STL / PLY / GLB / FCT1 readers;\n> - a headless `CompileStepSequence` with staleness;\n> - material seam policies in `ClusterPyramid`;\n> - a conservative SDF `Mip1` and raymarch `.slang`;\n> - collision fits and icon capture;\n> - the workspace panes.\n>\n> 🔴 One finding blocks part of the work: the **Hybrid** solver chosen in `GeometryCompilerFindingsReport.md` has **no source on the branch** (`CompilerSolvers.js` is missing; see §1.2).\n\n---\n\n## 1. 🏆 Key Decisions\n\n*(Legend — Parity / Fit: 🔴 = best, 🚩 = moderate, ✔️ = lowest · Effort: ✔️ = lowest/best)*\n\n### 1.1 🚩 Workspace layout (the two HTML sources disagree)\n\n| Rank | Option | Parity | Fit | Summary |\n| :---: | :--- | :---: | :---: | :--- |\n| 🏆 🥇 | **A — Step-driven shell** (Import · Viewport · Settings, the Geometry Compile layout). The studio's tools fold into their steps. | 🔴 | 🔴 | \"Compiler\" means steps run top to bottom with staleness. Cluster LOD step gets the studio's view modes (Clusters, Groups, LOD level, Triangles, Error), Freeze LOD, instance grid, frustum/cone cull. SDF Bake step gets the 4 raymarch modes. UV Charts step gets the UV workspace. Geometry step gets the geometry editor. |\n| 🥈 | B — Studio shell (Outliner · Viewport · Inspector, the reference studio layout) with the steps as an Inspector section | 🚩 | 🚩 | Keeps the LOD playground first. The compile order and staleness become hard to see. |\n| 🥉 | C — Both, switched by a header segment | 🔴 | ✔️ | Two layouts to keep at parity, and twice the Exhibit captures. |\n\n💡 **Recommendation: A**, prototyped first in HTML (G0) so the C++ has a 1:1 reference (CLAUDE.md §2.5).\n\n### 1.2 🚩 The missing Hybrid solver\n\n| Rank | Option | Summary |\n| :---: | :--- | :--- |\n| 🏆 🥇 | **A — You point to the branch that holds `CompilerSolvers.js`** (Hybrid probabilistic QEM, adaptive shrinkwrap, retopo-seeded `LOD 3`) | Port it 1:1 with the locked constants from the report (`seedRatio = 0.28`, `minAngleGuardRad = 0.20`, …). |\n| 🥈 | B — Ship G3 on today's `ClusterPyramid` QEM + material seams. Hybrid goes to `Backlog.md`. | Nothing blocks. The report's thin-wall result (`0` breaches vs `11`) isn't delivered yet. |\n| 🥉 | C — Re-derive Hybrid from the report text alone | 🔴 High drift risk. The report says relaxing those constants caused stalls, spikes and chord sag. |\n\n📝 Also checked: the report quotes **14/14** suites, but `GeometryCompilerValidation.mjs` on `7eb76ce` holds **6 suites (6/6 PASS, run 2026-11-15)**. Every C++ gate below is defined against the 6 suites that exist, plus the 11 compile checks from Component Viewer.\n\n### 1.3 Compiled asset format\n\n| Rank | Option | Summary |\n| :---: | :--- | :--- |\n| 🏆 🥇 | **A — One `.GeometrySpace` per asset with Tier 2 sections:** `PolygonNetwork`, `ClusterPyramid` (`SerializeToBinaryBytes`), `SparseDistanceVolume` (`.FVOL` payload), UV charts, collision, icon (PNG), metadata manifest | One file per asset, one checksum, and the Component Viewer reads one path. |\n| 🥈 | B — Sidecar files (`.FVOL`, `.png`, …) | Paths can drift. Stale-detection is spread across files. |\n\n---\n\n## 2. 🔍 Ground Truth (HTML, captured 2026-11-15)\n\n| Source | Capture |\n| :--- | :--- |\n| Geometry Compile steps (c7egoist) | ![Geometry Compile](Images/GeometryCompileStepsReference.png) |\n| Geometry Compiler studio (unassignedinbox) | ![Geometry Compiler studio](Images/GeometryCompilerStudioReference.png) |\n\n---\n\n## 3. 🔍 Feature → C++ Mapping\n\n### 3.1 Compile steps (headless `GeometryCompileSession` + `CompileStepSequence`)\n\n| Step | HTML behaviour | C++ (reuse ✔️ / new 🚧) |\n| :--- | :--- | :--- |\n| 01 Source & Units | Readers; m/cm/mm/in/ft; up axis; weld tolerance; open / non-manifold edge report | ✔️ `GeometryInterchange` OBJ + glTF · 🚧 `ImportStlBytes`, `ImportPlyBytes`, `ImportGlbBytes`, `ImportFct1Bytes` (OBJ `usemtl` → `FacePartitionRegister` slots) · 🚧 `ConnectivityReport` (open edges, non-manifold, parts) |\n| 02 Geometry | Scale, mirror, rotate, pivot (centre / floor / authored), flip, normals (smooth / flat / angle split) | 🚧 `GeometryTransformDirectives` + `CornerNormalSplitter` (studio Geometry Editor = same directives) |\n| 03 UV Charts | Normal-cone chart growth, pack, checker, OBJ + SVG export | ✔️ `SeamCutGenerator` + `ConcaveSkylinePacker` · 🚧 `NormalConeChartUnwrap` in `UVProjectionSolvers` if output differs from the JS `unwrapCharts` (`normalLimitDeg = 60`, `mergeBelow = 24`) |\n| 04 SDF Bake | Sparse 8×8×8 bricks 16³–128³, conservative `Mip1`, slice, `.FVOL`, VRAM eviction | ✔️ `SignedDistanceVolume`, `GpuSdfBaker`, `BakeVolumeSdfCompute.slang`, `ExtractSdfSectionCompute.slang` · 🚧 exact 3-axis EDT conservative `Mip1` (not in the header today) · 🚧 `.FVOL` section codec · 🚧 `EvictFinestBricks(MaximumResidentBytes)` |\n| 05 Cluster LOD | 128-tri clusters, groups of 4, ratio 0.5; **Preserve materials** Off / Slide / Pin; wrong-material share | ✔️ `ClusterPyramid::BuildFromPolygonNetwork` · 🚧 `ClusterBuildDirectives { MaterialSeamPolicy, ClusterTriangleCount, GroupClusterCount, SimplifyRatio }` · 🚧 triple-junction lock, last-face guard, per-material clustering · 🚧 `MaterialDriftMeasurement` |\n| 06 Collision | Box / sphere / capsule fit, SDF collider, none | 🚧 `CollisionFitSolver` (`SimulationSpace/PhysicsSpace/`) |\n| 07 Icon Bake | Square capture box, clay / normal shading, PNG | 🚧 `IconCaptureSequence` (offscreen `TieredWorldRenderSequence` → `ImageCodec`) → `ThumbnailSheetRepository` |\n| 08 Metadata | Name, category, tags | 🚧 manifest keys in the `.GeometrySpace` Tier 1 |\n| Staleness | Changing step N marks N…8 stale; Bake steps run on demand | 🚧 `CompileStepSequence` on `WorkspaceThread` (async, triple-buffered snapshots) |\n\n### 3.2 Studio views folded into steps\n\n| Studio feature | Step | C++ |\n| :--- | :--- | :--- |\n| View modes Shaded / Clusters / Groups / LOD level / Triangles / Error, ramp legend | 05 | ✔️ `VisibilityClusterRasterization` + 🚧 `ClusterInspectionShading.slang` |\n| View-dependent cut, pixel-error slider, forced level, Freeze LOD | 05 | ✔️ `SelectMonotonicCut` + `ClusterCullEncoder` |\n| Frustum / cone cull tiles, back faces | 05 | ✔️ `EnableNormalConeBackfaceCull` |\n| Instance grid 1×1…15×15, spacing | 05 | ✔️ `RigidClusterInstance` span |\n| Picked cluster (level, error, bounds, why chosen) | 05 | ✔️ `ViewportPickQuery` → cluster ordinal |\n| SDF workspace: Iso + AO, 3D Cutaway, Step Heat, Sparse Bricks; slice navigator; iso offset | 04 | 🚧 `SparseDistanceRaymarch.slang` (4 modes as a push constant; conservative 0.96 / 0.78 relaxation; second-smallest-distance brick edges, from the report) |\n| UV workspace: charts list, rotate / mirror / pack, checker, seams, fill | 03 | ✔️ UV `Solvers/` + `UVTileRasterization.slang` |\n| Geometry editor: scale XYZ / uniform, mirror, rotate, centre, normals | 02 | 🚧 shared `GeometryTransformDirectives` |\n| Icon camera box, default angle, size, save / copy | 07 | 🚧 `IconCaptureSequence` |\n| 7 procedural presets (vase, braid, carved torus, trefoil, asteroid, planet, terrain) | 01 | 🚧 `ProceduralSourcePresets` beside `AnalyticPrimitives` (seeded `DeterministicRandom` noise) |\n| Level chart, time chart, build overlay | 05 | ImGui chrome via `PixelSpace` (charts are panel UI, not viewport overlays) |\n\n### 3.3 Panels (reuse only)\n\n| Region | Unit |\n| :--- | :--- |\n| Import pane (asset tile, counts, step list with ✔️ / stale markers) | `OutlinerPanel` → `GeometryCompilerStepsPanel` |\n| Viewport + log strip | `ViewportPanel` + `ViewportProjectionPane` → `GeometryCompilerViewportHost` |\n| Settings | `InspectorPanel` + `ExclusiveSelector` (units, up axis), `ScalarSlider` (weld, ratios), `DropdownSelector` (level, budget), `CapsuleButton` → `GeometryCompilerInspectorPanel` |\n| Header (progress, Cancel, Compile all, **Compile & open in Component Viewer**) | `CapsuleButton` + `GeometryCompilerWorkspaceHost` header |\n\n### 3.4 Axis convention\n\n📝 The engine is `+X` forward, `+Y` left, `+Z` up. Step 01's up-axis switch therefore converts **Y-up files into Z-up**, the reverse of the HTML. FCT1 (authored Z-up) loads unchanged. Check 4 becomes \"body is 6.22 m long, 1.46 m tall **along +Z**\".\n\n---\n\n## 4. 🚧 Milestones\n\n| # | Milestone | Deliverables | Exit gate (Exhibit + `.png` → `Exhibits/Images/GeometryCompiler/`) |\n| :---: | :--- | :--- | :--- |\n| **G0** | HTML merge | `Experimental/GeometryCompiler/` adopts the step shell (§1.1 A) with studio tools inside the steps. Component Viewer's Compile button opens it. | HTML: 6 GC suites + 11 compile checks + smoke. Reference captures for every step. |\n| **G1** | Readers | STL (bin / ascii), PLY (ascii / bin), GLB, FCT1, OBJ `usemtl` slots | `GeometryReaderValidation`: ports checks 1–3 (FCT1 counts, fan-triangulated quads). Proof: the 6 formats rendered as clay tiles. |\n| **G2** | Headless compile | `GeometryCompileSession`, `CompileStepSequence`, `ConnectivityReport`, `GeometryTransformDirectives`, `CornerNormalSplitter`, `CollisionFitSolver`, `.GeometrySpace` sections | `GeometryCompileValidation`: ports checks 4–9 (units, welding, normals, fits, downstream-only invalidation, vehicle body with 8 material families). Proof: step timeline + collision fits. |\n| **G3** | Cluster LOD | `ClusterBuildDirectives`, seam policies, `MaterialDriftMeasurement`, inspection shading, Hybrid (if §1.2 A) | Ports checks 10–11 + GC suite 1 (monotone error, nested spheres, crack-free cuts, edge counts). Body LOD 2 < 1% drift (Slide = 0.02% at 744 tris). Proof: Off / Slide / Pin side by side. |\n| **G4** | SDF | EDT `Mip1`, eviction, `.FVOL`, `SparseDistanceRaymarch.slang` | GC suites 3–5 (thin-wall vase, `Mip1 ≤ Mip0`, slice RGBA, eviction fallback, raymarch contract). Zero-tunnelling front wall (`GlassVessel 64³`, `0` punctured pixels). Proof: 4 modes. |\n| **G5** | UV charts | Chart unwrap parity, pack, OBJ + SVG export | GC suite 2 (unwrap, pack, OBJ round-trip). Proof: chart sheet + checker. |\n| **G6** | Icon + presets | `IconCaptureSequence`, `ProceduralSourcePresets` | Proof: 7 preset icons, transparent background (`alpha = 0` outside). |\n| **G7** | Panels + host | §3.3 units, `GeometryCompilerSession` revision via `RevisionTracker` | `GeometryCompilerWorkspaceUIValidation`: click every step, Compile all, Cancel. Side-by-side `.png` against G0. |\n| **G8** | Executable + handoff | `FrontierGeometryCompilerLaunch.cpp`, `WorkspaceCategory::GeometryCompiler`, `CompiledGeometryExchange` | CTest `FrontierGeometryCompilerExecutableSmoke --frames=3 --capture-png=…`. FeatureSet: Compile & open lands the asset in Component Viewer Content. |\n\n📝 GC suite 6 (StudioIconSet integration + zero-`And` naming) maps to the shared `VectorIconRepository` check and the banned-word grep gate. There's no separate milestone.\n\n---\n\n## 5. ⚠️ Risks\n\n| Risk | Rating | Mitigation |\n| :--- | :---: | :--- |\n| Hybrid solver source missing | 🔴 | §1.2. G3 can ship on `ClusterPyramid` meanwhile. |\n| Report numbers vs code drift (14 vs 6 suites) | 🚩 | Gates are defined only against runnable suites. Report corrections noted in `Tracker.md`. |\n| WebGPU WGSL raymarcher → `.slang` | 🚩 | Same math, and the 4 modes keep the CPU fallback as the Exhibit reference image. |\n| Nanite-style cluster streaming | ✔️ | Stays out of scope (report §5). Only the cut and culling views are ported. |\n"}, {"path": "Experimental/ArtworkInspector/README.md", "name": "README.md", "group": "Experimental/ArtworkInspector", "size": 5705, "mtime": 1794767681.897, "content": "# Pattern / Stamp Studio card\n\nThis is the inspector of TextureStudio's **Pattern Studio** (seamless tiles) and **Stamp Studio** (PBR decals), rebuilt as a **single card** in the Project Zero style. It uses the same language as the [Material card](../MaterialInspector/README.md). In the workspace page, the card sits beside its layer outliner (outliner · card; there is no viewport).\n\n```\npython3 Experimental/ArtworkInspector/Serve.py        # http://0.0.0.0:8098/  (?mode=pattern | ?mode=stamp)\n```\n\nThe two studios share one card. The dock bar above it (Material · Pattern · Stamp · Baking) switches between studios. There is no mode toggle in the card itself.\n\n## Screenshots\n\n| Pattern — Shape dropdown open | Stamp |\n| --- | --- |\n| ![Pattern — outliner and card, the motif Shape dropdown open with engine-drawn glyphs](Screenshots/pattern.png) | ![Stamp — outliner and card](Screenshots/stamp.png) |\n\n## Dropdowns\n\nEvery pick list in the card is a Project Zero dropdown (`CardKit.Dropdown`), not a chip grid:\n\n- **Shape** (motif primitive): each option has a 16 px glyph drawn by the engine itself (`ArtworkModel.MotifGlyph`, cached).\n- **Blend mode**, with a one-word hint per mode (darkens, lightens, glows…).\n- **Surface finish**, with a gloss / metal swatch and its roughness · metal · height.\n- **Add channel**, **starter library** (grouped, filterable) and every modifier option with more than four values.\n\nShort 2–4 way toggles (gradient source, mask mode, small modifier options) stay segments. The list opens below the button (above it near the bottom of the window), is never clipped by the card, and works from the keyboard: ↓ / ↑ open and move, Home / End, Enter, Esc, and typing filters lists longer than ten.\n\n## What changed from the TextureStudio inspector\n\n| TextureStudio | This card |\n| --- | --- |\n| Instances / Scale Span / Coverage trio. | **Instances** (stacked per layer, plus evaluation time), **Coverage** (motif area, excluding the ground), and an **edge** caption: seam wraps for patterns; margin or *clipped* for stamps, which turns red when a decal crosses its border. **Palette** shows the distinct authored colours and their luminance contrast, and warns below 25 %. |\n| Long always-open sections: transform, fill, stroke, PBR (22 sliders), mask, modifiers, ground. | One row per property with a live readout (Shape, Fill, Outline, Placement, Blend, Surface, Mask). One row opens at a time. |\n| Fill and stroke sources as dropdowns with separate stop editors. | Solid · Linear · Radial segment, a stop strip (2–12 stops) and angle. |\n| 22 PBR sliders shown at once. | A finish dropdown (ink, cotton, wool, ceramic, foil, rubber), then only the channels in use. `+ Channel` adds others; × removes one. |\n| Modifier cards with every field. | A modifier list with a bypass dot and a one-line readout (for example \"Grid 5×5\" or \"WORLEY · 0.40–1.60×\"). One editor opens at a time, with reorder, remove and a dice button for seeds. |\n\n## Card anatomy\n\n1. **Header:** undo, redo, open project, reset to starter.\n2. **Identity:** live SVG thumbnail (shown 2×2 for patterns so the seam is visible), editable name, grouped starter picker (21 pattern, 30 stamp).\n3. **Statistics:** Instances · Coverage · Palette, refreshed on the next frame after every edit.\n4. **Layers** (top → bottom): an eye dot, a colour chip and the motif glyph. Double-click to rename. The active row has ↑ ↓ duplicate and delete. `+ Layer` adds a motif, text or gradient layer.\n5. **Properties** of the selected layer.\n6. **Modifiers** of the selected layer, applied in order.\n7. **Document** (folded): ground switch and colour, export resolution.\n8. **Export:** `.svg`, Project (`frontier.<mode>.v1`, which opens in TextureStudio with *Open project*), Copy SVG.\n\nKeyboard: ↑ / ↓ move between property rows. Esc closes popovers, then the open editor. Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) undo and redo.\n\n## Data and compatibility\n\n- **`ArtworkModel.js`** is pure (no DOM). Every edit returns a new document.\n- `Engine/NoiseField.js`, `Engine/PbrChannelDefinitions.js` and `Engine/Patterns/ArtworkStackEngine.js` are byte-identical copies from TextureStudio. `Engine/Patterns/ArtworkStarters.js` holds the 51 starter builders, extracted without three.js.\n- Shape parameter ranges follow the engine's own clamps. For example, ring inner ratio is 0.1–0.92, star points are 3–16 and gear teeth are 6–20.\n- Documents are stored per starter under `localStorage[\"Frontier.ArtworkInspector.v1:<mode>:<starter>\"]` and sync live between windows. `?starter=<id>` opens a specific starter.\n- The thumbnail is the document's own SVG export, passed as a Blob URL. A 1 000-instance layer exports about 1 MB of SVG, too much to re-encode as a data URI on every render.\n\n## Outliner\n\nThe page also shows a **Layers outliner** (`ArtworkOutliner.js`) with this tree: canvas → layers → modifiers. Its stat tiles are Visible and Modifiers. Rows have tools to reorder, duplicate, lock and hide, and you can rename a row inline or drag it to reorder. See the outliner notes in `../MaterialInspector/README.md`. Add `?outliner=0` to the URL to hide it.\n\n## Checks\n\n```\nnode Experimental/ArtworkInspector/Scripts/CheckArtworkInspector.mjs\nJSDOM_DIR=/tmp/smoke node Experimental/ArtworkInspector/Scripts/SmokeArtworkInspector.mjs   # npm i --prefix /tmp/smoke jsdom@25\n```\n\nThe smoke test picks every dropdown the way a user does (open, click the option, check it closes): starter library, shape, blend, finish and add channel.\n\nIf `TS_DIR` points at a TextureStudio checkout (`…/Experimental/TextureStudio`), the check also confirms the copied engine files are unchanged.\n"}, {"path": "Experimental/BakeInspector/README.md", "name": "README.md", "group": "Experimental/BakeInspector", "size": 8685, "mtime": 1794767681.901, "content": "# Map Baking card\n\nThis is the inspector of TextureStudio's **Baking** workspace, rebuilt as a **single card** in the Project Zero style beside its outliner (outliner · card; no viewport), alongside the [Material](../MaterialInspector/README.md) and [Pattern / Stamp](../ArtworkInspector/README.md) cards. It contains no three.js and no baker: it edits bake settings, estimates their cost, and hands a request to whatever host bakes.\n\n```\npython3 Experimental/BakeInspector/Serve.py        # http://0.0.0.0:8099/\n```\n\n## Screenshots\n\n![Bake set — the Ranger character: body, clothing and props in the outliner; the Field jacket has its own queue and 1K resolution, so only it is STALE and \"Stale only · 1\" re-bakes just that part](Screenshots/baking.png)\n\n| Baking, progress per part (isolation dropdown open) | Single study |\n| --- | --- |\n| ![A bake set running: done parts, the running part at 80 %, queued parts numbered](Screenshots/baking-running.png) | ![Single high / low study, as before](Screenshots/baking-study.png) |\n\n## Bake sets: one character, many parts\n\nA character is many meshes that belong together: body, head, eyes, hair, a hat, a jacket, a shirt, pants, boots, gloves, a backpack, a sidearm. Each needs its own high → low pair, cage and maps, but you want one name, one output and one bake. Pick a **bake target** in the card's identity dropdown (or the outliner's *Targets*):\n\n| Target | Parts |\n| --- | --- |\n| **Character · full outfit** (\"Ranger\") | Body · Head · Eyes · Hair │ Field cap · Field jacket · Shirt · Cargo pants · Boots · Gloves │ Backpack · Sidearm |\n| **Character · base body** | Body · Head · Hands · Eyes · Hair |\n| **Gear kit · props** | Backpack · Rifle · Canteen · Holster |\n| Any study (teapot, shader ball, …) | The original single high / low bake. |\n\n**Set options** (the card's *Parts* section):\n\n- **Output:** *Per part* (one texture set per part, `ranger_field_jacket_ao.png`, so clothes can be swapped), *Atlas* (every enabled part packed into one 1K–8K sheet per map, space shared by surface size), or *UDIM* (one tile per part, 1001, 1002, …).\n- **Parts see each other** (a dropdown):\n  - *Match by name*: a low part projects only onto its own high part, so jacket rays never land on the body.\n  - *All together*: contact shading, but projection can bleed between layers.\n  - *Exploded*: parts are pulled apart first; clean, with no contact shading.\n\n**Each part** (pick it in the outliner; the card opens its editor):\n\n- name and **kind** (a dropdown of 15 kinds in Body / Clothing / Props);\n- its own **Low / High** meshes;\n- **resolution** (set default or 256 – 2K; in atlas mode its share of the sheet is shown instead);\n- **Own cage** (front / rear) or the set cage;\n- **Contact AO**: whether other parts darken it, e.g. a collar on the neck;\n- **Follow set queue**, or its **own map queue** (eyes bake just normal + AO; a jacket can add thickness);\n- duplicate, remove, and **Add part** (a filterable dropdown).\n\n**Baking a set:**\n\n- *Bake N parts* runs every enabled part in body → clothing → props order.\n- The outliner shows **progress per part**: DONE, the running part's own %, and queue numbers for the rest.\n- Staleness is **per part**. Editing the jacket marks only the jacket stale (and parts whose contact AO sees it, if its mesh changed). **Stale only · N** then re-bakes just those parts and keeps the other results.\n- The estimate (output, files, rays, ETA) sums over enabled parts. Skipping a part or a whole category (the category disc) removes it from the bake.\n\nThe docked card is decluttered:\n\n- It shows only the map opened in the queue.\n- Output, rays, ETA and freshness sit on one line under the Bake button, instead of three stat tiles.\n- Export preset and copy request are icon buttons in the header, instead of a footer block.\n- Undocked (`?outliner=0`), it keeps the full card.\n\n## What changed from the TextureStudio inspector\n\n| TextureStudio | This card |\n| --- | --- |\n| Resolution / Rays per Px / Volume SDF trio, which echoed the sliders. | **Output:** memory of the results, stacked by map group. **Ray budget:** rays traced plus an estimated time on the chosen device; turns amber or red as it grows. **Result:** Unbaked, Baking (stepped meter), Fresh, or **Stale** once a setting that affects output changes. Switching device does not make results stale. |\n| An 18-item checklist on one side and always-open \"Ray Execution & Surface Settings\", \"3D Volume SDF\" and \"Export\" cards on the other. It was unclear which slider affected which map. | Maps are grouped (Normals, Surface, Masks & IDs, Volume & Distance). The dot queues a map. **Opening a map shows only the settings that shape it** (for example, AO shows rays per texel and ray distance). It says when a setting also drives other queued maps, and shows that map's own memory and ray cost. |\n| Settings scattered across cards. | Rarely changed output settings (resolution, padding, cage, tangent convention) sit in one folded \"Output & cage\" section. |\n\n## Bake hosting\n\n`Mount(element, { Bake, OnResult, OnSource })`:\n\n- `Bake(request, { Progress(fraction, text, jobIndex), Signal, Jobs })` resolves to `{ Device, Ms, Maps, Data }`. `Jobs` is the ordered `{ Part, Map }` list (`Part` is null for a single study).\n  - `request` is `BakeModel.Request(settings)`. It is split the way TextureStudio's `runBake` splits it: `surface` holds `bakeMeshMaps` options and channels; `volume` holds `bakeVolumeSdf` options.\n  - Abort through `Signal` when the user presses Cancel.\n  - For a bake set, `request` is `frontier.bake-request.v2`: `set` (name, output, isolation, atlas / UDIM settings), `shared` ray settings, and one `parts[]` entry per enabled part. Each entry has its sources, tris, `matchBy` name, contact AO, UDIM tile or atlas share, `surface` (resolution, channels, its cage, output file names) and `volume`.\n- `OnSource(slot, File | null, partId | null)` passes custom low / high meshes (`.obj` / `.stl` / `.fbx` / `.glb`) to the host.\n\nThis page attaches no host. **Bake** runs a clearly labelled dry run that walks the queue on the estimated timings, so the progress, cancel and staleness behaviour can be tried.\n\n## Data\n\n- **`BakeModel.js`** is pure. Its defaults and ranges are field-for-field those of `BakingWorkspace` (teapot; normal, AO, curvature, height and SDF; 512 px; 12 rays; cage 0.14 / 0.14; SDF 36³ signed).\n- **`Engine/BakeCatalog.js`** holds the map catalog (18) and studies (5), copied verbatim from `Engine/BakingEngine.js`.\n- **Estimates:**\n  - RGBA8 maps, float32 SDF voxels.\n  - Rays per texel by map: cage maps 2, hemisphere maps N, bevel 8; curvature, IDs and wireframe are free.\n  - UV coverage is assumed to be 72 %.\n  - Throughput is assumed to be about 320 M rays/s on GPU and 4.5 M on CPU.\n  - These are orders of magnitude for comparing settings, not promises.\n- Settings persist in `localStorage[\"Frontier.BakeInspector.v1\"]`. Preset files use `frontier.bake.v1`, with an optional `set` (parts without their mesh files). Request files use `frontier.bake-request.v1` for a study and `v2` for a bake set.\n- Part kinds, outputs, isolation modes and the set templates are tables in `BakeModel.js` (`PART_KINDS`, `OUTPUTS`, `ISOLATIONS`, `SET_TEMPLATES`). Code says *bake set* / *part*; the UI says character.\n\n## Outliner\n\nThe page also shows a **Queue outliner** (`BakeOutliner.js`) with this tree: study → map groups → maps. With a bake set it becomes **character → Body / Clothing / Props → parts → that part's maps**, then *Set queue* and *Targets*. The stat tiles become Parts and Fresh / stale, and an *Add part* dropdown sits under the search. Its stat tiles are Queued and Unbaked. Each row has a status disc that queues or skips the map, and a badge that shows its queue position or its READY / STALE state. See the outliner notes in `../MaterialInspector/README.md`. Add `?outliner=0` to the URL to hide it.\n\n## Checks\n\n```\nnode Experimental/BakeInspector/Scripts/CheckBakeInspector.mjs\nJSDOM_DIR=/tmp/smoke node Experimental/BakeInspector/Scripts/SmokeBakeInspector.mjs   # npm i --prefix /tmp/smoke jsdom@25\n```\n\nThe check covers bake sets: templates, estimates summed over parts, per-part overrides, atlas / UDIM, per-part staleness and the preset round trip. The smoke drives a set in the card (target dropdown, part editor, kind / resolution dropdowns, own queue, per-part mesh, output, isolation, add / remove, a v2 host bake, stale-only re-bake, undo). `MaterialInspector/Scripts/SmokeOutliners.mjs bakeset` drives the set tree: part and category toggles, a per-part map, Add part, progress per part, and a stale-only bake.\n"}, {"path": "Experimental/BrushStudio/README.md", "name": "README.md", "group": "Experimental/BrushStudio", "size": 12204, "mtime": 1794767701.601, "content": "# Brush Studio\n\nThis page is the **texture-painting workspace**, in the Project Zero editor's visual language: a Brush Library, a blank workspace **viewport**, and a **Studio** card. Every paint tool has its own dedicated studio laid out like Procreate's Brush Studio: Brush Studio, Stamp Studio for decals, Text Studio, Eraser Studio, and so on. No renderer is attached, so the viewport is left blank. A small, closable 2D **Drawing Pad** floats in the viewport as a previewer of what the current tool does to each PBR channel.\n\n![Brush Studio — library, blank viewport with the tool rail and the Drawing Pad previewer, Brush Studio card](Screenshots/brush-studio.png)\n\n```\npython3 Experimental/MaterialInspector/Serve.py       # serves the repo root on :8097\nhttp://localhost:8097/Experimental/BrushStudio/\n  ?brush=<catalogue id>   start on a brush, e.g. pencil-classic-yellow-hb\n  ?tool=<tool id>         paint · smudge · erase · fill · stamp · gradient · text · curve · move · eyedropper\n  ?section=<section id>   open a section in that tool's studio, e.g. shape, grain (Brush) · decal, material (Stamp)\n  ?pad=0                  start with the Drawing Pad closed\n```\n\n## Layout\n\nThe page is library · viewport · card. It is the only workspace with a viewport; Material, Pattern, Stamp and Baking are outliner · card. It uses the same dock nav pill, 22 px card radius, DM Sans 300 type and the shared CardKit controls.\n\nThere is **no amber on this page**. Each tool icon and each studio-section icon has its own colour, drawn on the icon itself with no fill behind it. Edited marks and focus rings are blue.\n\n- **Brush Library** card:\n  - Search.\n  - The 102 TextureStudio catalogue instruments, grouped by family, each with a live preview stroke.\n  - Your own duplicated or imported brushes, listed as *My brushes*.\n  - A blue dot on any brush that differs from its reset point.\n- **Viewport** (blank, no renderer). It carries:\n  - The **tool rail** (Paint · Smudge · Erase | Fill · Stamp · Gradient · Text · Curve · Move | Eyedropper, then pad undo / redo and the pad toggle).\n  - Procreate-style size and opacity sliders.\n  - Channel views (Colour / Rough / Metal / Height / Glow).\n  - The floating **Drawing Pad**.\n- **Drawing Pad** (a previewer you can close). Close it with its ×, the rail's pad button or the eye button in the studio header. It has:\n  - Paper tones.\n  - **Live** re-render: strokes are redrawn as you edit the brush.\n  - A preview stroke.\n  - Clear (undoable).\n  - A one-line stats footer: size, opacity, dabs, render ms, items.\n- **Studio** card: a section list and that section's settings, as in Procreate's Brush Studio.\n  - Picking a tool on the rail switches the card to that tool's studio.\n  - Each section shows a count of edited settings. Each section has *Reset section*, and each edited field has its own reset.\n\n| Pad closed | Narrow (1366 × 768) | Narrow (1100) |\n| --- | --- | --- |\n| ![Drawing Pad closed](Screenshots/pad-closed.png) | ![1366 px](Screenshots/narrow-1366.png) | ![1100 px](Screenshots/narrow-1100.png) |\n\nResponsive layout:\n\n- **Below 1500 px:** the columns narrow.\n- **Below 1240 px:** the viewport spans the top and the library sits next to the studio.\n- **Below 820 px:** everything stacks.\n\n## Dropdowns\n\nPick lists are Project Zero dropdowns (`CardKit.Dropdown`): **Shape source** and **Grain source** show a large preview of the current source beside a dropdown of every source with a thumbnail (filterable). Rendering mode, colour gradients and every option list longer than four are dropdowns too. Short toggles stay segments.\n\n![Shape section — the shape source dropdown with thumbnails](Screenshots/shape-dropdown.png)\n\n## Brush Studio sections (Procreate's Brush Studio, plus texture painting)\n\nThe Paint tool's studio starts with a **Colour** section (primary / secondary discs, swatches, symmetry and blend), followed by the brush sections:\n\n| Section | Groups |\n| --- | --- |\n| Stroke path | spacing, jitter lateral / linear, fall off |\n| Stabilization | StreamLine (+ pressure), stabilization, motion filtering (+ expression) |\n| Taper | pressure taper, touch taper (with linked ends), size / opacity / pressure / tip, tip animation, classic taper |\n| Shape | 16 procedural sources, scatter / rotation / count / jitter / flips / azimuth, roundness (+ graph), tip falloff, filtering |\n| Grain | 12 procedural grains, moving or texturized, scale / zoom / rotation / depth / offset / blend, filtering |\n| Rendering | 6 modes in a dropdown (light → heavy glaze, uniform / intense blending), flow, wet edges, burnt edges, blend mode, luminance |\n| Wet mix | dilution, charge, attack, pull, grade, blur (+ jitter), wetness jitter |\n| Colour dynamics | stroke gradients and multicolour modes, stamp and stroke HSB jitter, colour pressure and tilt, opacity over the stroke, hue over the stroke |\n| Dynamics | speed → size / opacity, size / opacity jitter, over-the-stroke behaviour |\n| Stylus | pressure curve editor, pressure → size / opacity / flow / bleed / smoothing, tilt curve and tilt targets, mouse and touch simulation |\n| Properties | stamp preview, orient to screen, preview scale, smudge, min / max size and opacity |\n| **Materials** | which PBR channels the brush paints, plus roughness / metallic / height / emission values, each textured by the shape or grain |\n| **Instrument** | the catalogue tool's own controls (shape, paint, bristle, grade, nib, ink…). Each control maps onto the studio settings, and the mapping is shown under the control |\n| About this brush | name, author, created date, signature, brush data, and *Create new reset point* / *Reset all settings* |\n\nIn total the studio has 139 fields. Every value is normalised, so an imported brush can never contain an out-of-range value.\n\nThe Materials and Instrument sections go beyond Procreate's Brush Studio:\n\n- **Materials** is there because this studio paints textures.\n- **Instrument** keeps the TextureStudio tool menus' schema intact. Switching a control's option away and back restores the same settings, whatever order you touched the controls in.\n\n## Tool studios\n\nEvery tool has a **dedicated studio**, built the same way as the Brush Studio:\n\n- Coloured section icons on the left and the section's settings beside them.\n- Edited counts on each section.\n- Per-field and per-section reset.\n- An **About** section with the shortcut, what changed since the defaults, and *Reset all settings*.\n\nSettings marked as brush-bound edit the active brush directly, so a tool studio and the Brush Studio never disagree. In the Smudge, Eraser and Curve studios, the brush card has a **Brush Studio** button. It opens the brush's studio without changing tool; the header's back chip, or Esc, returns.\n\n| Studio | Key | Sections |\n| --- | --- | --- |\n| Brush Studio (Paint) | B | Colour, then the 14 brush sections above |\n| Smudge Studio | S | Tip (finger or current brush), Smudge (strength, finger painting, StreamLine, spacing), About |\n| Eraser Studio | E | Eraser (catalogue eraser or current brush), Tip (size, strength, flow, hardness, edge), Feel, Channels to erase, About |\n| Fill Studio | G | Scope (region / similar / all, threshold, feather, grow), Source (colour or grain, opacity, blend), Material, About |\n| **Stamp Studio** (decals) | P | Decal (16 shapes, click / drag / grid), Transform (size, rotation, jitter, mirror), Look (tint, opacity, hardness, blend), Material, About |\n| Gradient Studio | D | Shape (linear / radial / conic, spread), Colours (presets, stops), Blend (opacity, mode, painted / empty), Line (apply / clear), About |\n| **Text Studio** | T | Text, Type (font, weight, italic, align), Layout (size, spacing, line height, arc, rotation), Look (colour, opacity, outline), Material, Place, About |\n| Curve Studio | C | Brush, Path (smooth / polyline, closed, smoothness), Pressure (even / taper / swell / fade), Points (stroke, undo point, clear), About |\n| Move Studio | V | Target, Offset (U / V, nudges), Transform (scale, rotation, flips, clip / tile edges), Commit, About |\n| Eyedropper Studio | I | Sample (hex / RGB / HSL readout, send to primary / secondary), Sampling (area, target, source, return to previous tool), Recent, About |\n\n| | | |\n| --- | --- | --- |\n| ![Stamp Studio (decals)](Screenshots/studio-stamp-decals.png) **Stamp Studio** | ![Text Studio](Screenshots/studio-text.png) **Text Studio** | ![Eraser Studio](Screenshots/studio-eraser.png) **Eraser Studio** |\n| ![Smudge Studio](Screenshots/studio-smudge.png) **Smudge Studio** | ![Fill Studio](Screenshots/studio-fill.png) **Fill Studio** | ![Gradient Studio](Screenshots/studio-gradient.png) **Gradient Studio** |\n| ![Curve Studio](Screenshots/studio-curve.png) **Curve Studio** | ![Move Studio](Screenshots/studio-move.png) **Move Studio** | ![Eyedropper Studio](Screenshots/studio-eyedropper.png) **Eyedropper Studio** |\n| ![Eraser Studio — About](Screenshots/studio-eraser-about.png) **About** (any tool) | | |\n\nPad keys:\n\n- `[` / `]` change the brush size.\n- Enter applies a gradient, text, curve or move.\n- Backspace removes the last curve point.\n- Ctrl+Z and Ctrl+Shift+Z undo and redo on the pad.\n- Alt+Z undoes settings changes.\n- Esc returns from the Brush Studio to the current tool's studio.\n\n## Files\n\n| File | What it holds |\n| --- | --- |\n| `BrushModel.js` | Pure brush schema: shapes, grains, render and blend modes, the 14 sections and their fields, defaults, family presets, instrument mapping, set / reset / reset point / duplicate / export / import |\n| `BrushEngine.js` | Pure stroke planner: stabilisation, spacing, tapers, jitter, dynamics, colour, and a seeded RNG, so a replayed stroke is identical |\n| `Sources.js` | Procedural tips and grains (no bitmap files) with cached thumbnails. `SetCanvasFactory` lets the tests run without a DOM |\n| `ToolModel.js` | The 10 tools as typed field groups, their **studios** (sections, icon colours), edited-setting tracking, and the curve path and pressure profiles |\n| `Painter.js` | 2D renderer: stroke (grain, wet edges, blending, smudge, per-channel values), flood fill, stamp, gradient, text, move, height shading |\n| `Pad.js` | The Drawing Pad: an op list (undoable clear, capped at 160 ops), live re-render, channel views, pointer / pen input with pressure and tilt, and stats |\n| `BrushStudio.js` / `.css` | Library, viewport overlays (rail, sliders, Drawing Pad), the Studio card for every tool, control bindings and keyboard handling. The blank viewport comes from `../MaterialInspector/Viewport.js` |\n| `Engine/PaintToolCatalogue.js` | Byte-identical copy of TextureStudio's catalogue (102 instruments, schemas and artwork) |\n| `Engine/BrushDynamics.js` | Verbatim extract of TextureStudio's `TexturePaintEngine.js` curves, HSL shifting, colour / opacity modes and gradient presets |\n\n## Data\n\nA brush exports as `*.brush.json` with schema `frontier.brush.v1`. The file holds:\n\n- the catalogue `instrument` it came from;\n- the instrument `params`;\n- all 139 studio `values`;\n- the `reset` point;\n- name / author / signature.\n\nImports are normalised field by field. Unknown keys are dropped, and a foreign schema is rejected.\n\n## Checks\n\n```\nTS_DIR=/path/to/TextureStudio node Experimental/BrushStudio/Scripts/CheckBrushStudio.mjs\nJSDOM_DIR=/tmp/smoke node Experimental/BrushStudio/Scripts/SmokeBrushStudio.mjs      # npm i --prefix /tmp/smoke jsdom@25\n```\n\n- **`CheckBrushStudio.mjs`** checks the pure modules: schema, every instrument and every option, edits and resets, round trips, engine determinism and stabilisation, sources, tools and their studios (every group has a section, no amber, edits counted per section), the curve tool, and the renderer on a pixel-less canvas. With `TS_DIR` set, it also confirms the copied engine files match TextureStudio.\n- **`SmokeBrushStudio.mjs`** boots the page in jsdom and drives it end to end: library, every section and field type, the curve editor, all resets, duplicate / export / import, undo / redo, every pad tool, every tool studio (every section and control, counts, resets, About), the Brush Studio link and Esc, closing / reopening the Drawing Pad, channel views and keyboard shortcuts.\n"}, {"path": "Experimental/ComponentViewer/README.md", "name": "README.md", "group": "Experimental/ComponentViewer", "size": 12577, "mtime": 1794764154.239, "content": "# Component Viewer\n\nVehicle Lab, renamed and redesigned as a Blueprint-style **Component Viewer**, merged with Frontier-1's Cluster LOD\nStudio (Hero Workspace) as an import step called **Geometry Compile**. The look follows Project Zero as Cluster LOD\nStudio uses it: charcoal docks on a 2 px seam, trapezoid tabs, pill sliders, white active segments, amber selection,\na notch at the top for shortcuts and a drawer at the bottom.\n\n```\npython3 Experimental/ComponentViewer/Serve.py        # http://0.0.0.0:8095/ → /Experimental/ComponentViewer/\n```\n\n## Screenshots\n\n![Component Viewer — components, viewport, details](Screenshots/component-viewer.png)\n\n## Two screens\n\n**Geometry Compile** (the import inspector) opens for every imported object: OBJ, glTF / GLB, STL, PLY and Frontier's\nFCT1 `.facet`. FBX is listed but has no reader yet. Steps run top to bottom, and changing a setting marks that step\nand every step after it stale:\n\n| Step | What it does | Runs |\n|---|---|---|\n| Source & Units | Reads the file, sets units (m/cm/mm/in/ft) and Z-up → Y-up, welds with a tolerance, checks topology | auto |\n| Geometry | Scale, mirror, rotate, pivot (centre, floor or authored), flip normals, normals mode (smooth/flat/angle split) | auto |\n| UV Charts | Chart unwrap and pack (from Frontier-1), checker / chart preview, OBJ + UVs and SVG sheet export | Bake |\n| SDF Bake | Signed distance field in a worker, slice view and raymarched preview, `.r32` export | Bake |\n| Cluster LOD | Nanite-style cluster hierarchy in a worker, levels with triangle counts, error and wrong-material share; **Preserve materials** toggle (below) | Bake |\n| Collision | Box, sphere or capsule fit, the SDF as a distance-field collider, or none | auto |\n| Icon Bake | Content-browser icon inside a square capture frame, clay or normal shading, PNG export | auto |\n| Metadata | Name, category and tags | auto |\n\n**Compile & open** adds the compiled asset to Content and opens it as a new Blueprint class. Esc cancels.\n\n### Material-aware cluster LOD\n\nEvery LOD triangle is a surviving source triangle, so it always keeps its material slot. Forced LODs and the\n*Materials* preview draw each face with its own slot. With **Preserve materials** on (the default):\n\n- Each material is clustered as if it were its own mesh, so every cluster holds one material.\n- The simplifier holds the seams between materials, using the same machinery as open borders:\n  - **Slide** (default): seam vertices may move only along the seam.\n  - **Pin**: seam vertices never move, so borders stay exact and reduction stops earlier.\n- Vertices where three or more materials meet never move, and no collapse may remove the last faces of a material\n  in a group.\n- It is still one mesh. Clusters on either side of a seam index the same shared vertices and edges, are grouped\n  together across the seam and simplify together. Every level stays crack-free, and the check script verifies this\n  with edge counts.\n\n*Wrong material* is the share of a level's surface that shows a different material from the source surface nearest\nto it.\n\n| Mesh | Off | Slide | Pin |\n|---|---|---|---|\n| ControlVehicle body, LOD 2 | 2.6% at 726 tris | 0.02% at 744 tris | 0.3% at 884 tris |\n| Torus, 8 material regions | 24% at 1254 tris | 0.9% at 1928 tris | 0.3% at 3984 tris |\n\n\n**Component Viewer** (the Blueprint editor):\n\n- *Components*: the scene hierarchy under the class's **Origin** (its own frame; renamed from the old default root). Drag a row onto another to re-parent it. Each row has a\n  visibility toggle and a warning marker. Actor components (Vehicle Movement, Rotating Movement) sit in their own\n  section. **Add** lists the component classes plus every compiled mesh in Content.\n- *Viewport*: 7 inspection channels, keys 1–7: Lit, Unlit, Density, Normals, UV checker, Cluster LOD and Collision.\n  Click a component to select it, or drop a Content asset onto the viewport to add it. **Construction Script** shows a\n  generated node graph you can pan, zoom and drag.\n- *Details*: built from each class's property specs (transform, mesh and material slots, LOD, lights, camera,\n  collision, vehicle wheels and powertrain). Selecting the root shows class defaults, compiler results and the asset\n  pipeline state.\n- *Drawer*: compiled-data cards (icon, UV, SDF, LOD, collision) for the selected mesh, plus Vehicle Lab's torque curve,\n  editable with linear, smooth, ease or step interpolation.\n- *Simulate* (Space): Vehicle Lab's drive preview, with speed, rpm, acceleration, torque, gear, throttle and brake.\n  It spins the Vehicle Movement wheels and Rotating Movement components.\n- **Compile** (Ctrl+S) validates the class and bakes its icon. The other keys are Del, Ctrl+D, F, G, T, C and Esc; press\n  ? for the full list.\n\n**Sockets** (`Sockets.js` model, `SocketVisuals.js` looks). A socket is not a fixed point: its children ride on a\n*joint frame* and the socket kind decides how that frame moves. Pick a kind from the tiles in Details (your numbers are\nkept when you switch) or add one directly from **Add → Sockets**.\n\n| Kind | Moves | Drives | Debug look |\n|---|---|---|---|\n| Fixed | never | — | Graphite hex puck, lit face, three bolts |\n| Hinge | about one axis, between two angles | Hold at pose · Sweep | Pin and knuckles, a light fan over the allowed range with bright limit edges, a needle with a glowing tip at the current angle |\n| Slider | along one axis, between two stops | Hold at pose · Sweep | Translucent track on a steel rail, ringed end stops, a glowing carriage |\n| Ball | inside a cone | Hold at pose · Orbit | Ball in a cup, the allowed cone as a light volume, a stem with a glowing knob showing the current swing |\n| Spring | along one axis, with stiffness and damping | Preload pose; reacts to acceleration (rear squats, front lifts) and road bumps met at each spring's own position | Coil that compresses live and brightens with speed, damper body and rod, plates |\n| Spin | continuously | Fixed rpm · vehicle speed over a rolling radius | Hub and a ring of three comet arcs that turns with it, brighter with rpm |\n| Tether | hangs on a length and swings (pendulum) | Gravity, drag, trails back under acceleration (atan a/g) | Eye, rope, end ring; when selected, a fan of the swing range |\n| Dock | connects and disconnects | Hold (Connect / Release) · Pull test · Aero load from Vehicle Movement | Collar with state notches, an iris (steady when connected, rings pulling in when seeking, pushing out when rejected), the snap radius as a field, a flux beam to the plug while it is free, a ripple on connect |\n\n- A dock only accepts children whose tags contain its **key** (empty key accepts anything). Wrong key: the plug is\n  pulled to the snap radius and bounced, never connected, and the class reports it. Load colours the notches\n  green → amber → red as it nears the break force; above it the dock releases.\n- Connect, release and rejection events rise as pings from the socket. The selected socket shows a floating tag (kind,\n  name, live value) and is drawn in an x-ray pass, so a spring inside a tyre stays visible.\n- **Kick** (Spring, Tether) and **Reset motion** are in Details; the pose slider scrubs Hinge, Slider, Ball and Spring\n  in the editor; Sweep, bumps, pull tests and vehicle-driven motion run in Simulate.\n\nOn BP_ControlVehicle every wheel hangs from a Spring socket at its axle mount, the front wheels turn on Hinge sockets\n(±32°), Vehicle Lab's RearWingSocket is a Dock keyed `wing` holding a procedural rear wing (pull test: tears off at\n1.2 kN and snaps back), and a TowStrap tether swings at the rear.\n\n**Glide camera** (`Camera.js`, both viewports). State is a pivot plus yaw, pitch, distance and focal length; input\nwrites goals and the live values ease toward them, so nothing ever cuts.\n\n- Drag orbits with inertia around the *surface you grabbed*: on press the pivot slides along the view axis to the depth\n  under the cursor, so the view never jumps but always turns around what you touched.\n- Wheel glides toward the point under the cursor. Right / middle / Shift drag pans. Hold right and use WASD + QE to\n  drift (Shift for speed).\n- Alt + wheel, or the lens chip (14 / 24 / 35 / 50 / 85 / 135 mm), is a dolly zoom: distance scales with focal length,\n  so the subject keeps its size while the perspective flattens or deepens.\n- F, double-click, step changes and new imports are eased flights (position, pivot and lens, log-space distance).\n- The dial (bottom right) shows the axes as depth-sorted beads with a horizon arc; click a bead to fly to that side.\n  ↻ is a turntable that pauses while you touch the view. With a Camera component selected, **Look through** (C) flies\n  into its pose and lens.\n- While simulating, speed opens the lens slightly and high rpm adds a faint engine shimmer.\n\n**Debug visuals** (`Visuals.js`): no line helpers anywhere. Volumes are surfaces, light is light.\n\n| Thing | Drawn as |\n|---|---|\n| Collision (compiled green, components amber) | Field shell: fresnel rim, soft face borders, rising scan bands |\n| SDF collider | Shell with one soft dot per voxel cell on each face |\n| Spot light, camera view | Additive light-volume beam (round / 16:9 four-sided) fading along its axis |\n| Point light | Glow core; influence radius as a faint additive field while selected |\n| Selection | The selected surfaces glow amber toward their silhouette, breathing slowly. The fresnel term is injected into the mesh's own material (a per-selection clone), so there is no second mesh and nothing on the floor |\n| Camera component | Modelled cinema camera: rounded body, mount, knurled focus ring, coated front element, hood, handle, monitor (lit when selected), battery, tally lamp (glows when selected); the view beam starts at the lens |\n| Origin / Scene pivots, Geometry-step pivot | Shaded anchor: ring, core and three axis beads |\n| Arrow | Shaded shaft and cone |\n| Floor | Dots (metres, quarters) fading out around the pivot; axis dots tinted red X / blue Z |\n| Open borders (Source step) | Trail of glowing amber beads |\n| Triangle density (replaces wireframe) | Heat ramp per triangle from its area against the median: blue sparse … red dense |\n| Mesh with no asset | Pulsing red field box |\n\nThe starting class is **BP_ControlVehicle**, the Vehicle Lab car. Its body, tyre and rim `.facet` files are compiled\nthrough the same pipeline. It has four wheels on Spring sockets (front ones on steering Hinges), each with a rim child, a docked rear wing, a tow strap, headlights, a chase camera, a bumper trigger and\nVehicle Movement, using the Vehicle Lab sheet values: 1300 kg, a 520 N·m peak and a 7200 rpm redline.\n\n## Files\n\n| File | Role |\n|---|---|\n| `Main.js` | Boot, workers, icon renderer, import flow, vehicle class |\n| `GeometryCompile.js` | Import inspector UI |\n| `CompileSteps.js` | Step pipeline, settings, invalidation (no DOM) |\n| `ComponentViewer.js` | Blueprint editor UI |\n| `Blueprint.js` | Component classes, property specs, tree operations, validation, torque curve, drive step (no DOM) |\n| `Render.js` | three.js stage, mesh channels, icon renderer |\n| `Camera.js` | Glide camera rig and its HUD (dial, lens, turntable) |\n| `Sockets.js` | Socket kinds, parameters, step (springs, pendulum, dock state machine), joint pose (no DOM) |\n| `SocketVisuals.js` | One debug look per socket kind |\n| `Visuals.js` | Shader debug visuals: field shells, beams, glows, selection tint, camera model, dot floor, density |\n| `Ui.js`, `Icons.js`, `ComponentViewer.css` | Project Zero controls, icons and styles |\n| `Engine/` | Readers, mesh analysis, workers; SDF, UV, cluster LOD, simplification, transform and OBJ export from Frontier-1 |\n| `Models/` | ControlVehicle Body / Tyre / Rim (FCT1) from Vehicle Lab |\n| `Vendor/`, `Fonts/` | three.js r187; DM Sans (OFL) |\n\n## Checks\n\n```\nnode Experimental/ComponentViewer/Scripts/CheckComponentViewer.mjs          # readers, pipeline, blueprint model, drive\nnpm install --prefix /tmp/smoke jsdom@25\nJSDOM_DIR=/tmp/smoke node Experimental/ComponentViewer/Scripts/SmokeComponentViewer.mjs   # UI paths in jsdom\n```\n\nThe smoke test boots the whole page with mocked WebGL and workers, then clicks through every main path. It fails on any\nruntime error. It does not check what the GPU draws.\n\nSources: Vehicle Lab is `Experimental Remastered/AssetInspector` on Frontier-OLD, branch `arena/d96da802-frontier`.\nCluster LOD Studio is `Experimental/ClusterLodStudio` on Frontier-1, branch `arena/453e172d-frontier-1`. Copied engine\nfiles keep an attribution header.\n"}, {"path": "Experimental/ForceFieldVisualization/README.md", "name": "README.md", "group": "Experimental/ForceFieldVisualization", "size": 3193, "mtime": 1794742176.821, "content": "# Force field visualization\n\nOne renderer for a horizontal slice of a force field, used by the Force Field editor and the Particle editor (and,\nlater, the Frontier editor). The look is the eos Force Field Debugger's vector field; the range is 100 m to 100 km.\n\n![Map at 100 km with cascades](../../Exhibits/ForceFieldEditor/Images/ForceFieldMap100km.jpg)\n\n## Projections\n\n| Mode    | Use                                                         | Heatmap drawing                         |\n|---------|-------------------------------------------------------------|-----------------------------------------|\n| Map     | Top-down, log zoom about the cursor, pan, double-click to centre | One image, affine transform         |\n| Oblique | The slice as a tilted plate; source columns stand on it    | One image, affine transform             |\n| Camera  | Any view-projection (column-major, WebGPU depth 0–1)        | Projected cells on an offscreen layer   |\n\n## What it draws\n\n- Turbo heatmap (the eos colour stops), smooth or eos cells; quantities: horizontal speed, east, south, vertical,\n  vorticity ω, divergence ∇·v; automatic scale at the 98th percentile, eased between refreshes, or fixed.\n- White arrows with 5 px heads at ±0.55 rad (eos); ⊙ / ⊗ where vertical flow dominates, measured against the view's\n  median so uniform gravity marks nothing.\n- Tracers riding the sampled lattice at a display rate (direction and structure, not real-time travel).\n- Source outlines by contribution (flow teal, accelerate amber, damp violet): circles, boxes, columns, tracks,\n  bearing arrows, labels that avoid each other; small sources keep their dot and drop their label at wide spans.\n- Scale bar (m / km), legend, probe crosshair, cascade overlay, and a minimap of the authored extent with the view's\n  outline (or the camera's ground trace).\n\n## Level of detail\n\nThe lattice cell is the power of two nearest `CellPixels` on screen, snapped to the world: panning never shimmers\nand each halving of zoom is one level. The caller's sampler receives the cell size (`CellSpan`) so terms shorter\nthan two cells can fade, as a coarse cascade would average them. A sample costs about 1 µs in the Force Field\neditor's field, so a 150 × 95 lattice refreshes in about 14 ms; it is re-sampled only when the view, the slice or the\nfield changes, or every `RefreshInterval` while time runs.\n\n## Use\n\n```javascript\nconst View = ForceFieldVisualization.Create(Canvas, {\n    Sample: (Contribution, X, Y, Z, Time, CellSpan, Out) => { /* add m/s, m/s² or 1/s into Out */ return true; },\n    OnSourcePick: Token => {}, OnSourceMove: (Token, X, Z) => {}, OnHover: Point => {}\n});\nView.Configure({ Quantity: 'Speed', Contribution: 'Flow', SliceHeight: 10, Sources: [/* outlines */] });\nObject.assign(View.View, { Mode: 'Map', CentreX: 0, CentreZ: 0, Span: 6000 });\nView.AttachNavigation();\nrequestAnimationFrame(function Tick() { View.Render(Seconds()); requestAnimationFrame(Tick); });\n```\n\nReturning `false` from `Sample` marks a point outside the field (drawn transparent). The C++ port keeps the same\nsplit: the field supplies samples, this renderer owns sampling density, colour, arrows and overlays.\n"}, {"path": "Experimental/FractureEditor/README.md", "name": "README.md", "group": "Experimental/FractureEditor", "size": 7260, "mtime": 1794764154.239, "content": "# Fracture Editor\n\nA 3D redesign of the per-object **Fracture** editor from Frontier-OLD's Project Zero editor\n(`arena/bc062d35-frontier-old`, `Experimental/ProjectZeroEditor`). The object is broken into real 3D pieces (a seeded\n3D Voronoi fracture of its solid) and shown in a three.js viewport around the recipe UI. The pieces are an authoring\npreview of what the recipe makes. This is not the runtime solver, and the drop test is a simple ballistic preview, not\nphysics.\n\n```\npython3 Experimental/FractureEditor/Serve.py         # http://0.0.0.0:8096/ → /Experimental/FractureEditor/\n```\n\nIt is plain ES modules with no build step. three.js (r187), the glide camera (`Camera.js`) and the line-free visuals\n(dot floor, glow sprite, in-material halo from `Visuals.js`) and the fonts are shared from `../ComponentViewer/`. The\nlook is the same Project Zero language as the Component Viewer: charcoal docks on a 2 px seam, pill sliders, white\nactive segments and amber (#ffb238) for selection and the impact point.\n\n## Screenshots\n\n![Fracture Editor — objects, 3D viewport, recipe](Screenshots/fracture-editor.png)\n\n## What changed from the old UI\n\n| Old (Project Zero) | Redesign |\n|---|---|\n| A small inspector card plus an editor in a separate pop-up window (opened with ↗) | One window. The **Objects** list, the **3D viewport** and the **Recipe** sit side by side. The **Inspector card** tab swaps the recipe for the compact card, which edits the same recipe with the 3D view still live |\n| One object at a time; you had to find it in the outliner | An object list with a state pill per object (Off · Live · Unbaked · Stale · SDF pending · Baked), search, filters (All / On / Needs bake) and **Bake N objects** |\n| Material as a dropdown | Six material tiles, each with a one-line note on how it breaks (concrete rubble, stone slabs, wood splinters, radial glass, tempered dice, tough ABS) |\n| Energy as a raw number | A cubic slider (most of the travel goes to the useful low range), shown in J or kJ, with **Tap / Strike / Impact / Blast** presets |\n| Piece ceiling and minimum size with no feedback | A **budget meter** shows what energy asks for, what the ceiling allows and what the minimum size allows, and highlights the one that decides the piece count |\n| Impact X/Y/Z number fields only | **Click the object's surface** in the 3D view to place the impact, drag the amber point across the surface, nudge it with the arrow keys and Page Up / Down (Shift for ×10), or type it in. **Centre** resets it |\n| Status text \"Open the editor to bake or refresh geometry.\" | A bake card with signature hash, piece count and age. When stale it lists **what changed** (e.g. `Material Concrete → Glass`) and offers **Revert** (restore the baked recipe) or **Rebake** |\n| SDF toggle and resolution select | The same controls, plus a memory breakdown (pieces, then `N × res³ × 2 B` of R16F, then total) |\n| No undo | Undo and redo per object (Ctrl Z / Ctrl Shift Z). A slider drag or impact drag counts as one step |\n| 2D glyph / schematic | A **3D viewport**: outer skin in the material's surface, fresh crack faces lighter and rougher, the amber impact glow drawn through the solid. Shade by **Material**, **Size** (density ramp) or **Release** order. **Explode** pulls pieces apart from the impact. **Cutaway** (C) peels away the pieces between the camera and the impact so the crack network inside shows, and it follows as you orbit. **Drop test** (Space) breaks the object at the impact and lets the pieces fall and settle. Hovering a piece shows its size, volume, crack faces and release order with the amber in-material halo |\n| Torus: \"Concave preview needs decomposition.\" | Concave shapes **are** decomposed: the ring is 16 convex wedges, and pieces that span wedges stay one piece. Imported meshes use a 3-part proxy hull until source-mesh decomposition exists (shown as a chip) |\n\nThere are no wireframes, outline helpers or selection footprint. Selection is the halo inside the material, and the\nfloor is the Component Viewer's dot floor with a soft shadow.\n\n## Compatibility\n\nStorage is byte-compatible with the old editor, so recipes move both ways:\n\n- Key `Frontier.Fracture.v2:<objectId>` → `{ Owner: {Id, Name, Primitive, Scale}, Settings }`\n- Same defaults and clamps: Energy 0–50 000, Seed 1–999 999 (integer), Ceiling 2–160 (integer), Minimum size 0.002–0.3,\n  impact ±1000. SDF resolution is 32, 64 or 128.\n- Same materials (`concrete rock wood glass tempered plastic`).\n- Same bake signature: `{Revision: 2, Primitive, Scale, Recipe}`. It ignores Enabled, Mode, PieceSdf, SdfResolution,\n  Baked and EditedAt, so turning on SDF or changing its resolution only marks the SDF as pending, not the pieces.\n- `?object=<id>` opens that object, which is how the old launcher opened the editor window.\n- `storage` events keep other open windows (another editor, or the Project Zero inspector) in sync live.\n\n## How the pieces are made\n\nEach shape is a set of convex polyhedra built from tangent half-spaces in a unit box and scaled by the object's Scale:\n- cube: box\n- cylinder / cone: 28-sided frustum\n- sphere: 110 tangent planes (Fibonacci directions)\n- torus: 16 octagonal wedges\n- imported mesh: plinth + tapered body + head proxy\n\nSeeds come from the material pattern:\n- concrete / stone: a cluster around the impact, widening with energy\n- glass: radial spokes in the pane's plane\n- wood: grain (the cell space is squashed along y, so cells come out as splinters)\n- tempered: a jittered 3D grid of \"dice\"\n- ABS: a few big pieces\n\nEach piece is the solid clipped by the bisector planes to every nearer seed, with the cut capped as a crack face. The\nchecks verify that piece volumes add up exactly to the solid, that every piece is a closed surface, and that the outer\nskin of all pieces equals the intact skin.\n\n## Keys\n\nViewport: drag to orbit · right-drag to pan · wheel to glide · click the surface to place the impact · drag the amber point · `F` frame · `C` cutaway · `Space` drop test · arrows / PgUp / PgDn nudge the impact\n\n`↑ ↓` object · `E` enable · `R` new seed · `B` bake · `1 2 3` shading · `V` recipe or inspector card · `?` shortcuts · Ctrl Z / Ctrl Shift Z\n\n## Files\n\n| File | Contents |\n|---|---|\n| `FractureModel.js` | Pure model: normalize/clamps, `describe`, `signature`, `bakeState`, `recipeDiff`, storage, piece budget, memory estimate, convex solids, `clipPoly`, deterministic 3D Voronoi `shatter`, `intact` |\n| `Viewport3D.js` | three.js viewport: piece meshes (outer / crack material groups), shading, explode, cutaway, drop test, impact marker + click / drag placement, hover halo, card snapshot |\n| `FractureEditor.js` | The UI: object list, viewport wiring, recipe panel, bake flow (simulated progress), inspector card, undo, keys, sync |\n| `FractureEditor.css` | Styles |\n| `Icons.js` | Inline stroke icons |\n| `index.html`, `Serve.py` | Page and preview server |\n| `Scripts/CheckFractureEditor.mjs` | 19 model checks: compatibility, clamps, signature, states, diff, volume / closure / skin invariants, material character, convex decomposition |\n| `Scripts/SmokeFractureEditor.mjs` | jsdom drive of every UI path with WebGL mocked (`JSDOM_DIR=/tmp/smoke node …`) |\n"}, {"path": "Experimental/MaterialInspector/README.md", "name": "README.md", "group": "Experimental/MaterialInspector", "size": 9081, "mtime": 1794767701.601, "content": "# Material Inspector\n\nThis is the Material workspace inspector from **TextureStudio** (`unassignedinbox/Frontier`, branch `arena/6eeea758-frontier`), rebuilt as a **single card** in the Project Zero editor style. It has no workspace, viewport or renderer.\n\n```\npython3 Experimental/MaterialInspector/Serve.py        # http://0.0.0.0:8097/\n```\n\n## Screenshots\n\n| Material workspace (outliner · card, no viewport) | Material outliner |\n| --- | --- |\n| ![Material workspace](Screenshots/material.png) | ![Material outliner](Screenshots/material-outliner.png) |\n\n![Field source — the generator is a dropdown (glyph, name, short tag) beside the live preview](Screenshots/material-field-dropdown.png)\n\nOther workspaces: [Pattern / Stamp](../ArtworkInspector/README.md#screenshots), [Map Baking](../BakeInspector/README.md#screenshots) and [Brush Studio](../BrushStudio/README.md).\n\n## Layout and dropdowns\n\nMaterial, Pattern, Stamp and Map Baking are **outliner · card** pages; none of them has a viewport. Only Texture Painting ([Brush Studio](../BrushStudio/README.md)) keeps the blank Project Zero viewport, from `Viewport.js` / `Workspace.css` (`MountViewport(Host, { Title, Meta, Views, View, Chips, Hint, OnView })` → `{ Body, SetMeta, SetView }`).\n\n**Dropdowns.** `CardKit.Dropdown(Act, Options, Current, { Label, Placeholder, Search, Class, Disabled, Extra })` is the shared Project Zero pick list.\n\n- Options are `[Label, Value, Lead?, Hint?]` or `{ Group }` headings. *Lead* is an icon name or raw HTML (a swatch, a glyph, a thumbnail).\n- Each option is a button with `data-act` / `data-value`, so cards keep their existing click handling.\n- One document-level installer handles opening (one at a time), outside clicks, fixed placement (never clipped, flips up near the bottom), the keyboard (↓ ↑ Home End Enter Esc) and a filter box for lists longer than ten.\n- `CardKit.Chips(...)` now renders a dropdown too, so every former chip grid became one.\n\nWhere it is used:\n\n| Workspace | Dropdowns |\n| --- | --- |\n| Material | Field generator, material library |\n| Pattern / Stamp | Motif shape, blend, surface finish, add channel, starter library, long modifier options |\n| Map Baking | Bake target (sets + studies), isolation, part kind, part resolution, add part |\n| Brush Studio | Shape source and grain source (thumbnails), rendering mode, colour gradients, every option list with more than four values |\n\nShort 2–4 way toggles stay segments, for example Value · Field · Ramp · Image, OpenGL / DirectX, and Per part · Atlas · UDIM.\n\n## What changed from the TextureStudio inspector\n\n| TextureStudio | This card |\n| --- | --- |\n| Two tabs: *Properties* and *Layer Stack*. | One card. The strata are a compact stack inside it. |\n| A cloud of 28 removable channel pills, followed by an \"Inspect Channel\" dropdown, a \"Source\" dropdown, a \"Generator\" dropdown and a column of sliders. | One quiet row per channel showing its live value. Rows are grouped (Core, Specular, Coat, Sheen, Thin film, Volume, Emission), and groups without authored channels start folded. Opening a row expands **that one channel's** editor in place. |\n| Source and generator are hidden behind dropdowns. | Source is a visible segment (Value · Field · Ramp · Image). The eight field generators are one dropdown with a glyph and short tag each. Ramp shape is a segment. |\n| \"Drag pills to scrub values\". | You can drag any scalar readout in the list without opening anything. Shift gives fine control. |\n| Separate \"Surface Albedo & Microfacet\" sliders that duplicate channels. | Channels *are* the values. Only the stratum's own knobs (finish, coat orange peel, flake dispersion and palette, detail presets) are in a folded section. |\n\nShort strata (coat, flakes and new detail strata, with 8 or fewer channels) are shown as a flat list without group heads.\n\n## Card anatomy\n\n1. **Identity.** Editable material name, catalog label and library picker.\n2. **Statistics.** Three tiles that answer questions the channel list cannot (the old Roughness / Metalness / Strata trio only repeated values shown below it):\n   - **Response:** reflectance at normal incidence (F0), with a log-scale meter on which the dielectric band 2–8 % is marked. F0 is blended from IOR × specular and the base colour by metalness. The caption gives the class (Dielectric / Hybrid / Conductor) and gloss band. The tile turns amber for in-between metalness, which is rarely physical.\n   - **Albedo:** sRGB luminance of the base colour (sampled mean when a field or ramp drives it), on a meter marked with the plausible band: 12–94 % for dielectrics, ≥ 70 % for conductors. It warns when the colour falls outside that band.\n   - **Signal:** how many channel slots across enabled strata are driven by fields, ramps or images rather than constant values, as a stacked meter by source kind.\n3. **Strata** (top → bottom):\n   - The dot toggles a stratum on or off.\n   - Click a stratum to select it; double-click to rename it.\n   - `+ Detail` adds a masked detail stratum, which you can remove again.\n4. **Channels.** Filter, `+ Channel` (adds a missing channel; the list keeps registry order), and grouped rows. One row is open at a time:\n   - **Value:** a slider pill with a numeric field, a colour field with hex input, or X/Y/Z inputs for vectors.\n   - **Field:** live preview, generator dropdown, Scale / Seed / Angle / Contrast, and a colour ramp (or the camouflage palette).\n   - **Ramp:** linear, radial or conic, with angle and stops.\n   - **Image:** drop or choose a tile. It is resampled to a PNG of at most 256 px and embedded.\n   - For non-value sources there is also a *Base value* control and a *Drive directly* switch.\n   - The footer shows the parameter address and a Remove button.\n5. **Stratum knobs** (folded).\n6. **Export:** `.material` TOML, JSON (`alloy.material.v6`), or Copy.\n\nKeyboard: ↑ / ↓ move between channel rows. Esc closes the open editor. Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) undo and redo.\n\nThe same card language is reused by the [Pattern / Stamp Studio](../ArtworkInspector/README.md) and [Map Baking](../BakeInspector/README.md) cards. `CardKit.js` holds the shared templates (knob, colour field, stops, segments, dropdown, stat tile + meters, undo history, dock nav) and `Icons.js` the shared glyphs.\n\n## Data and compatibility\n\n- **`MaterialModel.js`** is pure (no DOM). It keeps the TextureStudio document format unchanged:\n  - flat look-dev parameters (`color`, `roughness`, `coat`, …);\n  - `Authoring` v2 (`Layers`, `Generators`, `Inputs`, `Sources`, …);\n  - the same `ChannelAddress` carrier rules: surface → targets, coat → `coat*`, flakes → `flake-output:*`, detail → `layer:<id>:*`.\n- **`Engine/FieldSpecification.js`** and **`Engine/textureSource.js`** are byte-identical copies from TextureStudio.\n- Every material is stored per id under `localStorage[\"Frontier.MaterialInspector.v1:<id>\"]`. Changes sync live between open windows.\n- `?material=<id>` opens a specific catalog entry.\n- The catalog is a short slice of the TextureStudio library: Derez Lattice Dissolve, Candy Crimson, Brushed Titanium, Molten Magma Crust and Woodland Camouflage · Smooth. Together they cover every stratum model and source kind.\n\n## Outliners\n\nEach studio page shows its card next to a matching **outliner card**. The outliner follows the Project Zero editor's Outliner layout:\n\n1. A heading with a round action button.\n2. Two statistic tiles, which also act as filters.\n3. A search pill with a filter menu, and the active filters shown as chips.\n4. 39 px tree rows with a disclosure arrow, icon, name and metadata, a status disc and an amber selection bar.\n5. A footer of readouts.\n\n`OutlinerKit.js` holds the shared plumbing: search, filters, expand / collapse, keyboard navigation (arrows, Home / End, Enter, F2, Delete, Space), inline rename and drag reorder. Each outliner supplies only its rows and actions:\n\n| Page | Outliner | Tree |\n| --- | --- | --- |\n| Material | `MaterialOutliner.js` | material → strata layers → driven channels (field / pattern / ramp / texture) |\n| Pattern / Stamp | `../ArtworkInspector/ArtworkOutliner.js` | canvas → layers (motif / text / gradient…) → modifiers |\n| Map Baking | `../BakeInspector/BakeOutliner.js` | study → map groups → maps, plus the study set |\n\nThe outliner and the card share one hub, so changes made in either one show up in the other. Add `?outliner=0` to the URL to show the card on its own.\n\n## Checks\n\n```\nnode Experimental/MaterialInspector/Scripts/CheckMaterialInspector.mjs\nJSDOM_DIR=/tmp/smoke node Experimental/MaterialInspector/Scripts/SmokeMaterialInspector.mjs   # npm i --prefix /tmp/smoke jsdom@25\nJSDOM_DIR=/tmp/smoke node Experimental/MaterialInspector/Scripts/SmokeOutliners.mjs           # all three outliners\n```\n\nIf `TS_DIR` points at a TextureStudio checkout (`…/Experimental/TextureStudio`), the check script also confirms two things:\n\n- the copied engine files are unchanged;\n- TextureStudio's own `NormalizeMaterialAuthoring` accepts every document this card exports.\n"}, {"path": "README.md", "name": "README.md", "group": "Repository Root", "size": 11, "mtime": 1794742176.821, "content": "# Frontier\n"}]</script>
+<script>
+(function() {
+  let DOCS = JSON.parse(document.getElementById('embeddedDocs').textContent);
+  const docByPath = new Map(DOCS.map(d => [d.path, d]));
+
+  let liveServerConnected = false;
+  let folderScope = 'all';
+  let openTabs = [];
+  let activePath = '';
+  let viewMode = 'preview';
+  let zoomScale = 1.0;
+  let searchQuery = '';
+  const collapsedGroups = new Set(['Experimental']);
+
+  // Pane visibility & right-dock tab state ('notepad' | 'inspector')
+  let leftPaneOpen = true;
+  let rightTabsOpen = ['notepad', 'inspector'];
+  let activeRightTab = 'notepad';
+  let rightWide = false;
+
+  // Notepad state
+  let currentNoteRel = 'Documentation/Plans/SessionNotes.md';
+  let noteSaveTimer = null;
+  let noteDirty = false;
+
+  // Pre-open Plan docs in center tabs (excluding SessionNotes.md / Note-*.md so center starts on the active Plan)
+  DOCS.filter(d => String(d.group).startsWith('Plans') && d.name !== 'SessionNotes.md' && !d.name.startsWith('Note-')).forEach(d => openTabs.push(d.path));
+  if (openTabs.length === 0 && DOCS.length > 0) {
+    openTabs.push(DOCS[0].path);
+  }
+  activePath = openTabs[0] || '';
+
+  // =========================================================================
+  // SMOOTH ANIMATED SCROLL ENGINE (eased section jumps + smooth wheel glide)
+  // =========================================================================
+  const wheelTargets = new WeakMap();
+  const wheelFrames = new WeakMap();
+
+  function animateScrollTo(el, targetTop, durationMs) {
+    if (!el) return;
+    const cancelPrev = wheelFrames.get(el);
+    if (cancelPrev) cancelAnimationFrame(cancelPrev);
+    wheelTargets.delete(el);
+
+    const startTop = el.scrollTop;
+    const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    const clampedTarget = Math.min(maxTop, Math.max(0, targetTop));
+    const delta = clampedTarget - startTop;
+    if (Math.abs(delta) < 1) return;
+
+    const startTime = performance.now();
+    function step(now) {
+      const t = Math.min(1, (now - startTime) / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3); // cubic ease-out
+      el.scrollTop = startTop + delta * eased;
+      if (t < 1) {
+        wheelFrames.set(el, requestAnimationFrame(step));
+      } else {
+        wheelFrames.delete(el);
+      }
+    }
+    wheelFrames.set(el, requestAnimationFrame(step));
+  }
+
+  function glideWheelDelta(el, rawDeltaY, deltaMode) {
+    if (!el || !rawDeltaY) return false;
+    const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    if (maxTop <= 0) return false;
+
+    let dy = rawDeltaY;
+    if (deltaMode === 1) dy *= 36;
+    else if (deltaMode === 2) dy *= el.clientHeight * 0.85;
+
+    const base = wheelTargets.has(el) ? wheelTargets.get(el) : el.scrollTop;
+    const next = Math.min(maxTop, Math.max(0, base + dy));
+    wheelTargets.set(el, next);
+
+    // Immediate first-step response + 60fps cubic glide
+    const initialDiff = next - el.scrollTop;
+    if (Math.abs(initialDiff) >= 0.5) {
+      el.scrollTop += initialDiff * 0.26;
+    }
+
+    if (!wheelFrames.has(el)) {
+      const tick = () => {
+        const target = wheelTargets.get(el);
+        if (target === undefined) {
+          wheelFrames.delete(el);
+          return;
+        }
+        const diff = target - el.scrollTop;
+        if (Math.abs(diff) < 0.6) {
+          el.scrollTop = target;
+          wheelTargets.delete(el);
+          wheelFrames.delete(el);
+          return;
+        }
+        el.scrollTop += diff * 0.26;
+        wheelFrames.set(el, requestAnimationFrame(tick));
+      };
+      wheelFrames.set(el, requestAnimationFrame(tick));
+    }
+    return true;
+  }
+
+  window.addEventListener('wheel', e => {
+    if (e.ctrlKey || e.metaKey || !e.deltaY || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+
+    let scrollEl = e.target.closest('.smooth-scroll-surface');
+    if (!scrollEl) {
+      if (e.target.closest('#centerPane')) {
+        scrollEl = viewMode === 'source'
+          ? document.getElementById('sourcePane')
+          : document.getElementById('previewPane');
+      } else if (e.target.closest('#leftPane')) {
+        scrollEl = document.getElementById('treeContainer');
+      } else if (e.target.closest('#rightPane')) {
+        scrollEl = activeRightTab === 'notepad'
+          ? document.getElementById('notepadTextarea')
+          : document.getElementById('inspectorView');
+      } else {
+        scrollEl = viewMode === 'source'
+          ? document.getElementById('sourcePane')
+          : document.getElementById('previewPane');
+      }
+    }
+
+    if (glideWheelDelta(scrollEl, e.deltaY, e.deltaMode)) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  window.addEventListener('keydown', e => {
+    const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+    if (tag === 'input' || tag === 'textarea') return;
+    const scrollEl = viewMode === 'source'
+      ? document.getElementById('sourcePane')
+      : document.getElementById('previewPane');
+    if (!scrollEl) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); glideWheelDelta(scrollEl, 96, 0); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); glideWheelDelta(scrollEl, -96, 0); }
+    else if (e.key === 'PageDown') { e.preventDefault(); glideWheelDelta(scrollEl, scrollEl.clientHeight * 0.82, 0); }
+    else if (e.key === 'PageUp') { e.preventDefault(); glideWheelDelta(scrollEl, -scrollEl.clientHeight * 0.82, 0); }
+    else if (e.key === 'Home') { e.preventDefault(); animateScrollTo(scrollEl, 0, 320); }
+    else if (e.key === 'End') { e.preventDefault(); animateScrollTo(scrollEl, scrollEl.scrollHeight, 320); }
+  });
+
+  // =========================================================================
+  // PANE OPEN / CLOSE WITH X + REOPEN PILLS
+  // =========================================================================
+  function syncPaneLayout() {
+    const grid = document.getElementById('workspaceGrid');
+    const rightOpen = rightTabsOpen.length > 0 && Boolean(activeRightTab);
+
+    grid.classList.toggle('left-closed', !leftPaneOpen);
+    grid.classList.toggle('right-closed', !rightOpen);
+    grid.classList.toggle('right-wide', rightOpen && activeRightTab === 'notepad' && rightWide);
+
+    document.getElementById('btnReopenDocuments').classList.toggle('hidden', leftPaneOpen);
+    document.getElementById('btnReopenNotepad').classList.toggle('hidden', rightTabsOpen.includes('notepad'));
+    document.getElementById('btnReopenInspector').classList.toggle('hidden', rightTabsOpen.includes('inspector'));
+
+    renderRightPaneTabs();
+
+    const showNotepad = rightOpen && activeRightTab === 'notepad';
+    const showInspector = rightOpen && activeRightTab === 'inspector';
+    document.getElementById('notepadView').classList.toggle('hidden', !showNotepad);
+    document.getElementById('inspectorView').classList.toggle('hidden', !showInspector);
+    document.getElementById('rightFooterLeft').textContent = showNotepad
+      ? currentNoteRel
+      : (document.getElementById('outlineCountPill').textContent + ' Sections');
+  }
+
+  function renderRightPaneTabs() {
+    const strip = document.getElementById('rightTabStrip');
+    const labels = { notepad: 'Notepad', inspector: 'Inspector' };
+    strip.innerHTML = rightTabsOpen.map(id => {
+      const cls = id === activeRightTab ? 'trap-tab active' : 'trap-tab';
+      return (
+        '<div class="' + cls + '" data-rtab="' + id + '">' +
+        (id === activeRightTab ? '<span class="tab-dot"></span>' : '') +
+        '<span>' + labels[id] + '</span>' +
+        '<span class="tab-x" data-rclose="' + id + '" title="Close ' + labels[id] + '">×</span>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  function closeRightTab(tabId) {
+    rightTabsOpen = rightTabsOpen.filter(t => t !== tabId);
+    if (activeRightTab === tabId) {
+      activeRightTab = rightTabsOpen[0] || '';
+    }
+    syncPaneLayout();
+  }
+
+  function reopenRightTab(tabId) {
+    if (!rightTabsOpen.includes(tabId)) {
+      if (tabId === 'notepad') rightTabsOpen.unshift('notepad');
+      else rightTabsOpen.push(tabId);
+    }
+    activeRightTab = tabId;
+    syncPaneLayout();
+  }
+
+  // =========================================================================
+  // NOTEPAD (LIVE SESSION AUTO-SAVE + PUSH TO GITHUB)
+  // =========================================================================
+  function updateNoteMetrics() {
+    const val = document.getElementById('notepadTextarea').value;
+    const words = val.trim() ? val.trim().split(/\s+/).filter(Boolean).length : 0;
+    const lines = val.split('\n').length;
+    document.getElementById('noteMetrics').textContent = lines + ' ln · ' + words + ' words';
+  }
+
+  function setNoteStatus(text, cls) {
+    const el = document.getElementById('noteSaveStatus');
+    el.textContent = text;
+    el.className = cls || 'status-saved';
+  }
+
+  function normalizeNoteRelFromInput() {
+    let raw = document.getElementById('noteFilenameInput').value.trim() || 'SessionNotes.md';
+    raw = raw.replace(/^\/+/, '');
+    if (!raw.toLowerCase().endsWith('.md')) raw += '.md';
+    document.getElementById('noteFilenameInput').value = raw.replace(/^Documentation\/Plans\//, '');
+    currentNoteRel = raw.startsWith('Documentation/Plans/')
+      ? raw
+      : ('Documentation/Plans/' + raw);
+    document.getElementById('rightFooterLeft').textContent = currentNoteRel;
+    return currentNoteRel;
+  }
+
+  async function loadNoteFromServer(relPath) {
+    const embedded = docByPath.get(relPath);
+    if (embedded && embedded.content !== undefined) {
+      document.getElementById('notepadTextarea').value = embedded.content;
+      updateNoteMetrics();
+    }
+    try {
+      const resp = await fetch('api/notes?path=' + encodeURIComponent(relPath), { cache: 'no-store' });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      liveServerConnected = true;
+      currentNoteRel = data.path;
+      document.getElementById('noteFilenameInput').value = data.name;
+      document.getElementById('notepadTextarea').value = data.content || '';
+      localStorage.setItem('frontier_note_' + currentNoteRel, data.content || '');
+      updateNoteMetrics();
+      setNoteStatus('● Synced with Session', 'status-saved');
+    } catch (_) {
+      const cached = localStorage.getItem('frontier_note_' + relPath);
+      if (cached !== null) {
+        document.getElementById('notepadTextarea').value = cached;
+        updateNoteMetrics();
+      }
+    }
+  }
+
+  async function saveNoteToSession(manual) {
+    const relPath = normalizeNoteRelFromInput();
+    const content = document.getElementById('notepadTextarea').value;
+    localStorage.setItem('frontier_note_' + relPath, content);
+    noteDirty = false;
+
+    try {
+      setNoteStatus('● Saving to Session...', 'status-saved');
+      const resp = await fetch('api/notes/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: relPath, content })
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const res = await resp.json();
+      if (!res.ok) throw new Error(res.error || 'Save error');
+      setNoteStatus(manual ? '✓ Saved to Session' : '● Auto-saved to Session', 'status-saved');
+      syncLiveTree(true);
+    } catch (_) {
+      setNoteStatus('● Saved in Browser', 'status-saved');
+    }
+  }
+
+  async function pushNoteToGithub() {
+    const btn = document.getElementById('btnPushGithub');
+    const relPath = normalizeNoteRelFromInput();
+    const content = document.getElementById('notepadTextarea').value;
+    localStorage.setItem('frontier_note_' + relPath, content);
+
+    btn.disabled = true;
+    setNoteStatus('↑ Pushing to GitHub...', 'status-saved');
+    try {
+      const resp = await fetch('api/notes/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: relPath, content })
+      });
+      const res = await resp.json();
+      if (!resp.ok || !res.ok) {
+        throw new Error(res.error || ('HTTP ' + resp.status));
+      }
+      setNoteStatus('✓ Pushed ' + res.commit + ' → GitHub', 'status-pushed');
+      syncLiveTree(true);
+    } catch (err) {
+      setNoteStatus('✕ Push failed: ' + err.message, '');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // =========================================================================
+  // MARKDOWN PARSER & RENDERER
+  // =========================================================================
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function formatSize(bytes) {
+    const kb = Number(bytes || 0) / 1024;
+    return kb < 10 ? kb.toFixed(1) + ' KB' : Math.round(kb) + ' KB';
+  }
+
+  function highlightQuery(htmlText) {
+    if (!searchQuery || searchQuery.length < 2) return htmlText;
+    const escapedQ = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('(' + escapedQ + ')', 'gi');
+    return htmlText.replace(/(>[^<]*<)/g, seg => {
+      const inner = seg.slice(1, -1);
+      return '>' + inner.replace(re, '<mark>$1</mark>') + '<';
+    });
+  }
+
+  function resolveRelativePath(basePath, href) {
+    if (/^(https?:|mailto:|#)/i.test(href)) return null;
+    const cleanHref = href.split('#')[0];
+    const baseParts = basePath.split('/').slice(0, -1);
+    for (const part of cleanHref.split('/')) {
+      if (!part || part === '.') continue;
+      if (part === '..') baseParts.pop();
+      else baseParts.push(part);
+    }
+    const candidate = baseParts.join('/');
+    return docByPath.has(candidate) ? candidate : null;
+  }
+
+  function formatInline(raw, currentDocPath) {
+    const tokens = [];
+    let s = escapeHtml(raw);
+    s = s.replace(/`([^`]+)`/g, (_, code) => {
+      const idx = tokens.push('<code>' + code + '</code>') - 1;
+      return '\x00TOK' + idx + '\x00';
+    });
+
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, href) => {
+      const resolved = resolveRelativePath(currentDocPath, href);
+      if (resolved) {
+        return '<a href="#" data-doclink="' + escapeHtml(resolved) + '">' + label + '</a>';
+      }
+      return '<a href="' + href + '" target="_blank" rel="noopener">' + label + '</a>';
+    });
+
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+    s = s.replace(/\x00TOK(\d+)\x00/g, (_, i) => tokens[Number(i)]);
+    return s;
+  }
+
+  function parseMarkdown(md, currentDocPath) {
+    const cleaned = String(md || '').replace(/<!--[\s\S]*?-->/g, '');
+    const lines = cleaned.replace(/\r\n/g, '\n').split('\n');
+    let html = '';
+    const headings = [];
+    let i = 0;
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      if (line.trimStart().startsWith('```')) {
+        i++;
+        const buf = [];
+        while (i < lines.length && !lines[i].trimStart().startsWith('```')) {
+          buf.push(escapeHtml(lines[i]));
+          i++;
+        }
+        i++;
+        html += '<pre><code>' + buf.join('\n') + '</code></pre>';
+        continue;
+      }
+
+      if (/^\s*([-*_])\s*\1\s*\1[\s\-*_]*$/.test(line)) {
+        html += '<hr>';
+        i++;
+        continue;
+      }
+
+      const hMatch = line.match(/^(#{1,6})\s+(.*)$/);
+      if (hMatch) {
+        const level = hMatch[1].length;
+        const text = hMatch[2].trim();
+        const slug = 'sec-' + headings.length;
+        if (level <= 3) {
+          headings.push({ level, text: text.replace(/[`*]/g, ''), slug });
+        }
+        html += '<h' + level + ' id="' + slug + '">' + formatInline(text, currentDocPath) + '</h' + level + '>';
+        i++;
+        continue;
+      }
+
+      if (line.includes('|') && i + 1 < lines.length && /^\s*\|?[\s:-]+\|[\s|:-]*$/.test(lines[i + 1])) {
+        const splitRow = r => {
+          let t = r.trim();
+          if (t.startsWith('|')) t = t.slice(1);
+          if (t.endsWith('|')) t = t.slice(0, -1);
+          return t.split('|').map(c => c.trim());
+        };
+        const headers = splitRow(line);
+        const aligns = splitRow(lines[i + 1]).map(a => {
+          if (a.startsWith(':') && a.endsWith(':')) return 'center';
+          if (a.endsWith(':')) return 'right';
+          return 'left';
+        });
+        i += 2;
+        let tbl = '<div class="table-scroll"><table><thead><tr>';
+        headers.forEach((h, idx) => {
+          tbl += '<th style="text-align:' + (aligns[idx] || 'left') + '">' + formatInline(h, currentDocPath) + '</th>';
+        });
+        tbl += '</tr></thead><tbody>';
+        while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
+          const cells = splitRow(lines[i]);
+          tbl += '<tr>';
+          headers.forEach((_, idx) => {
+            tbl += '<td style="text-align:' + (aligns[idx] || 'left') + '">' + formatInline(cells[idx] || '', currentDocPath) + '</td>';
+          });
+          tbl += '</tr>';
+          i++;
+        }
+        tbl += '</tbody></table></div>';
+        html += tbl;
+        continue;
+      }
+
+      if (line.trimStart().startsWith('>')) {
+        const qLines = [];
+        while (i < lines.length && lines[i].trimStart().startsWith('>')) {
+          qLines.push(lines[i].replace(/^\s*>\s?/, ''));
+          i++;
+        }
+        html += '<blockquote>' + qLines.map(ql => '<p>' + formatInline(ql, currentDocPath) + '</p>').join('') + '</blockquote>';
+        continue;
+      }
+
+      if (/^\s*[-*+]\s+/.test(line)) {
+        html += '<ul>';
+        while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+          const itemText = lines[i].replace(/^\s*[-*+]\s+/, '');
+          html += '<li>' + formatInline(itemText, currentDocPath) + '</li>';
+          i++;
+        }
+        html += '</ul>';
+        continue;
+      }
+
+      if (/^\s*\d+\.\s+/.test(line)) {
+        html += '<ol>';
+        while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+          const itemText = lines[i].replace(/^\s*\d+\.\s+/, '');
+          html += '<li>' + formatInline(itemText, currentDocPath) + '</li>';
+          i++;
+        }
+        html += '</ol>';
+        continue;
+      }
+
+      if (line.trim() === '') {
+        i++;
+        continue;
+      }
+
+      const pLines = [];
+      while (
+        i < lines.length &&
+        lines[i].trim() !== '' &&
+        !lines[i].trimStart().startsWith('#') &&
+        !lines[i].trimStart().startsWith('```') &&
+        !lines[i].trimStart().startsWith('>') &&
+        !/^\s*[-*+]\s+/.test(lines[i]) &&
+        !/^\s*\d+\.\s+/.test(lines[i])
+      ) {
+        pLines.push(formatInline(lines[i], currentDocPath));
+        i++;
+      }
+      html += '<p>' + pLines.join(' ') + '</p>';
+    }
+
+    return { html, headings };
+  }
+
+  function colorizeSourceLine(rawLine) {
+    let s = escapeHtml(rawLine);
+    if (/^#{1,6}\s/.test(rawLine)) return '<span class="tok-h">' + s + '</span>';
+    if (/^\s*&gt;/.test(s)) return '<span class="tok-q">' + s + '</span>';
+    if (rawLine.trimStart().startsWith('|')) return '<span class="tok-t">' + s + '</span>';
+    s = s.replace(/`([^`]+)`/g, '<span class="tok-c">`$1`</span>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<span class="tok-b">**$1**</span>');
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<span class="tok-l">[$1]($2)</span>');
+    return s;
+  }
+
+  function groupAllowedByScope(grp) {
+    if (grp === 'Local Opened Files') return true;
+    if (folderScope === 'plans') return grp === 'Plans' || grp.startsWith('Plans/');
+    if (folderScope === 'docs') return grp === 'Documentation' || grp === 'Repository Root';
+    if (folderScope === 'skills') return grp === 'AgenticInstructions';
+    return true;
+  }
+
+  function orderedGroups() {
+    const seen = [];
+    for (const d of DOCS) {
+      if (!seen.includes(d.group)) seen.push(d.group);
+    }
+    return seen.sort((a, b) => {
+      const rank = g => {
+        if (g === 'Plans' || g.startsWith('Plans/')) return 0;
+        if (g === 'Local Opened Files') return 1;
+        if (g === 'Documentation') return 2;
+        if (g === 'AgenticInstructions') return 3;
+        if (g === 'Repository Root') return 4;
+        return 5;
+      };
+      return rank(a) - rank(b) || a.localeCompare(b);
+    });
+  }
+
+  function renderTree() {
+    const container = document.getElementById('treeContainer');
+    const q = searchQuery.toLowerCase();
+    const groups = orderedGroups();
+
+    const plansTotal = DOCS.filter(d => String(d.group).startsWith('Plans')).length;
+    document.getElementById('statPlansCount').textContent = String(plansTotal);
+    document.getElementById('statAllCount').textContent = String(DOCS.length);
+    document.getElementById('headerTotalLabel').textContent = DOCS.length + ' files';
+
+    let visibleTotal = 0;
+    let out = '';
+
+    for (const grp of groups) {
+      if (!groupAllowedByScope(grp)) continue;
+      const items = DOCS.filter(d => d.group === grp && (
+        !q ||
+        d.name.toLowerCase().includes(q) ||
+        d.path.toLowerCase().includes(q) ||
+        String(d.content || '').toLowerCase().includes(q)
+      ));
+      if (items.length === 0) continue;
+      visibleTotal += items.length;
+      const collapsed = collapsedGroups.has(grp);
+
+      out += '<div class="folder-group">';
+      out += '<div class="folder-row" data-group="' + escapeHtml(grp) + '">';
+      out += '<div class="folder-row-left">';
+      out += '<span style="color:var(--fr-ink-muted);font-size:10px;width:10px;">' + (collapsed ? '▸' : '▾') + '</span>';
+      out += '<span class="folder-icon"></span>';
+      out += '<span>' + escapeHtml(grp) + '</span>';
+      out += '</div>';
+      out += '<span class="folder-badge">' + items.length + '</span>';
+      out += '</div>';
+
+      out += '<div class="folder-entries' + (collapsed ? ' collapsed' : '') + '">';
+      for (const doc of items) {
+        const cls = doc.path === activePath ? 'entry-row active' : 'entry-row';
+        const byteCount = doc.size || new Blob([String(doc.content || '')]).size;
+        out += '<div class="' + cls + '" data-open="' + escapeHtml(doc.path) + '" title="' + escapeHtml(doc.path) + '">';
+        out += '<div class="entry-main">';
+        out += '<span class="entry-square-icon">MD</span>';
+        out += '<span class="entry-name">' + escapeHtml(doc.name) + '</span>';
+        out += '</div>';
+        out += '<span class="entry-size">' + formatSize(byteCount) + '</span>';
+        out += '</div>';
+      }
+      out += '</div></div>';
+    }
+
+    container.innerHTML = out || '<div style="padding:16px;color:var(--fr-ink-muted);font-size:12px;">No matching Markdown documents.</div>';
+    document.getElementById('leftFooterSummary').textContent = visibleTotal + ' VISIBLE';
+  }
+
+  function renderTabs() {
+    const strip = document.getElementById('tabsStrip');
+    const tabsHtml = openTabs.map(p => {
+      const doc = docByPath.get(p);
+      if (!doc) return '';
+      const cls = p === activePath ? 'trap-tab active' : 'trap-tab';
+      return (
+        '<div class="' + cls + '" data-tab="' + escapeHtml(p) + '" title="' + escapeHtml(doc.path) + '">' +
+        (p === activePath ? '<span class="tab-dot"></span>' : '') +
+        '<span>' + escapeHtml(doc.name) + '</span>' +
+        '<span class="tab-x" data-close="' + escapeHtml(p) + '">×</span>' +
+        '</div>'
+      );
+    }).join('');
+
+    strip.innerHTML =
+      tabsHtml +
+      '<button class="tab-add-disc" id="btnTabBarAdd" title="Open local .md file">+</button>';
+
+    const addBtn = document.getElementById('btnTabBarAdd');
+    if (addBtn) {
+      addBtn.addEventListener('click', () => document.getElementById('localFileInput').click());
+    }
+  }
+
+  function renderActiveDocument(triggerReveal) {
+    const doc = docByPath.get(activePath);
+    const mdBody = document.getElementById('mdBody');
+    const sourcePane = document.getElementById('sourcePane');
+    const previewPane = document.getElementById('previewPane');
+    const stage = document.getElementById('documentStage');
+    const outlineList = document.getElementById('outlineList');
+
+    stage.classList.toggle('mode-split', viewMode === 'split');
+    sourcePane.classList.toggle('hidden', viewMode === 'preview');
+    previewPane.classList.toggle('hidden', viewMode === 'source');
+
+    if (triggerReveal) {
+      mdBody.style.animation = 'none';
+      void mdBody.offsetWidth;
+      mdBody.style.animation = '';
+    }
+
+    if (!doc) {
+      document.getElementById('activeDocTitle').textContent = 'No document selected';
+      document.getElementById('activeDocPath').textContent = 'Choose a .md file from Documents';
+      document.getElementById('activeGroupBadge').textContent = 'IDLE';
+      mdBody.innerHTML = '<p style="color:var(--fr-ink-muted);">Select a Markdown document in Documents or click <strong>+ Open .md</strong>.</p>';
+      sourcePane.innerHTML = '';
+      outlineList.innerHTML = '';
+      document.getElementById('outlineCountPill').textContent = '0';
+      return;
+    }
+
+    const content = String(doc.content || '');
+    document.getElementById('activeDocTitle').textContent = doc.name;
+    document.getElementById('activeDocPath').textContent = doc.path;
+    document.getElementById('activeGroupBadge').textContent = String(doc.group).toUpperCase();
+
+    const rawLines = content.replace(/\r\n/g, '\n').split('\n');
+    sourcePane.innerHTML = rawLines.map((ln, idx) =>
+      '<div class="source-line"><span class="line-num">' + (idx + 1) + '</span><span class="line-code">' +
+      highlightQuery(colorizeSourceLine(ln)) + '</span></div>'
+    ).join('');
+
+    const parsed = parseMarkdown(content, doc.path);
+    mdBody.innerHTML = highlightQuery('<div>' + parsed.html + '</div>');
+
+    outlineList.innerHTML = parsed.headings.map(h =>
+      '<div class="outline-row lvl-' + h.level + '" data-jump="' + h.slug + '" title="' + escapeHtml(h.text) + '">' +
+      escapeHtml(h.text) + '</div>'
+    ).join('');
+    document.getElementById('outlineCountPill').textContent = String(parsed.headings.length);
+
+    const words = content.trim() ? content.trim().split(/\s+/).filter(Boolean).length : 0;
+    const sizeText = formatSize(new Blob([content]).size);
+
+    document.getElementById('footerMetrics').textContent =
+      'LINES ' + rawLines.length + ' · WORDS ' + words + ' · ' + sizeText;
+    document.getElementById('metaGroup').textContent = doc.group;
+    document.getElementById('metaLines').textContent = String(rawLines.length);
+    document.getElementById('metaWords').textContent = String(words);
+    document.getElementById('metaSize').textContent = sizeText;
+    if (activeRightTab === 'inspector') {
+      document.getElementById('rightFooterLeft').textContent = parsed.headings.length + ' Sections';
+    }
+
+    if (searchQuery && searchQuery.length >= 2) {
+      const re = new RegExp(searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+      const count = (content.match(re) || []).length;
+      document.getElementById('matchInfo').textContent = count + (count === 1 ? ' match' : ' matches');
+    } else {
+      document.getElementById('matchInfo').textContent = '';
+    }
+  }
+
+  async function ensureFreshFileContent(path, preserveScroll) {
+    const existing = docByPath.get(path);
+    if (!liveServerConnected || !existing || existing.localOnly) return;
+    try {
+      const resp = await fetch('api/file?path=' + encodeURIComponent(path), { cache: 'no-store' });
+      if (!resp.ok) return;
+      const fresh = await resp.json();
+      if (existing.content !== fresh.content || existing.mtime !== fresh.mtime) {
+        existing.content = fresh.content;
+        existing.mtime = fresh.mtime;
+        existing.size = fresh.size;
+        if (path === activePath) {
+          const prevPreviewTop = document.getElementById('previewPane').scrollTop;
+          const prevSourceTop = document.getElementById('sourcePane').scrollTop;
+          renderActiveDocument(false);
+          if (preserveScroll) {
+            document.getElementById('previewPane').scrollTop = prevPreviewTop;
+            document.getElementById('sourcePane').scrollTop = prevSourceTop;
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  async function syncLiveTree(preserveScroll) {
+    try {
+      const resp = await fetch('api/tree', { cache: 'no-store' });
+      if (!resp.ok) return;
+      const payload = await resp.json();
+      if (!payload || !Array.isArray(payload.files)) return;
+
+      liveServerConnected = true;
+      document.getElementById('serverModeFooter').textContent = '● LIVE DISK';
+
+      const localDocs = DOCS.filter(d => d.localOnly);
+      const merged = [];
+      for (const item of payload.files) {
+        const prev = docByPath.get(item.path);
+        const entry = {
+          path: item.path,
+          name: item.name,
+          group: item.group,
+          size: item.size,
+          mtime: item.mtime,
+          content: item.content !== undefined ? item.content : (prev ? prev.content : '')
+        };
+        docByPath.set(entry.path, entry);
+        merged.push(entry);
+      }
+      for (const loc of localDocs) {
+        merged.push(loc);
+      }
+      DOCS = merged;
+      renderTree();
+      renderTabs();
+      if (activePath) {
+        await ensureFreshFileContent(activePath, preserveScroll);
+      }
+    } catch (_) {}
+  }
+
+  async function openDocument(path) {
+    if (!docByPath.has(path)) return;
+    if (!openTabs.includes(path)) openTabs.push(path);
+    activePath = path;
+    renderTree();
+    renderTabs();
+    await ensureFreshFileContent(path, false);
+    renderActiveDocument(true);
+    animateScrollTo(document.getElementById('previewPane'), 0, 260);
+    animateScrollTo(document.getElementById('sourcePane'), 0, 260);
+  }
+
+  function closeTab(path) {
+    openTabs = openTabs.filter(p => p !== path);
+    if (activePath === path) {
+      activePath = openTabs[openTabs.length - 1] || '';
+    }
+    renderTree();
+    renderTabs();
+    renderActiveDocument(true);
+  }
+
+  const scopeTitles = {
+    all: 'All Folders',
+    plans: 'Plans Only',
+    docs: 'Governance Docs',
+    skills: 'Agentic Skills'
+  };
+
+  window.setFolderScope = function(scope) {
+    folderScope = scope;
+    document.getElementById('wellPlans').classList.toggle('selected', scope === 'plans');
+    document.getElementById('wellAll').classList.toggle('selected', scope === 'all');
+    document.getElementById('dropdownLabel').textContent = scopeTitles[scope] || 'All Folders';
+    document.querySelectorAll('.studio-dropdown-option').forEach(opt => {
+      opt.classList.toggle('active', opt.getAttribute('data-scope') === scope);
+    });
+    renderTree();
+  };
+
+  window.setViewMode = function(mode, btn) {
+    viewMode = mode;
+    document.querySelectorAll('.mode-pill').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderActiveDocument(true);
+  };
+
+  window.adjustZoom = function(delta) {
+    zoomScale = Math.min(1.6, Math.max(0.75, Math.round((zoomScale + delta) * 100) / 100));
+    document.documentElement.style.setProperty('--doc-scale', String(zoomScale));
+    document.getElementById('zoomLabel').textContent = Math.round(zoomScale * 100) + '%';
+  };
+
+  window.resetZoom = function() {
+    zoomScale = 1.0;
+    document.documentElement.style.setProperty('--doc-scale', '1');
+    document.getElementById('zoomLabel').textContent = '100%';
+  };
+
+  // =========================================================================
+  // EVENT WIRING
+  // =========================================================================
+  // Close & Reopen Documents / Notepad / Inspector
+  document.getElementById('btnCloseDocumentsTab').addEventListener('click', e => {
+    e.stopPropagation();
+    leftPaneOpen = false;
+    syncPaneLayout();
+  });
+
+  document.getElementById('btnReopenDocuments').addEventListener('click', () => {
+    leftPaneOpen = true;
+    syncPaneLayout();
+  });
+
+  document.getElementById('rightTabStrip').addEventListener('click', e => {
+    const closeBtn = e.target.closest('[data-rclose]');
+    if (closeBtn) {
+      e.stopPropagation();
+      closeRightTab(closeBtn.getAttribute('data-rclose'));
+      return;
+    }
+    const tab = e.target.closest('[data-rtab]');
+    if (tab) {
+      activeRightTab = tab.getAttribute('data-rtab');
+      syncPaneLayout();
+    }
+  });
+
+  document.getElementById('btnReopenNotepad').addEventListener('click', () => reopenRightTab('notepad'));
+  document.getElementById('btnReopenInspector').addEventListener('click', () => reopenRightTab('inspector'));
+
+  // Notepad actions
+  document.getElementById('notepadTextarea').addEventListener('input', () => {
+    noteDirty = true;
+    updateNoteMetrics();
+    setNoteStatus('● Editing...', '');
+    clearTimeout(noteSaveTimer);
+    noteSaveTimer = setTimeout(() => saveNoteToSession(false), 450);
+  });
+
+  document.getElementById('notepadTextarea').addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      clearTimeout(noteSaveTimer);
+      saveNoteToSession(true);
+      return;
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const ta = e.target;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      ta.value = ta.value.substring(0, start) + '  ' + ta.value.substring(end);
+      ta.selectionStart = ta.selectionEnd = start + 2;
+      ta.dispatchEvent(new Event('input'));
+    }
+  });
+
+  document.getElementById('noteFilenameInput').addEventListener('change', () => {
+    const rel = normalizeNoteRelFromInput();
+    loadNoteFromServer(rel);
+  });
+
+  document.getElementById('btnNewNote').addEventListener('click', () => {
+    const stamp = new Date().toISOString().slice(11, 16).replace(':', '');
+    document.getElementById('noteFilenameInput').value = 'Note-' + stamp + '.md';
+    normalizeNoteRelFromInput();
+    document.getElementById('notepadTextarea').value = '# Note (' + stamp + ')\n\n';
+    updateNoteMetrics();
+    saveNoteToSession(true);
+    document.getElementById('notepadTextarea').focus();
+  });
+
+  document.getElementById('btnToggleMonoNote').addEventListener('click', function() {
+    const ta = document.getElementById('notepadTextarea');
+    const mono = ta.classList.toggle('mono-mode');
+    this.classList.toggle('active', mono);
+  });
+
+  document.getElementById('btnWideNotepad').addEventListener('click', function() {
+    rightWide = !rightWide;
+    this.classList.toggle('active', rightWide);
+    syncPaneLayout();
+  });
+
+  document.getElementById('btnSaveSession').addEventListener('click', () => {
+    clearTimeout(noteSaveTimer);
+    saveNoteToSession(true);
+  });
+
+  document.getElementById('btnPushGithub').addEventListener('click', pushNoteToGithub);
+
+  document.getElementById('btnCopyNote').addEventListener('click', async function() {
+    const text = document.getElementById('notepadTextarea').value;
+    try {
+      await navigator.clipboard.writeText(text);
+      const orig = this.textContent;
+      this.textContent = 'Copied ✓';
+      setTimeout(() => { this.textContent = orig; }, 1200);
+    } catch (_) {}
+  });
+
+  document.getElementById('btnDownloadNote').addEventListener('click', () => {
+    normalizeNoteRelFromInput();
+    const leaf = document.getElementById('noteFilenameInput').value || 'SessionNotes.md';
+    const blob = new Blob([document.getElementById('notepadTextarea').value], { type: 'text/markdown;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = leaf;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  // Smooth scroll to top button
+  document.getElementById('btnScrollTop').addEventListener('click', () => {
+    animateScrollTo(document.getElementById('previewPane'), 0, 360);
+    animateScrollTo(document.getElementById('sourcePane'), 0, 360);
+  });
+
+  // Dropdown filter
+  document.getElementById('dropdownBtn').addEventListener('click', e => {
+    e.stopPropagation();
+    document.getElementById('dropdownSheet').classList.toggle('hidden');
+  });
+
+  document.getElementById('dropdownSheet').addEventListener('click', e => {
+    const opt = e.target.closest('[data-scope]');
+    if (!opt) return;
+    setFolderScope(opt.getAttribute('data-scope'));
+    document.getElementById('dropdownSheet').classList.add('hidden');
+  });
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#dropdownWrap')) {
+      document.getElementById('dropdownSheet').classList.add('hidden');
+    }
+  });
+
+  document.getElementById('treeContainer').addEventListener('click', e => {
+    const folder = e.target.closest('[data-group]');
+    if (folder) {
+      const g = folder.getAttribute('data-group');
+      if (collapsedGroups.has(g)) collapsedGroups.delete(g);
+      else collapsedGroups.add(g);
+      renderTree();
+      return;
+    }
+    const item = e.target.closest('[data-open]');
+    if (item) openDocument(item.getAttribute('data-open'));
+  });
+
+  document.getElementById('tabsStrip').addEventListener('click', e => {
+    const closeBtn = e.target.closest('[data-close]');
+    if (closeBtn) {
+      e.stopPropagation();
+      closeTab(closeBtn.getAttribute('data-close'));
+      return;
+    }
+    const tab = e.target.closest('[data-tab]');
+    if (tab) openDocument(tab.getAttribute('data-tab'));
+  });
+
+  // Smooth animated Outline section jump + highlight flash
+  document.getElementById('outlineList').addEventListener('click', e => {
+    const entry = e.target.closest('[data-jump]');
+    if (!entry) return;
+    const target = document.getElementById(entry.getAttribute('data-jump'));
+    const container = document.getElementById('previewPane');
+    if (target && container) {
+      const containerRect = container.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const desiredTop = container.scrollTop + (targetRect.top - containerRect.top) - 24;
+      animateScrollTo(container, desiredTop, 380);
+      target.classList.remove('section-highlight');
+      void target.offsetWidth;
+      target.classList.add('section-highlight');
+    }
+  });
+
+  document.getElementById('mdBody').addEventListener('click', e => {
+    const link = e.target.closest('[data-doclink]');
+    if (link) {
+      e.preventDefault();
+      openDocument(link.getAttribute('data-doclink'));
+    }
+  });
+
+  document.getElementById('searchInput').addEventListener('input', e => {
+    searchQuery = e.target.value.trim();
+    renderTree();
+    renderActiveDocument(false);
+  });
+
+  document.getElementById('btnRefreshTree').addEventListener('click', () => syncLiveTree(true));
+
+  for (const id of ['btnOpenLocalMain', 'btnOpenLocalIcon', 'btnAddTabLeft']) {
+    document.getElementById(id).addEventListener('click', () => {
+      document.getElementById('localFileInput').click();
+    });
+  }
+
+  document.getElementById('localFileInput').addEventListener('change', async e => {
+    const files = Array.from(e.target.files || []);
+    for (const f of files) {
+      const text = await f.text();
+      const virtualPath = 'Local/' + f.name;
+      const entry = {
+        path: virtualPath,
+        name: f.name,
+        group: 'Local Opened Files',
+        size: f.size,
+        mtime: Date.now() / 1000,
+        content: text,
+        localOnly: true
+      };
+      docByPath.set(virtualPath, entry);
+      if (!DOCS.some(d => d.path === virtualPath)) DOCS.unshift(entry);
+      openDocument(virtualPath);
+    }
+    e.target.value = '';
+  });
+
+  // Initialize UI
+  syncPaneLayout();
+  renderTree();
+  renderTabs();
+  renderActiveDocument(false);
+  loadNoteFromServer(currentNoteRel);
+
+  syncLiveTree(true);
+  setInterval(() => {
+    if (liveServerConnected && !noteDirty) syncLiveTree(true);
+  }, 3000);
+})();
+</script>
+</body>
+</html>
