@@ -4,9 +4,14 @@
 // Vehicle Lab heritage: the ControlVehicle sample and the Vehicle Movement component carry Vehicle Lab's authored
 // numbers (sockets, mass, CoM, aero, torque curve, gearing) from Frontier-OLD's VehicleProvingGrounds sheets.
 
+import { socketDefaults, SOCKET_KIND, dockAccepts } from './Sockets.js';
+
 export const COMPONENT_CLASSES = {
   Origin: { label: 'Origin', icon: 'root', scene: true, group: 'Common', props: [] }, // the class's own frame: every scene component hangs from it
   Scene: { label: 'Scene', icon: 'pivot', scene: true, group: 'Common', props: [] },
+  // A socket's children ride on its joint frame; the kind (Fixed, Hinge, Slider, Ball, Spring, Spin, Tether, Dock)
+  // decides how that frame moves. See Sockets.js.
+  Socket: { label: 'Socket', icon: 'sockDock', scene: true, group: 'Sockets', props: [{ key: 'kind', label: 'Socket', type: 'socket', section: 'Socket' }] },
   StaticMesh: {
     label: 'Static Mesh', icon: 'cube', scene: true, group: 'Common', props: [
       { key: 'asset', label: 'Static mesh', type: 'asset', section: 'Static Mesh' },
@@ -129,6 +134,7 @@ const DEFAULTS = {
     torqueCurve: VEHICLE_SHEET.torqueCurve.map((p) => p.slice()), interpolation: 'smooth',
   }),
   RotatingMovement: () => ({ rate: 45, target: null }),
+  Socket: () => socketDefaults('fixed'),
 };
 
 let nextComponent = 1;
@@ -258,6 +264,17 @@ export function validateBlueprint(bp, assets) {
       for (let i = 1; i < curve.length; i++) if (curve[i][0] <= curve[i - 1][0]) { issues.push({ level: 'error', id: c.id, text: 'Torque curve RPM must increase' }); break; }
     }
     if (c.type === 'RotatingMovement' && c.props.target && !findComponent(bp, c.props.target)) issues.push({ level: 'error', id: c.id, text: `${c.name} target is missing` });
+    if (c.type === 'Socket') {
+      const p = c.props, kind = SOCKET_KIND[p.kind];
+      if (!kind) issues.push({ level: 'error', id: c.id, text: `${c.name} has an unknown socket kind` });
+      if (p.kind === 'hinge' && p.angleMin >= p.angleMax) issues.push({ level: 'error', id: c.id, text: `${c.name}: hinge minimum must be below maximum` });
+      if (p.kind === 'slider' && p.travelMin >= p.travelMax) issues.push({ level: 'error', id: c.id, text: `${c.name}: slider stops must increase` });
+      if (p.kind === 'dock') {
+        const kids = childrenOf(bp, c.id);
+        if (!kids.length) issues.push({ level: 'warn', id: c.id, text: `${c.name}: dock holds nothing (attach a child to plug in)` });
+        for (const k of kids) if (!dockAccepts(p.key, k.props.tags)) issues.push({ level: 'warn', id: c.id, text: `${k.name} is not tagged “${p.key}”, so ${c.name} will reject it` });
+      }
+    }
   }
   return issues;
 }

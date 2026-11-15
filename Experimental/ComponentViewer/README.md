@@ -70,6 +70,33 @@ to it.
 - **Compile** (Ctrl+S) validates the class and bakes its icon. The other keys are Del, Ctrl+D, F, G, T, C and Esc; press
   ? for the full list.
 
+**Sockets** (`Sockets.js` model, `SocketVisuals.js` looks). A socket is not a fixed point: its children ride on a
+*joint frame* and the socket kind decides how that frame moves. Pick a kind from the tiles in Details (your numbers are
+kept when you switch) or add one directly from **Add → Sockets**.
+
+| Kind | Moves | Drives | Debug look |
+|---|---|---|---|
+| Fixed | never | — | Graphite hex puck, lit face, three bolts |
+| Hinge | about one axis, between two angles | Hold at pose · Sweep | Pin and knuckles, a light fan over the allowed range with bright limit edges, a needle with a glowing tip at the current angle |
+| Slider | along one axis, between two stops | Hold at pose · Sweep | Translucent track on a steel rail, ringed end stops, a glowing carriage |
+| Ball | inside a cone | Hold at pose · Orbit | Ball in a cup, the allowed cone as a light volume, a stem with a glowing knob showing the current swing |
+| Spring | along one axis, with stiffness and damping | Preload pose; reacts to acceleration (rear squats, front lifts) and road bumps met at each spring's own position | Coil that compresses live and brightens with speed, damper body and rod, plates |
+| Spin | continuously | Fixed rpm · vehicle speed over a rolling radius | Hub and a ring of three comet arcs that turns with it, brighter with rpm |
+| Tether | hangs on a length and swings (pendulum) | Gravity, drag, trails back under acceleration (atan a/g) | Eye, rope, end ring; when selected, a fan of the swing range |
+| Dock | connects and disconnects | Hold (Connect / Release) · Pull test · Aero load from Vehicle Movement | Collar with state notches, an iris (steady when connected, rings pulling in when seeking, pushing out when rejected), the snap radius as a field, a flux beam to the plug while it is free, a ripple on connect |
+
+- A dock only accepts children whose tags contain its **key** (empty key accepts anything). Wrong key: the plug is
+  pulled to the snap radius and bounced, never connected, and the class reports it. Load colours the notches
+  green → amber → red as it nears the break force; above it the dock releases.
+- Connect, release and rejection events rise as pings from the socket. The selected socket shows a floating tag (kind,
+  name, live value) and is drawn in an x-ray pass, so a spring inside a tyre stays visible.
+- **Kick** (Spring, Tether) and **Reset motion** are in Details; the pose slider scrubs Hinge, Slider, Ball and Spring
+  in the editor; Sweep, bumps, pull tests and vehicle-driven motion run in Simulate.
+
+On BP_ControlVehicle every wheel hangs from a Spring socket at its axle mount, the front wheels turn on Hinge sockets
+(±32°), Vehicle Lab's RearWingSocket is a Dock keyed `wing` holding a procedural rear wing (pull test: tears off at
+1.2 kN and snaps back), and a TowStrap tether swings at the rear.
+
 **Glide camera** (`Camera.js`, both viewports). State is a pivot plus yaw, pitch, distance and focal length; input
 writes goals and the live values ease toward them, so nothing ever cuts.
 
@@ -103,7 +130,7 @@ writes goals and the live values ease toward them, so nothing ever cuts.
 | Mesh with no asset | Pulsing red field box |
 
 The starting class is **BP_ControlVehicle**, the Vehicle Lab car. Its body, tyre and rim `.facet` files are compiled
-through the same pipeline. It has four wheels, each with a rim child, headlights, a chase camera, a bumper trigger and
+through the same pipeline. It has four wheels on Spring sockets (front ones on steering Hinges), each with a rim child, a docked rear wing, a tow strap, headlights, a chase camera, a bumper trigger and
 Vehicle Movement, using the Vehicle Lab sheet values: 1300 kg, a 520 N·m peak and a 7200 rpm redline.
 
 ## Files
@@ -117,6 +144,8 @@ Vehicle Movement, using the Vehicle Lab sheet values: 1300 kg, a 520 N·m peak a
 | `Blueprint.js` | Component classes, property specs, tree operations, validation, torque curve, drive step (no DOM) |
 | `Render.js` | three.js stage, mesh channels, icon renderer |
 | `Camera.js` | Glide camera rig and its HUD (dial, lens, turntable) |
+| `Sockets.js` | Socket kinds, parameters, step (springs, pendulum, dock state machine), joint pose (no DOM) |
+| `SocketVisuals.js` | One debug look per socket kind |
 | `Visuals.js` | Shader debug visuals: field shells, beams, glows, selection tint, camera model, dot floor, density |
 | `Ui.js`, `Icons.js`, `ComponentViewer.css` | Project Zero controls, icons and styles |
 | `Engine/` | Readers, mesh analysis, workers; SDF, UV, cluster LOD, simplification, transform and OBJ export from Frontier-1 |

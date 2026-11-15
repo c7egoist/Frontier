@@ -184,6 +184,38 @@ await step('graph mode', async () => {
   console.log('   nodes:', $('Graph').querySelectorAll('.gnode').length, '| pane hidden:', $('GraphPane').hidden);
   click(modes[0]);
 });
+await step('sockets: dock release / connect, kinds, add menu, simulate pings', async () => {
+  const row = (name) => [...$('ComponentTree').querySelectorAll('.comp-row')].find((r) => r.querySelector('b')?.firstChild?.textContent === name);
+  const subs = [...$('ComponentTree').querySelectorAll('.comp-row small')].map((x) => x.textContent).filter((t) => / socket/.test(t));
+  console.log('   socket rows:', subs.length, '|', [...new Set(subs)].join(', '));
+  click(row('RearWingSocket')); await sleep(30);
+  const tiles = $('Details').querySelectorAll('.sock-tile');
+  const tag = $('ViewportWell').querySelector('.socket-tag');
+  console.log('   tiles:', tiles.length, '| active:', $('Details').querySelector('.sock-tile.active')?.textContent, '| tag:', tag.hidden ? 'hidden' : tag.textContent);
+  if (tiles.length !== 8) throw new Error('expected 8 socket kinds');
+  const btn = () => [...$('Details').querySelectorAll('.sock-actions button')].find((b) => /Release|Connect/.test(b.textContent));
+  click(btn()); await sleep(700);
+  const afterRelease = $('Details').querySelector('.sock-live').textContent;
+  click(btn()); await sleep(900);
+  const afterConnect = $('Details').querySelector('.sock-live').textContent;
+  console.log('   release →', afterRelease, '| connect →', afterConnect, '| pings so far:', $('ViewportWell').querySelectorAll('.socket-ping').length);
+  if (!/released|returning/.test(afterRelease) || !/connected/.test(afterConnect)) throw new Error('dock did not release and reconnect');
+  click(row('TowStrap')); await sleep(20);
+  for (const t of [...$('Details').querySelectorAll('.sock-tile')]) { click(t); await sleep(15); click([...$('Details').querySelectorAll('.sock-tile')].find((x) => x.textContent === t.textContent)); }
+  click([...$('Details').querySelectorAll('.sock-tile')].find((x) => x.textContent === 'Tether')); await sleep(20);
+  console.log('   TowStrap kind after cycling:', $('Details').querySelector('.sock-tile.active')?.textContent, '| fields:', $('Details').querySelectorAll('.sock-fields .field').length);
+  click($('AddComponentBtn')); await sleep(10);
+  const items = [...$('AddList').querySelectorAll('.sock-item')];
+  click($('AddComponentBtn'));
+  for (let i = 0; i < items.length; i++) { click($('AddComponentBtn')); await sleep(5); click($('AddList').querySelectorAll('.sock-item')[i]); await sleep(10); }
+  console.log('   socket menu items:', items.length, '| comps:', $('StatComponents').textContent);
+  click(row('RearWingSocket')); await sleep(20);
+  click($('SimulateBtn')); await sleep(3200);
+  const pings = [...$('ViewportWell').querySelectorAll('.socket-ping')].map((x) => x.textContent);
+  console.log('   sim pings:', pings.join(' | ') || 'none', '| live:', $('Details').querySelector('.sock-live').textContent);
+  click($('SimulateBtn')); await sleep(20);
+  if (!pings.some((t) => /RearWingSocket · released at 1\.2/.test(t))) throw new Error('pull test did not release the wing');
+});
 await step('add component menu', async () => {
   click($('AddComponentBtn')); await sleep(10);
   const items = $('AddList').querySelectorAll('.menu-item');

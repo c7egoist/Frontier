@@ -2,7 +2,7 @@
 // components with transforms, then actor components) and the Content tray of compiled assets. Centre: one tab per
 // open blueprint with the Viewport (inspection channels, simulate) or the Construction Script graph, plus a drawer
 // with the compiled data of the selected mesh and Vehicle Lab's response curves. Right: Details for the selection.
-import { $, el, iconEl, section, panel, rangeField, segmented, toggle, selectField, vec3Field, colorField, textField, rows, metrics, toast, download } from './Ui.js';
+import { $, el, iconEl, section, panel, rangeField, segmented, segmentedField, toggle, selectField, vec3Field, colorField, textField, rows, metrics, toast, download } from './Ui.js';
 import { icon, hydrateIcons } from './Icons.js';
 import {
   COMPONENT_CLASSES, SCENE_PROPS, COMMON_PROPS, findComponent, childrenOf, actorComponents, addComponent, removeComponent,
@@ -12,6 +12,8 @@ import { STEPS, isCompiled, fmt, formatMs } from './CompileSteps.js';
 import { THREE, Stage, meshObject, collisionObject, assetSlots } from './Render.js';
 import { fieldShell, beam, glowSprite, solidArrow, anchorMark, addHalo, cameraModel } from './Visuals.js';
 import { createCameraHud } from './Camera.js';
+import { SOCKET_KINDS, SOCKET_KIND, SOCKET_FIELDS, SOCKET_PARAMS, DRIVES, socketDefaults, createSocketState, stepSocket, socketPose, socketReadout, rotateVector, dockAccepts, poseLabel } from './Sockets.js';
+import { socketVisual } from './SocketVisuals.js';
 import { IMPORT_FORMATS } from './Engine/ImportFormats.js';
 
 const CHANNELS = [
@@ -33,6 +35,8 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
   let bp = null, selectedId = null, channel = 'lit', centreMode = 'viewport', simulate = false, drawerTab = 'compiled', leftTab = 'components';
   let objects = new Map(), selection = null, drive = createDriveState();
   const graphState = new Map(); // bp.id → { nodes positions, pan }
+  let sockets = new Map();             // component id → { c, node, mount, vis } for the current scene
+  let socketStates = new Map();        // component id → socket state (survives rebuilds; reset when Simulate stops)
 
   // ------------------------------------------------------------------------------------------------ blueprints
   function open(blueprint) {
@@ -40,6 +44,7 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
     bp = blueprint;
     selectedId = bp.rootId;
     drive = createDriveState();
+    socketStates = new Map();
     rebuildScene();
     frameAll();
     renderAll();
@@ -55,7 +60,7 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
 
   const selected = () => (bp ? findComponent(bp, selectedId) : null);
 
-  const SELECT_DRAWN = new Set(['PointLight', 'SpotLight', 'Camera']); // visuals that change with selection
+  const SELECT_DRAWN = new Set(['PointLight', 'SpotLight', 'Camera', 'Socket']); // visuals that change with selection
   function select(id) {
     const before = selected();
     selectedId = id;
@@ -81,14 +86,17 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
   // ----------------------------------------------------------------------------------------------- scene build
   function rebuildScene() {
     objects = new Map();
+    sockets = new Map();
     const root = new THREE.Group();
     walkScene(bp, (c) => {
       const node = buildComponent(c);
       objects.set(c.id, node);
       const parent = c.parent ? objects.get(c.parent) : null;
-      (parent || root).add(node);
+      (parent ? parent.userData.mount || parent : root).add(node); // socket children ride on the joint frame
     });
+    stepSockets(0);
     stage.setContent(root);
+    stage.xray = sockets.has(selectedId);
     selection = null;
     updateSelection();
   }
@@ -151,6 +159,18 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
       case 'Arrow': gizmo(solidArrow(p.length, p.color), 0.12); break;
       case 'Origin': gizmo(anchorMark(0.11, '#e8e8e8'), 0.12); break;
       case 'Scene': gizmo(anchorMark(0.07, '#6aa7c7'), 0.1); break;
+      case 'Socket': {
+        const accepts = p.kind !== 'dock' || childrenOf(bp, c.id).every((k) => dockAccepts(p.key, k.props.tags));
+        const vis = socketVisual(p, { selected: c.id === selectedId, accepts });
+        gizmo(vis.group, 0.08);
+        // The selected socket draws in the x-ray pass, so a spring inside a tyre or a dock inside the body stays visible.
+        if (c.id === selectedId) vis.group.traverse((o) => o.layers.set(1));
+        const mount = new THREE.Group();
+        node.add(mount);
+        node.userData.mount = mount;
+        sockets.set(c.id, { c, node, mount, vis, accepts });
+        break;
+      }
     }
     return node;
   }
@@ -240,8 +260,78 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
         }
       }
     }
+    stepSockets(dt);
     updateReadout();
   });
+
+  // ------------------------------------------------------------------------------------------------- sockets
+  // Every frame (editor and Simulate): step each socket, put its joint frame on the mount its children hang from,
+  // move the live parts of its debug look, and surface connect / release events as pings in the viewport.
+  const tmp = new THREE.Vector3();
+  function stepSockets(dt) {
+    if (!bp) return;
+    const vm = actorComponents(bp).find((x) => x.type === 'VehicleMovement');
+    const moving = simulate && vm;
+    const downforce = moving ? 0.5 * 1.225 * vm.props.liftArea * drive.speed * drive.speed : 0;
+    for (const [id, s] of sockets) {
+      let state = socketStates.get(id);
+      if (!state) { state = createSocketState(); socketStates.set(id, state); }
+      s.node.updateMatrixWorld();
+      const along = tmp.setFromMatrixPosition(s.node.matrixWorld).x;
+      const events = stepSocket(state, s.c.props, dt, {
+        simulate, accel: moving ? drive.acceleration : 0, speed: moving ? drive.speed : 0, distance: moving ? drive.distance : undefined,
+        along, downforce: downforce * 0.35, accepts: s.accepts,
+      });
+      const pose = socketPose(s.c.props, state);
+      s.mount.quaternion.fromArray(pose.rotation);
+      s.mount.position.fromArray(rotateVector(pose.rotation, pose.offset));
+      s.vis.update(state, pose);
+      for (const e of events) ping(s, e);
+    }
+    updateSocketTag();
+  }
+
+  const PING_TEXT = { connected: 'connected', released: 'released', rejected: 'rejected · wrong key' };
+  function ping(s, e) {
+    if (centreMode !== 'viewport') return;
+    const at = projectToWell(s.node);
+    if (!at) return;
+    const kind = e.type === 'connected' ? 'ok' : e.type === 'rejected' ? 'bad' : 'warn';
+    const text = `${s.c.name} · ${PING_TEXT[e.type]}${e.load ? ` at ${(e.load / 1000).toFixed(2)} kN` : ''}`;
+    const node = el('div', { class: `socket-ping ${kind}`, style: { left: `${at.x}px`, top: `${at.y}px` } }, text);
+    $('ViewportWell').append(node);
+    setTimeout(() => node.remove(), 1800);
+  }
+
+  function projectToWell(node, lift = 0) {
+    const well = $('ViewportWell'), rect = well.getBoundingClientRect(), canvasRect = stage.canvas.getBoundingClientRect();
+    node.updateMatrixWorld();
+    const v = new THREE.Vector3().setFromMatrixPosition(node.matrixWorld);
+    v.y += lift;
+    v.project(stage.camera);
+    if (v.z > 1 || v.z < -1) return null;
+    return { x: canvasRect.left - rect.left + ((v.x + 1) / 2) * canvasRect.width, y: canvasRect.top - rect.top + ((1 - v.y) / 2) * canvasRect.height };
+  }
+
+  // A floating tag over the selected socket: kind, name and the live value.
+  const socketTag = el('div', { class: 'socket-tag', hidden: '' });
+  $('ViewportWell').append(socketTag);
+  let socketLive = null; // live readout element in Details
+  function updateSocketTag() {
+    const s = sockets.get(selectedId);
+    if (!s || centreMode !== 'viewport') { socketTag.hidden = true; return; }
+    const state = socketStates.get(selectedId);
+    const kind = SOCKET_KIND[s.c.props.kind] || SOCKET_KIND.fixed;
+    const text = state ? socketReadout(s.c.props, state) : '';
+    const at = projectToWell(s.node);
+    if (!at) { socketTag.hidden = true; return; }
+    socketTag.hidden = false;
+    socketTag.style.setProperty('--k', kind.color);
+    socketTag.style.transform = `translate(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px)`;
+    const html = `<i></i><b>${esc(kind.label)}</b><span>${esc(s.c.name)}</span><em>${esc(text)}</em>`;
+    if (socketTag.dataset.html !== html) { socketTag.innerHTML = html; socketTag.dataset.html = html; }
+    if (socketLive && socketLive.isConnected) socketLive.textContent = text;
+  }
 
   // While simulating, speed opens the lens a little and high rpm adds a faint engine shimmer to the camera.
   function speedFeel(dt, speed, rpmShare) {
@@ -259,7 +349,7 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
     $('SimulateBtn').querySelector('.ico').innerHTML = icon(on ? 'stop' : 'play', 14);
     const vm = actorComponents(bp).find((c) => c.type === 'VehicleMovement');
     $('SimHud').hidden = !(on && vm);
-    if (!on) { drive = createDriveState(); stage.grid.position.x = 0; stage.rig.kick.fov = 0; stage.rig.kick.offset.set(0, 0, 0); rebuildScene(); }
+    if (!on) { drive = createDriveState(); socketStates = new Map(); stage.grid.position.x = 0; stage.rig.kick.fov = 0; stage.rig.kick.offset.set(0, 0, 0); rebuildScene(); }
   }
 
   function updateHud(vm) {
@@ -382,8 +472,10 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
   function treeRow(c, depth, actor = false) {
     const cls = COMPONENT_CLASSES[c.type];
     const asset = c.type === 'StaticMesh' && c.props.asset ? assets.get(c.props.asset) : null;
-    const sub = c.type === 'StaticMesh' ? (asset ? asset.name : 'No mesh') : cls.label;
-    const thumb = asset && asset.out.icon ? el('img', { class: 'row-thumb', src: asset.out.icon, alt: '' }) : iconEl(cls.icon, 16, 'entity-icon');
+    const sk = c.type === 'Socket' ? SOCKET_KIND[c.props.kind] || SOCKET_KIND.fixed : null;
+    const sub = c.type === 'StaticMesh' ? (asset ? asset.name : 'No mesh') : sk ? `${sk.label} socket${c.props.kind === 'dock' && c.props.key ? ` · key ${c.props.key}` : ''}` : cls.label;
+    const thumb = asset && asset.out.icon ? el('img', { class: 'row-thumb', src: asset.out.icon, alt: '' }) : iconEl(sk ? sk.icon : cls.icon, 16, 'entity-icon');
+    if (sk) thumb.style.color = sk.color;
     const kids = childrenOf(bp, c.id).length;
     const eye = !actor && c.id !== bp.rootId ? el('button', { type: 'button', class: `eye ${c.props.visible === false ? 'off' : ''}`, title: 'Toggle visibility', html: icon(c.props.visible === false ? 'eyeOff' : 'eye', 13) }) : el('span');
     if (eye.tagName === 'BUTTON') eye.addEventListener('click', (e) => { e.stopPropagation(); c.props.visible = c.props.visible === false; changed(); if (c.id === selectedId) renderDetails(); });
@@ -419,7 +511,7 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
     list.innerHTML = '';
     const groups = {};
     for (const [type, cls] of Object.entries(COMPONENT_CLASSES)) {
-      if (type === 'Origin') continue;
+      if (type === 'Origin' || type === 'Socket') continue;
       if (q && !cls.label.toLowerCase().includes(q)) continue;
       (groups[cls.group] ||= []).push([type, cls]);
     }
@@ -428,6 +520,15 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
       for (const [type, cls] of items) {
         const b = el('button', { type: 'button', class: 'menu-item' }, iconEl(cls.icon, 15), el('span', {}, cls.label), el('small', {}, cls.scene ? 'scene' : 'actor'));
         b.addEventListener('click', () => { add(type); menu.hidden = true; });
+        list.append(b);
+      }
+    }
+    const kinds = SOCKET_KINDS.filter((k) => !q || `${k.label} socket`.toLowerCase().includes(q));
+    if (kinds.length) {
+      list.append(el('div', { class: 'menu-group' }, 'SOCKETS'));
+      for (const k of kinds) {
+        const b = el('button', { type: 'button', class: 'menu-item sock-item', style: { '--k': k.color }, title: k.note }, iconEl(k.icon, 15), el('span', {}, `${k.label} socket`), el('small', {}, 'scene'));
+        b.addEventListener('click', () => { add('Socket', { kind: k.id, drive: DRIVES[k.id] ? DRIVES[k.id][0][0] : 'hold' }, `${k.label}Socket`); menu.hidden = true; });
         list.append(b);
       }
     }
@@ -610,12 +711,68 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
       case 'asset': return assetField(c, p);
       case 'slots': return slotsField(c);
       case 'wheels': return wheelsField(c);
+      case 'socket': return socketField(c);
       case 'component': {
         const options = [{ id: '', label: 'Scene root' }, ...bp.components.filter((x) => COMPONENT_CLASSES[x.type].scene && x.id !== bp.rootId).map((x) => ({ id: x.id, label: x.name }))];
         return selectField({ label: p.label, options, value: v || '', onChange: (x) => setProp(c, p.key, x || null, { rebuild: false }) });
       }
     }
     return null;
+  }
+
+  // Socket editor: kind tiles (each applies that kind; numbers you set are kept), the kind's own fields, actions and
+  // a live readout of the joint.
+  function socketField(c) {
+    const p = c.props;
+    const kind = SOCKET_KIND[p.kind] || SOCKET_KIND.fixed;
+    const wrap = el('div', { class: 'socket-editor', style: { '--k': kind.color } });
+    const tiles = el('div', { class: 'sock-tiles', role: 'radiogroup', 'aria-label': 'Socket kind' });
+    for (const k of SOCKET_KINDS) {
+      const t = el('button', { type: 'button', class: `sock-tile ${k.id === p.kind ? 'active' : ''}`, role: 'radio', 'aria-checked': String(k.id === p.kind), title: k.note, style: { '--k': k.color } }, el('span', { class: 'sock-glyph', html: icon(k.icon, 18) }), el('span', {}, k.label));
+      t.addEventListener('click', () => {
+        if (k.id === p.kind) return;
+        p.kind = k.id;
+        if (DRIVES[k.id] && !DRIVES[k.id].some(([id]) => id === p.drive)) p.drive = DRIVES[k.id][0][0];
+        socketStates.delete(c.id);
+        changed({ details: true });
+        toast(`${c.name} is now a ${k.label} socket`);
+      });
+      tiles.append(t);
+    }
+    wrap.append(tiles, el('p', { class: 'sock-note' }, kind.note));
+    const fields = el('div', { class: 'sock-fields' });
+    for (const key of SOCKET_FIELDS[p.kind] || []) {
+      const spec = SOCKET_PARAMS[key];
+      let f = null;
+      const set = (x, opts) => setProp(c, key, x, opts);
+      if (spec.type === 'axis') f = segmentedField({ label: spec.label, options: ['X', 'Y', 'Z'], value: p.axis, onChange: (x) => { socketStates.delete(c.id); set(x); } });
+      else if (spec.type === 'range') f = rangeField({ label: spec.label, value: p[key], min: spec.min, max: spec.max, step: spec.step, unit: spec.unit, note: spec.note, onChange: (x) => set(x) });
+      else if (spec.type === 'pose') f = rangeField({ label: spec.label, value: p.pose, min: 0, max: 1, step: 0.01, format: (x) => poseLabel(p, +x), onInput: (x) => { p.pose = x; }, onChange: (x) => set(x, { rebuild: false }) });
+      else if (spec.type === 'drive') f = selectField({ label: spec.label, options: DRIVES[p.kind].map(([id, label]) => ({ id, label })), value: p.drive, onChange: (x) => { socketStates.delete(c.id); set(x, { rebuild: false }); } });
+      else if (spec.type === 'select') f = selectField({ label: spec.label, options: spec.options.map(([id, label]) => ({ id, label })), value: p[key], onChange: (x) => set(x, { rebuild: false }) });
+      else if (spec.type === 'text') f = textField({ label: spec.label, value: p[key], placeholder: spec.placeholder, onChange: (x) => { setProp(c, key, x.trim()); renderTree(); } });
+      else if (spec.type === 'bool') f = toggle({ label: spec.label, value: p[key], onChange: (x) => set(x, { rebuild: false }) });
+      if (f) { f.dataset.search = `socket ${spec.label}`.toLowerCase(); fields.append(f); }
+    }
+    wrap.append(fields);
+    // Actions
+    const actions = el('div', { class: 'sock-actions' });
+    if (p.kind === 'dock') {
+      const b = el('button', { type: 'button', class: 'tool wide' }, iconEl(p.connected ? 'unlink' : 'link', 14), p.connected ? 'Release' : 'Connect');
+      b.addEventListener('click', () => { setProp(c, 'connected', !p.connected, { rebuild: false, details: true }); });
+      actions.append(b);
+    }
+    if (['spring', 'tether'].includes(p.kind)) {
+      const b = el('button', { type: 'button', class: 'tool wide' }, iconEl('kick', 14), 'Kick');
+      b.addEventListener('click', () => { const st = socketStates.get(c.id); if (!st) return; if (p.kind === 'spring') st.v += 1.2; else st.omega += 3; });
+      actions.append(b);
+    }
+    const reset = el('button', { type: 'button', class: 'tool wide' }, iconEl('rotate', 14), 'Reset motion');
+    reset.addEventListener('click', () => socketStates.delete(c.id));
+    actions.append(reset);
+    socketLive = el('output', { class: 'sock-live' }, '—');
+    wrap.append(actions, el('div', { class: 'sock-live-row' }, el('span', {}, 'LIVE'), socketLive));
+    return wrap;
   }
 
   function assetField(c, p) {
@@ -814,6 +971,7 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
       if (c.type === 'StaticMesh') seq.push({ id: `set-${c.id}`, comp: c, kind: 'call', title: 'Set Static Mesh', sub: `Target: ${c.name}`, field: `Mesh: ${c.props.asset ? assets.get(c.props.asset)?.name || 'missing' : 'None'}` });
       if (/Light/.test(c.type)) seq.push({ id: `set-${c.id}`, comp: c, kind: 'call', title: 'Set Intensity', sub: `Target: ${c.name}`, field: `${c.props.intensity} cd` });
       if (c.type === 'VehicleMovement') seq.push({ id: `set-${c.id}`, comp: c, kind: 'call', title: 'Setup Wheels', sub: `Target: ${c.name}`, field: `${c.props.wheels.length} wheels · ${c.props.mass} kg` });
+      if (c.type === 'Socket') { const k = SOCKET_KIND[c.props.kind] || SOCKET_KIND.fixed; seq.push({ id: `set-${c.id}`, comp: c, kind: 'call', title: `Make ${k.label} Socket`, sub: `Target: ${c.name}`, field: socketReadout(c.props, socketStates.get(c.id) || createSocketState()).split('  ·  ').pop() }); }
       if (/Collision/.test(c.type)) seq.push({ id: `set-${c.id}`, comp: c, kind: 'call', title: 'Set Collision Profile', sub: `Target: ${c.name}`, field: c.props.trigger ? 'OverlapAll' : 'BlockAll' });
     }
     nodes.push(...seq);

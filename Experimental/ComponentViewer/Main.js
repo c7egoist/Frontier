@@ -111,21 +111,42 @@ const VEHICLE_PARTS = [
   { key: 'body', file: 'ControlVehicleBody.facet', name: 'ControlVehicle Body', tags: 'vehicle, body, fct1', collision: 'box', normals: 'angle' },
   { key: 'tyre', file: 'ControlVehicleTyre.facet', name: 'ControlVehicle Tyre', tags: 'vehicle, wheel, fct1', collision: 'box', normals: 'smooth' },
   { key: 'rim', file: 'ControlVehicleRim.facet', name: 'ControlVehicle Rim', tags: 'vehicle, wheel, fct1', collision: 'none', normals: 'angle' },
+  { key: 'wing', build: buildWing, name: 'Rear Wing', tags: 'vehicle, wing, aero', collision: 'box', normals: 'angle' },
 ];
+
+// A small rear wing built from boxes (Y-up, metres, origin at the mounting point): carbon main plane at 8° with a
+// gurney flap, body-colour endplates and blue pylons, using the Vehicle Lab material families.
+function buildWing() {
+  const pos = [], idx = [], fam = [];
+  const box = (c, h, family, tilt = 0) => {
+    const base = pos.length / 3, cs = Math.cos(tilt), sn = Math.sin(tilt);
+    for (let i = 0; i < 8; i++) {
+      const x = (i & 1 ? 1 : -1) * h[0], y = (i & 2 ? 1 : -1) * h[1], z = (i & 4 ? 1 : -1) * h[2];
+      pos.push(c[0] + x * cs - y * sn, c[1] + x * sn + y * cs, c[2] + z);
+    }
+    const quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+    for (const [a, b, c2, d] of quads) { idx.push(base + a, base + b, base + c2, base + a, base + c2, base + d); fam.push(family, family); }
+  };
+  box([0, 0.25, 0], [0.17, 0.016, 0.8], 8, 8 * Math.PI / 180);
+  box([-0.165, 0.29, 0], [0.008, 0.022, 0.8], 6);
+  for (const z of [-0.81, 0.81]) box([-0.01, 0.23, z], [0.2, 0.1, 0.008], 6);
+  for (const z of [-0.36, 0.36]) box([0.02, 0.11, z], [0.05, 0.11, 0.01], 10);
+  return { positions: new Float32Array(pos), indices: new Uint32Array(idx), families: new Uint32Array(fam), format: 'Procedural', notes: ['Rear wing built in Main.js for the Dock socket demo'] };
+}
 
 async function loadVehicle(report) {
   const parts = {};
   let i = 0;
   for (const part of VEHICLE_PARTS) {
     report(`Reading ${part.file}`, i / VEHICLE_PARTS.length);
-    const bytes = await (await fetch(`./Models/${part.file}`)).arrayBuffer();
-    const raw = readFacet(bytes);
+    const bytes = part.build ? null : await (await fetch(`./Models/${part.file}`)).arrayBuffer();
+    const raw = part.build ? part.build() : readFacet(bytes);
     const asset = createAsset({
-      name: part.name, fileName: part.file, fileSize: bytes.byteLength, raw, origin: 'sample', palette: VEHICLE_PALETTE,
+      name: part.name, fileName: part.file || `${part.key}.procedural`, fileSize: bytes ? bytes.byteLength : 0, raw, origin: 'sample', palette: VEHICLE_PALETTE,
       settings: {
-        source: { up: 'z' }, geometry: { centre: 'none', normals: part.normals }, collision: { type: part.collision },
+        source: { up: part.build ? 'y' : 'z' }, geometry: { centre: 'none', normals: part.normals }, collision: { type: part.collision },
         sdf: { resolution: 40 }, icon: { yaw: part.key === 'body' ? 40 : 60, pitch: 18 },
-        meta: { name: part.name, category: 'Vehicle part', tags: part.tags, notes: 'Vehicle Lab ControlVehicle source mesh (Frontier-OLD · VehicleProvingGrounds/Archive).' },
+        meta: { name: part.name, category: 'Vehicle part', tags: part.tags, notes: part.build ? 'Procedural rear wing for the Dock socket demo.' : 'Vehicle Lab ControlVehicle source mesh (Frontier-OLD · VehicleProvingGrounds/Archive).' },
       },
     });
     assets.set(asset.id, asset);
@@ -142,15 +163,23 @@ async function loadVehicle(report) {
 function buildVehicleBlueprint(parts) {
   const bp = createBlueprint('BP_ControlVehicle', 'Pawn');
   const body = addComponent(bp, 'StaticMesh', { name: 'Body', props: { asset: parts.body.id, location: [0, +VEHICLE_SHEET.groundOffset.toFixed(5), 0], mass: 1220, simulatePhysics: true } });
-  const names = ['WheelFL', 'WheelFR', 'WheelRL', 'WheelRR'];
+  // Each wheel hangs from a Spring socket at its axle mount (meets road bumps, squats and lifts with acceleration);
+  // the front ones turn on a Hinge socket (±32° steering lock) between the spring and the wheel.
+  const names = ['FL', 'FR', 'RL', 'RR'];
   const wheels = VEHICLE_SHEET.axleMount.map((m, i) => {
-    const tyre = addComponent(bp, 'StaticMesh', { parentId: body.id, name: names[i], props: { asset: parts.tyre.id, location: [m[0], m[2], -m[1]], rotation: [0, m[1] < 0 ? 180 : 0, 0], mass: 20 } });
-    addComponent(bp, 'StaticMesh', { parentId: tyre.id, name: `${names[i]}Rim`, props: { asset: parts.rim.id } });
+    const spring = addComponent(bp, 'Socket', { parentId: body.id, name: `Suspension${names[i]}`, props: { kind: 'spring', location: [m[0], m[2], -m[1]], springHz: 2, damping: 0.42, springTravel: 0.09, bumpSpacing: 7, loadGain: 1 } });
+    const mount = m[0] > 0 ? addComponent(bp, 'Socket', { parentId: spring.id, name: `Steer${names[i]}`, props: { kind: 'hinge', angleMin: -32, angleMax: 32, pose: 0.5 } }) : spring;
+    const tyre = addComponent(bp, 'StaticMesh', { parentId: mount.id, name: `Wheel${names[i]}`, props: { asset: parts.tyre.id, rotation: [0, m[1] < 0 ? 180 : 0, 0], mass: 20 } });
+    addComponent(bp, 'StaticMesh', { parentId: tyre.id, name: `Wheel${names[i]}Rim`, props: { asset: parts.rim.id } });
     return tyre;
   });
   addComponent(bp, 'SpotLight', { parentId: body.id, name: 'HeadlightL', props: { location: [2.95, 0.42, -0.78], rotation: [0, 0, -4], intensity: 30, angle: 28, range: 30 } });
   addComponent(bp, 'SpotLight', { parentId: body.id, name: 'HeadlightR', props: { location: [2.95, 0.42, 0.78], rotation: [0, 0, -4], intensity: 30, angle: 28, range: 30 } });
-  addComponent(bp, 'Scene', { parentId: body.id, name: 'RearWingSocket', props: { location: [-2.9822, 0.8367, 0] } });
+  // Vehicle Lab's rear wing socket, now a Dock keyed “wing”: Simulate runs a pull test (the wing tears off above
+  // 1.2 kN, drifts out and snaps back inside 0.3 m). Release / Connect work in the editor too.
+  const wingDock = addComponent(bp, 'Socket', { parentId: body.id, name: 'RearWingSocket', props: { kind: 'dock', location: [-2.9822, 0.8367, 0], key: 'wing', snapRadius: 0.3, breakForce: 1200, drive: 'pull' } });
+  addComponent(bp, 'StaticMesh', { parentId: wingDock.id, name: 'RearWing', props: { asset: parts.wing.id, tags: 'wing', mass: 6 } });
+  addComponent(bp, 'Socket', { parentId: body.id, name: 'TowStrap', props: { kind: 'tether', location: [-3.1, 0.1, 0], length: 0.32, swing: 30, tetherDamping: 0.3 } });
   addComponent(bp, 'Arrow', { parentId: body.id, name: 'Forward', props: { location: [3.2, 0.2, 0], length: 0.8 } });
   addComponent(bp, 'Camera', { name: 'ChaseCamera', props: { location: [-7.2, 2.4, 0], rotation: [0, 0, -12], fov: 62 } });
   addComponent(bp, 'BoxCollision', { parentId: body.id, name: 'FrontBumperTrigger', props: { location: [3.05, 0.1, 0], extent: [0.18, 0.28, 1.05], trigger: true } });

@@ -275,7 +275,8 @@ export class Stage {
     this.raycaster = new THREE.Raycaster();
     this.rig = new CameraRig(this.camera, canvas, { pick: (x, y) => { const hit = this.surfaceAt(x, y); return hit ? hit.point : null; } });
     this.framed = false;
-    this.scene.add(new THREE.HemisphereLight('#dfe8ff', '#202024', 1.5));
+    const hemi = new THREE.HemisphereLight('#dfe8ff', '#202024', 1.5);
+    this.scene.add(hemi);
     this.sun = new THREE.DirectionalLight('#ffffff', 2.4);
     this.sun.position.set(5, 9, 4);
     this.sun.castShadow = shadows;
@@ -285,6 +286,8 @@ export class Stage {
     const fill = new THREE.DirectionalLight('#9fc4ff', 0.6);
     fill.position.set(-6, 3, -5);
     this.scene.add(fill);
+    for (const light of [hemi, this.sun, fill]) light.layers.enable(1); // the x-ray pass is lit too
+    this.xray = false;
     this.grid = dotFloor();
     this.grid.visible = grid;
     this.scene.add(this.grid);
@@ -314,6 +317,20 @@ export class Stage {
       floor.uFocus.value.copy(this.rig.target);
       floor.uRadius.value = Math.max(6, this.rig.distance * 2.6);
       this.renderer.render(this.scene, this.camera);
+      // X-ray pass: objects on layer 1 (the selected socket's look) draw over everything, with their own depth.
+      if (this.xray) {
+        const background = this.scene.background, shadows = this.renderer.shadowMap.autoUpdate;
+        this.scene.background = null;              // a colour background would force a clear
+        this.renderer.shadowMap.autoUpdate = false;
+        this.renderer.autoClear = false;
+        this.renderer.clearDepth();
+        this.camera.layers.set(1);
+        this.renderer.render(this.scene, this.camera);
+        this.camera.layers.set(0);
+        this.renderer.autoClear = true;
+        this.renderer.shadowMap.autoUpdate = shadows;
+        this.scene.background = background;
+      }
       frames++;
       const now = performance.now();
       this.stats.ms = now - t0;

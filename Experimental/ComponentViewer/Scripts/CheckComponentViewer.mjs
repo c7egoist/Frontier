@@ -318,4 +318,98 @@ await test('Selection tint works inside the selected materials: no extra mesh, c
   assert.equal(a.material, matA); assert.equal(b.material, matB);
 });
 
+await test('Sockets: hinge / slider stay inside their limits, ball stays in its cone, spin follows rpm, quaternion maths', async () => {
+  const S = await import('../Sockets.js');
+  const hinge = { ...S.socketDefaults('hinge'), angleMin: -20, angleMax: 70, drive: 'sweep', period: 1 };
+  const st = S.createSocketState();
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < 240; i++) { S.stepSocket(st, hinge, 1 / 120, { simulate: true }); lo = Math.min(lo, st.angle); hi = Math.max(hi, st.angle); }
+  assert.ok(lo >= -20 - 1e-9 && hi <= 70 + 1e-9 && lo < -19 && hi > 69, `hinge swept ${lo.toFixed(1)}…${hi.toFixed(1)}`);
+  const held = S.createSocketState(); S.stepSocket(held, { ...hinge, drive: 'hold', pose: 0.25 }, 0.1, { simulate: true });
+  assert.ok(Math.abs(held.angle - 2.5) < 1e-9, 'hold sits at the pose');
+  // The joint frame really turns the axis' reference direction by the hinge angle (u → u cosθ + v sinθ).
+  const pose = S.socketPose({ ...hinge, axis: 'Y' }, { ...held, angle: 90 });
+  const r = S.rotateVector(pose.rotation, [1, 0, 0]);
+  assert.ok(Math.abs(r[0]) < 1e-9 && Math.abs(r[2] + 1) < 1e-9, `Y hinge at 90° takes +X to −Z (got ${r.map((x) => x.toFixed(3))})`);
+  const slider = { ...S.socketDefaults('slider'), travelMin: -0.1, travelMax: 0.4, drive: 'sweep', period: 0.5 };
+  const ss = S.createSocketState();
+  for (let i = 0; i < 200; i++) { S.stepSocket(ss, slider, 1 / 100, { simulate: true }); assert.ok(ss.travel >= -0.1 - 1e-9 && ss.travel <= 0.4 + 1e-9); }
+  const ball = { ...S.socketDefaults('ball'), cone: 25, drive: 'sweep' };
+  const bs = S.createSocketState();
+  for (let i = 0; i < 100; i++) {
+    S.stepSocket(bs, ball, 1 / 30, { simulate: true });
+    const d = S.rotateVector(S.socketPose(ball, bs).rotation, [0, 1, 0]);
+    assert.ok(Math.acos(Math.min(1, d[1])) <= 25 * Math.PI / 180 + 1e-6, 'axis stays inside the cone');
+  }
+  const spin = { ...S.socketDefaults('spin'), rpm: 60 };
+  const sp = S.createSocketState();
+  for (let i = 0; i < 25; i++) S.stepSocket(sp, spin, 0.01, { simulate: true });
+  assert.ok(Math.abs(sp.spin - 0.25 * 2 * Math.PI) < 1e-9, '60 rpm turns a quarter turn in 0.25 s');
+  const wheel = { ...spin, spinSource: 'vehicle', spinRadius: 0.5 };
+  S.stepSocket(sp, wheel, 0.1, { simulate: true, speed: 10 });
+  assert.ok(Math.abs(sp.rate - 20) < 1e-9, '10 m/s on a 0.5 m radius is 20 rad/s');
+});
+
+await test('Sockets: spring settles to its preload, squats under acceleration and meets bumps; tether swings with the pendulum period', async () => {
+  const S = await import('../Sockets.js');
+  const spring = { ...S.socketDefaults('spring'), springHz: 2, damping: 0.5, springTravel: 0.1, pose: 0.8, bumpSpacing: 0, loadGain: 1 };
+  const st = S.createSocketState();
+  for (let i = 0; i < 600; i++) S.stepSocket(st, spring, 1 / 120, {});
+  assert.ok(Math.abs(st.x - 0.03) < 1e-4, `preload 0.8 rests at +30 mm (got ${(st.x * 1000).toFixed(2)})`);
+  const rear = S.createSocketState(), front = S.createSocketState(), flat = { ...spring, pose: 0.5 };
+  for (let i = 0; i < 600; i++) { S.stepSocket(rear, flat, 1 / 120, { simulate: true, accel: 4, along: -1.6 }); S.stepSocket(front, flat, 1 / 120, { simulate: true, accel: 4, along: 1.7 }); }
+  const w2 = (2 * Math.PI * 2) ** 2;
+  assert.ok(Math.abs(rear.x - 2.4 / w2) < 1e-4 && Math.abs(front.x + 2.4 / w2) < 1e-4, 'rear squats, front lifts by 0.6·a/ω²');
+  const bumpy = { ...flat, bumpSpacing: 5 }, b = S.createSocketState();
+  let peak = 0;
+  for (let i = 0; i < 240; i++) { S.stepSocket(b, bumpy, 1 / 120, { simulate: true, distance: i * 0.05, along: 0 }); peak = Math.max(peak, b.x); }
+  assert.ok(peak > 0.02, `a bump every 5 m kicks the wheel up (${(peak * 1000).toFixed(0)} mm)`);
+  for (let i = 0; i < 2000; i++) S.stepSocket(b, bumpy, 1 / 120, { simulate: true, distance: 2.4, along: 0 });
+  assert.ok(Math.abs(b.x) < 1e-3, 'no new bumps when standing still: it settles');
+  // Pendulum: small swing, no drag → period 2π√(L/g).
+  const tether = { ...S.socketDefaults('tether'), length: 1, swing: 4, tetherDamping: 0 };
+  const ts = S.createSocketState();
+  let last = null, crossings = [];
+  for (let i = 0; i < 6000; i++) { S.stepSocket(ts, tether, 1 / 1000, {}); if (last !== null && last > 0 && ts.theta <= 0) crossings.push(i / 1000); last = ts.theta; }
+  const period = crossings[2] - crossings[1], expect = 2 * Math.PI * Math.sqrt(1 / 9.81);
+  assert.ok(Math.abs(period - expect) < 0.01, `period ${period.toFixed(3)} s vs ${expect.toFixed(3)} s`);
+  const towed = S.createSocketState();
+  for (let i = 0; i < 3000; i++) S.stepSocket(towed, { ...tether, swing: 0, tetherDamping: 4 }, 1 / 500, { simulate: true, accel: 3 });
+  assert.ok(Math.abs(towed.theta - Math.atan(3 / 9.81)) < 1e-3, 'under steady acceleration it trails back at atan(a/g)');
+});
+
+await test('Sockets: dock breaks above its force, drifts out, snaps back inside the radius; a wrong key is never accepted', async () => {
+  const S = await import('../Sockets.js');
+  const dock = { ...S.socketDefaults('dock'), drive: 'pull', breakForce: 1000, snapRadius: 0.3 };
+  const st = S.createSocketState();
+  const log = [];
+  let maxLoad = 0, maxGap = 0;
+  for (let i = 0; i < 1200; i++) {
+    for (const e of S.stepSocket(st, dock, 1 / 60, { simulate: true, accepts: true })) log.push([i / 60, e.type, e.load]);
+    if (st.dock.phase === 'connected') maxLoad = Math.max(maxLoad, st.dock.load);
+    maxGap = Math.max(maxGap, st.dock.gap);
+  }
+  assert.equal(log[0][1], 'released');
+  assert.ok(log[0][2] > 1000 && log[0][2] < 1010 && Math.abs(log[0][0] - 2.5) < 0.05, `releases just over 1 kN after 2.5 s (${log[0][2].toFixed(0)} N at ${log[0][0].toFixed(2)} s)`);
+  assert.equal(log[1][1], 'connected', 'snaps back');
+  assert.ok(log.filter((e) => e[1] === 'released').length >= 2, 'and the pull test repeats');
+  assert.ok(Math.abs(maxGap - 0.54) < 1e-6, 'drifts out to 1.8× the snap radius');
+  // Editor: Release / Connect without simulating.
+  const ed = S.createSocketState(), hold = { ...dock, drive: 'hold' };
+  S.stepSocket(ed, hold, 1 / 60, {});
+  assert.equal(ed.dock.phase, 'connected');
+  const ev = [];
+  for (let i = 0; i < 120; i++) ev.push(...S.stepSocket(ed, { ...hold, connected: false }, 1 / 60, {}));
+  assert.ok(ev[0].type === 'released' && ed.dock.gap > 0.5, 'Release lets go');
+  for (let i = 0; i < 240; i++) ev.push(...S.stepSocket(ed, hold, 1 / 60, {}));
+  assert.ok(ev.some((e) => e.type === 'connected') && ed.dock.phase === 'connected' && ed.dock.gap < 1e-3, 'Connect pulls it home');
+  // Wrong key: approaches, bounces off the snap radius, never connects.
+  const bad = S.createSocketState(), wrong = [];
+  let minGap = Infinity;
+  for (let i = 0; i < 1200; i++) { wrong.push(...S.stepSocket(bad, hold, 1 / 60, { simulate: true, accepts: false })); minGap = Math.min(minGap, bad.dock.gap); }
+  assert.ok(!wrong.some((e) => e.type === 'connected') && wrong.some((e) => e.type === 'rejected'), 'rejected, never connected');
+  assert.ok(minGap > 0.2, `keeps its distance (closest ${minGap.toFixed(2)} m)`);
+  assert.ok(S.dockAccepts('wing', 'aero, Wing') && !S.dockAccepts('wing', 'aero') && S.dockAccepts('', ''), 'key matching on tags');
+});
+
 console.log(`\n${passed} checks passed`);
