@@ -301,4 +301,21 @@ await test('Density view: smaller triangles map to the hot end of the ramp', asy
   assert.ok(red(0) > red(1) && red(1) > red(2));
 });
 
+await test('Selection tint works inside the selected materials: no extra mesh, child components untouched, restore is exact', async () => {
+  const THREE = await import('../Vendor/three.esm.min.js');
+  const { addHalo } = await import('../Visuals.js');
+  const matA = new THREE.MeshStandardMaterial(), matB = [new THREE.MeshStandardMaterial(), new THREE.MeshStandardMaterial()], matChild = new THREE.MeshStandardMaterial();
+  const node = new THREE.Group(), a = new THREE.Mesh(new THREE.BoxGeometry(), matA), b = new THREE.Mesh(new THREE.BoxGeometry(), matB);
+  const child = new THREE.Group(); child.userData.componentId = 'C9'; const c = new THREE.Mesh(new THREE.BoxGeometry(), matChild); child.add(c);
+  node.add(a, b, child);
+  const countBefore = (() => { let n = 0; node.traverse(() => n++); return n; })();
+  const restore = addHalo(node);
+  let n = 0; node.traverse(() => n++);
+  assert.equal(n, countBefore, 'no meshes added');
+  assert.ok(a.material !== matA && a.material.onBeforeCompile && b.material.length === 2 && b.material[0] !== matB[0]);
+  assert.equal(c.material, matChild, 'child component keeps its own material');
+  restore();
+  assert.equal(a.material, matA); assert.equal(b.material, matB);
+});
+
 console.log(`\n${passed} checks passed`);

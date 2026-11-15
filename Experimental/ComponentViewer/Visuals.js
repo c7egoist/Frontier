@@ -3,7 +3,7 @@
 //                  for SDF colliders), so a volume reads as a volume instead of a cage of edges
 //   beams          spot-light cones and camera frusta as additive light volumes fading along their axis
 //   glows          light cores and seam beads as camera-facing glow sprites
-//   halo           selection: an amber fresnel halo over the selected surfaces plus a footprint pooled on the floor
+//   halo           selection: the selected surfaces glow amber toward their silhouette, inside their own material
 //   dot floor      the ground as a field of dots (metres and quarters) fading into the dark, not a line grid
 //   solids         arrows and anchors as small shaded solids
 //   density        triangle density as a heat ramp on the surface (replaces wireframe)
@@ -225,81 +225,129 @@ export function anchorMark(size = 0.12, color = '#e8e8e8') {
 }
 
 // ------------------------------------------------------------------------------------------------------ selection
-const HALO_FRAGMENT = /* glsl */`
-  uniform vec3 uColor;
-  uniform float uTime;
-  varying vec3 vNormalView;
-  varying vec3 vViewDir;
-  varying vec3 vWorld;
-  void main() {
-    vec3 n = normalize(vNormalView);
-    if (!gl_FrontFacing) n = -n;
-    float rim = pow(1.0 - abs(dot(n, normalize(vViewDir))), 2.6);
-    float breathe = 0.82 + 0.18 * sin(uTime * 3.2);
-    float sweep = pow(0.5 + 0.5 * sin(vWorld.y * 6.0 + vWorld.x * 2.0 - uTime * 3.0), 24.0) * 0.18;
-    gl_FragColor = vec4(uColor, (0.06 + 0.9 * rim) * breathe + sweep);
-  }`;
+// The selected surfaces themselves glow amber toward their silhouette: the fresnel term is injected into the mesh's
+// own material (a per-selection clone), so there is no second mesh, no fill and no z-fighting, just the surface lit
+// from the edges, breathing slowly.
+const HALO_COLOR = new THREE.Color('#ffb238');
 
-const haloMaterial = new THREE.ShaderMaterial({
-  uniforms: { uColor: { value: new THREE.Color('#ffb238') }, uTime: clock },
-  vertexShader: SHELL_VERTEX, fragmentShader: HALO_FRAGMENT,
-  transparent: true, depthWrite: false, depthFunc: THREE.LessEqualDepth, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-});
-
-// Adds a halo child to every surface of `node` (child components excluded). Returns a function that removes them.
-export function addHalo(node) {
-  const added = [];
-  const visit = (o) => {
-    if (o !== node && o.userData.componentId) return;
-    if (o.isMesh && !o.userData.halo && o.geometry && o.material) {
-      const m = Array.isArray(o.material) ? o.material[0] : o.material;
-      if (m && m.visible !== false && !(m.isShaderMaterial)) {
-        const halo = new THREE.Mesh(o.geometry, haloMaterial);
-        halo.userData.halo = true;
-        halo.userData.debug = true;
-        halo.renderOrder = 8;
-        halo.raycast = () => {};
-        o.add(halo);
-        added.push(halo);
-      }
-    }
-    for (const c of [...o.children]) visit(c);
-  };
-  visit(node);
-  return () => { for (const h of added) h.removeFromParent(); };
+export function haloCompile(shader) {
+  shader.uniforms.uHaloTime = clock;
+  shader.uniforms.uHaloColor = { value: HALO_COLOR };
+  shader.vertexShader = shader.vertexShader
+    .replace('void main() {', 'varying vec3 vHaloN;\nvarying vec3 vHaloP;\nvoid main() {')
+    .replace('#include <project_vertex>', '#include <project_vertex>\n  vHaloN = normalMatrix * normal;\n  vHaloP = mvPosition.xyz;');
+  shader.fragmentShader = shader.fragmentShader
+    .replace('void main() {', 'uniform float uHaloTime;\nuniform vec3 uHaloColor;\nvarying vec3 vHaloN;\nvarying vec3 vHaloP;\nvoid main() {')
+    .replace(/\}\s*$/, `
+  vec3 haloN = length(vHaloN) > 0.01 ? normalize(vHaloN) : normalize(cross(dFdx(vHaloP), dFdy(vHaloP)));
+  float haloRim = pow(1.0 - abs(dot(haloN, normalize(-vHaloP))), 2.4);
+  float haloBreathe = 0.8 + 0.2 * sin(uHaloTime * 3.2);
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, uHaloColor, clamp(haloRim * 0.85 * haloBreathe, 0.0, 1.0)) + uHaloColor * 0.035;
+}`);
 }
 
-const FOOTPRINT_FRAGMENT = /* glsl */`
-  uniform vec3 uColor;
-  uniform vec2 uHalf;
-  uniform float uPad, uTime;
-  varying vec3 vLocal;
-  float roundedBox(vec2 p, vec2 b, float r) { vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
-  void main() {
-    float d = roundedBox(vLocal.xy, uHalf, min(uHalf.x, uHalf.y) * 0.35);
-    float inside = 1.0 - smoothstep(-uPad * 0.2, 0.0, d);
-    float ring = exp(-pow(d / (uPad * 0.18), 2.0));
-    float ripple = fract(uTime * 0.45);
-    float wave = exp(-pow((d - ripple * uPad) / (uPad * 0.08), 2.0)) * (1.0 - ripple);
-    float a = inside * 0.10 + ring * 0.55 + wave * 0.35;
-    gl_FragColor = vec4(uColor, a);
-  }`;
+function haloOf(material) {
+  const m = material.clone();
+  m.onBeforeCompile = haloCompile;
+  m.customProgramCacheKey = () => `halo:${material.type}`;
+  return m;
+}
 
-// A pool of amber light on the floor under a box: shows where the selection sits in plan, even when it floats.
-export function footprint(box, color = '#ffb238', floorY = 0) {
-  const size = box.getSize(new THREE.Vector3()), centre = box.getCenter(new THREE.Vector3());
-  const pad = Math.max(0.12, Math.max(size.x, size.z) * 0.12);
-  const geo = new THREE.PlaneGeometry(size.x + pad * 2, size.z + pad * 2);
-  const mat = new THREE.ShaderMaterial({
-    uniforms: { uColor: { value: new THREE.Color(color) }, uHalf: { value: new THREE.Vector2(Math.max(size.x / 2, 0.02), Math.max(size.z / 2, 0.02)) }, uPad: { value: pad }, uTime: clock },
-    vertexShader: SHELL_VERTEX, fragmentShader: FOOTPRINT_FRAGMENT, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.set(centre.x, floorY + 0.002, centre.z);
-  mesh.renderOrder = 4;
-  return markDebug(mesh);
+// Tints every surface of `node` (child components excluded). Returns a function that restores the materials.
+export function addHalo(node) {
+  const swapped = [];
+  const visit = (o) => {
+    if (o !== node && o.userData.componentId) return;
+    if (o.isMesh && o.material && !o.userData.haloOriginal) {
+      const list = Array.isArray(o.material) ? o.material : [o.material];
+      const first = list[0];
+      if (first && first.visible !== false && !first.isShaderMaterial) {
+        o.userData.haloOriginal = o.material;
+        o.material = Array.isArray(o.material) ? list.map(haloOf) : haloOf(o.material);
+        swapped.push(o);
+      }
+    }
+    for (const c of o.children) visit(c);
+  };
+  visit(node);
+  return () => {
+    for (const o of swapped) {
+      const tinted = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of tinted) m.dispose();
+      o.material = o.userData.haloOriginal;
+      delete o.userData.haloOriginal;
+    }
+  };
+}
+
+// ------------------------------------------------------------------------------------------------- camera model
+// A compact cinema camera facing +X: rounded graphite body, PL-style mount, lens with a knurled focus ring and a
+// coated front element, flared hood, top handle, flip-out monitor with a lit screen, rear battery and a tally lamp.
+// Returns { group, lensFront } (x of the front element, where the view beam starts).
+export function cameraModel({ active = false } = {}) {
+  const g = new THREE.Group();
+  const graphite = new THREE.MeshStandardMaterial({ color: '#25282f', roughness: 0.42, metalness: 0.35 });
+  const satin = new THREE.MeshStandardMaterial({ color: '#3a3e47', roughness: 0.3, metalness: 0.7 });
+  const rubber = new THREE.MeshStandardMaterial({ color: '#141518', roughness: 0.85, metalness: 0 });
+  const metal = new THREE.MeshStandardMaterial({ color: '#9aa0aa', roughness: 0.22, metalness: 1 });
+  const glass = new THREE.MeshStandardMaterial({ color: '#0d1626', roughness: 0.05, metalness: 0.9, emissive: '#2a3f7a', emissiveIntensity: 0.35 });
+  const add = (geo, mat, x = 0, y = 0, z = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; g.add(m); return m; };
+  const alongX = (geo) => geo.rotateZ(-Math.PI / 2);
+
+  // Body: rounded profile in X/Y, extruded across Z, centred.
+  const L = 0.24, H = 0.15, W = 0.12, r = 0.028;
+  const shape = new THREE.Shape();
+  shape.moveTo(-L / 2 + r, -H / 2);
+  shape.lineTo(L / 2 - r, -H / 2); shape.quadraticCurveTo(L / 2, -H / 2, L / 2, -H / 2 + r);
+  shape.lineTo(L / 2, H / 2 - r); shape.quadraticCurveTo(L / 2, H / 2, L / 2 - r, H / 2);
+  shape.lineTo(-L / 2 + r, H / 2); shape.quadraticCurveTo(-L / 2, H / 2, -L / 2, H / 2 - r);
+  shape.lineTo(-L / 2, -H / 2 + r); shape.quadraticCurveTo(-L / 2, -H / 2, -L / 2 + r, -H / 2);
+  const bevel = 0.008;
+  const body = new THREE.ExtrudeGeometry(shape, { depth: W - bevel * 2, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3, curveSegments: 6 });
+  body.translate(0, 0, -(W - bevel * 2) / 2);
+  add(body, graphite);
+  // Side vent strip and a recessed panel line on the operator side.
+  for (let i = 0; i < 6; i++) add(new THREE.BoxGeometry(0.006, 0.07, 0.004), rubber, -0.07 + i * 0.014, 0.005, -W / 2 - 0.001);
+
+  // Mount and lens (lathe profile along +X).
+  const mountX = L / 2 + bevel;
+  add(alongX(new THREE.CylinderGeometry(0.058, 0.058, 0.014, 40)), satin, mountX + 0.007);
+  add(alongX(new THREE.CylinderGeometry(0.05, 0.05, 0.02, 40)), graphite, mountX + 0.024);
+  const ring = alongX(new THREE.CylinderGeometry(0.056, 0.056, 0.04, 96, 1));
+  const pos = ring.attributes.position;
+  for (let i = 0; i < pos.count; i++) { // knurl: alternate the radius around the ring
+    const y = pos.getY(i), z = pos.getZ(i), a = Math.atan2(z, y), k = Math.sin(a * 48) > 0 ? 1 : 0.95;
+    if (Math.hypot(y, z) > 0.01) { pos.setY(i, y * k); pos.setZ(i, z * k); }
+  }
+  ring.computeVertexNormals();
+  add(ring, rubber, mountX + 0.054);
+  add(alongX(new THREE.CylinderGeometry(0.052, 0.052, 0.006, 40)), metal, mountX + 0.077); // witness ring
+  const hoodProfile = [new THREE.Vector2(0.05, 0), new THREE.Vector2(0.053, 0.02), new THREE.Vector2(0.07, 0.06), new THREE.Vector2(0.072, 0.064), new THREE.Vector2(0.066, 0.064), new THREE.Vector2(0.049, 0.02)];
+  const hood = alongX(new THREE.LatheGeometry(hoodProfile, 48));
+  add(hood, rubber, mountX + 0.08).material = new THREE.MeshStandardMaterial({ color: '#141518', roughness: 0.85, side: THREE.DoubleSide });
+  const lensFront = mountX + 0.095;
+  const element = alongX(new THREE.SphereGeometry(0.06, 40, 12, 0, Math.PI * 2, 0, 0.75));
+  element.scale(0.45, 1, 1);
+  add(element, glass, lensFront - 0.03);
+
+  // Top handle: two posts and a grip.
+  add(new THREE.CylinderGeometry(0.008, 0.008, 0.035, 12), satin, -0.07, H / 2 + 0.017);
+  add(new THREE.CylinderGeometry(0.008, 0.008, 0.035, 12), satin, 0.07, H / 2 + 0.017);
+  add(alongX(new THREE.CapsuleGeometry(0.012, 0.16, 4, 16)), rubber, 0, H / 2 + 0.04);
+
+  // Flip-out monitor on the operator side (−Z), screen facing back.
+  const arm = add(new THREE.BoxGeometry(0.02, 0.012, 0.03), satin, 0.06, 0.03, -W / 2 - 0.015);
+  arm.castShadow = false;
+  add(new THREE.BoxGeometry(0.11, 0.07, 0.008), graphite, 0.03, 0.03, -W / 2 - 0.034);
+  const screen = add(new THREE.PlaneGeometry(0.096, 0.056), new THREE.MeshBasicMaterial({ color: active ? '#bcd3ff' : '#4a5a78' }), 0.03, 0.03, -W / 2 - 0.0385);
+  screen.rotation.y = Math.PI;
+
+  // Rear battery and tally lamp.
+  add(new THREE.BoxGeometry(0.03, 0.11, 0.09), rubber, -L / 2 - 0.02, -0.005);
+  add(new THREE.BoxGeometry(0.004, 0.02, 0.05), metal, -L / 2 - 0.037, 0.02);
+  add(new THREE.SphereGeometry(0.008, 12, 8), new THREE.MeshBasicMaterial({ color: active ? '#ff4d3d' : '#5a1f1b' }), L / 2 - 0.02, H / 2 + 0.004, 0.035);
+  if (active) { const tally = glowSprite('#ff4d3d', 0.08, 0.9); tally.position.set(L / 2 - 0.02, H / 2 + 0.004, 0.035); g.add(tally); }
+  return { group: g, lensFront };
 }
 
 // ------------------------------------------------------------------------------------------------------ dot floor

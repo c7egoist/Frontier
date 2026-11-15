@@ -10,7 +10,7 @@ import {
 } from './Blueprint.js';
 import { STEPS, isCompiled, fmt, formatMs } from './CompileSteps.js';
 import { THREE, Stage, meshObject, collisionObject, assetSlots } from './Render.js';
-import { fieldShell, beam, glowSprite, solidArrow, anchorMark, addHalo, footprint } from './Visuals.js';
+import { fieldShell, beam, glowSprite, solidArrow, anchorMark, addHalo, cameraModel } from './Visuals.js';
 import { createCameraHud } from './Camera.js';
 import { IMPORT_FORMATS } from './Engine/ImportFormats.js';
 
@@ -137,13 +137,12 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
         const cam = new THREE.PerspectiveCamera(p.fov, 16 / 9, 0.1, 0.9);
         cam.rotation.y = -Math.PI / 2;
         node.add(cam);
-        const body = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.18, 0.14), new THREE.MeshStandardMaterial({ color: '#2b2f38', roughness: 0.5 }));
-        const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.065, 0.1, 16), new THREE.MeshStandardMaterial({ color: '#111', roughness: 0.3 }));
-        lens.rotation.z = Math.PI / 2;
-        lens.position.x = 0.18;
-        gizmo(body, 0.2);
-        node.add(lens);
-        node.add(frustumBeam(p.fov, c.id === selectedId));
+        const active = c.id === selectedId;
+        const model = cameraModel({ active });
+        gizmo(model.group, 0.2);
+        const view = frustumBeam(p.fov, active);
+        view.position.x = model.lensFront;
+        node.add(view);
         break;
       }
       case 'BoxCollision': gizmo(collisionObject({ type: 'box', centre: [0, 0, 0], half: p.extent }, AMBER), 0.1); break;
@@ -177,7 +176,7 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
     const visit = (o) => {
       if (o !== node && o.userData.componentId && !recurse) return;
       if (o.visible === false) return;
-      if ((o.isMesh || o.isLineSegments || o.isLine) && o.geometry && !o.userData.halo) {
+      if ((o.isMesh || o.isLineSegments || o.isLine) && o.geometry) {
         const m = Array.isArray(o.material) ? o.material[0] : o.material;
         if (!m || m.visible !== false) {
           if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
@@ -190,26 +189,13 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
     return box;
   }
 
-  // Selection: an amber fresnel halo over the selected surfaces and a footprint of light pooled on the floor.
+  // Selection: the selected surfaces glow amber toward their silhouette (tinted in their own material, no extra mesh).
   function updateSelection() {
-    if (selection) selection.removeHalo();
-    stage.setOverlay(null);
+    if (selection) selection.restore();
     selection = null;
     const node = objects.get(selectedId);
     if (!node || selectedId === bp.rootId) return;
-    const box = componentBox(node);
-    if (box.isEmpty()) return;
-    const pool = footprint(box, AMBER);
-    selection = { node, pool, removeHalo: addHalo(node), size: box.getSize(new THREE.Vector3()) };
-    stage.setOverlay(pool);
-  }
-
-  function followSelection() {
-    if (!selection) return;
-    const box = componentBox(selection.node);
-    if (box.isEmpty()) return;
-    const c = box.getCenter(new THREE.Vector3());
-    selection.pool.position.x = c.x; selection.pool.position.z = c.z;
+    selection = { node, restore: addHalo(node) };
   }
 
   function frameAll() {
@@ -233,7 +219,6 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
   // ---------------------------------------------------------------------------------------------- simulation
   stage.frameCallbacks.add((dt) => {
     if (!bp) return;
-    if (simulate) followSelection();
     if (simulate) {
       for (const c of actorComponents(bp)) {
         if (c.type === 'RotatingMovement') {

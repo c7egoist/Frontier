@@ -93,7 +93,8 @@ writes goals and the live values ease toward them, so nothing ever cuts.
 | SDF collider | Shell with one soft dot per voxel cell on each face |
 | Spot light, camera view | Additive light-volume beam (round / 16:9 four-sided) fading along its axis |
 | Point light | Glow core; influence radius as a faint additive field while selected |
-| Selection | Breathing amber fresnel halo on the selected surfaces + a footprint of light pooled on the floor, with a ripple |
+| Selection | The selected surfaces glow amber toward their silhouette, breathing slowly. The fresnel term is injected into the mesh's own material (a per-selection clone), so there is no second mesh and nothing on the floor |
+| Camera component | Modelled cinema camera: rounded body, mount, knurled focus ring, coated front element, hood, handle, monitor (lit when selected), battery, tally lamp (glows when selected); the view beam starts at the lens |
 | Origin / Scene pivots, Geometry-step pivot | Shaded anchor: ring, core and three axis beads |
 | Arrow | Shaded shaft and cone |
 | Floor | Dots (metres, quarters) fading out around the pivot; axis dots tinted red X / blue Z |
@@ -116,7 +117,7 @@ Vehicle Movement, using the Vehicle Lab sheet values: 1300 kg, a 520 N·m peak a
 | `Blueprint.js` | Component classes, property specs, tree operations, validation, torque curve, drive step (no DOM) |
 | `Render.js` | three.js stage, mesh channels, icon renderer |
 | `Camera.js` | Glide camera rig and its HUD (dial, lens, turntable) |
-| `Visuals.js` | Shader debug visuals: field shells, beams, glows, halo, footprint, dot floor, density |
+| `Visuals.js` | Shader debug visuals: field shells, beams, glows, selection tint, camera model, dot floor, density |
 | `Ui.js`, `Icons.js`, `ComponentViewer.css` | Project Zero controls, icons and styles |
 | `Engine/` | Readers, mesh analysis, workers; SDF, UV, cluster LOD, simplification, transform and OBJ export from Frontier-1 |
 | `Models/` | ControlVehicle Body / Tyre / Rim (FCT1) from Vehicle Lab |
