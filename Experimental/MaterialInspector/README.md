@@ -12,24 +12,31 @@ python3 Experimental/MaterialInspector/Serve.py        # http://0.0.0.0:8097/
 | --- | --- |
 | ![Material workspace](Screenshots/material.png) | ![Material outliner](Screenshots/material-outliner.png) |
 
+![Field source — the generator is a dropdown (glyph, name, short tag) beside the live preview](Screenshots/material-field-dropdown.png)
+
 Other workspaces: [Pattern / Stamp](../ArtworkInspector/README.md#screenshots), [Map Baking](../BakeInspector/README.md#screenshots) and [Brush Studio](../BrushStudio/README.md).
 
-## Workspace viewport
+## Layout and dropdowns
 
-`Viewport.js` and `Workspace.css` give Pattern, Stamp, Map Baking and Texture Painting the Project Zero workspace layout: outliner · **viewport** · card. The Material workspace has no viewport.
+Material, Pattern, Stamp and Map Baking are **outliner · card** pages; none of them has a viewport. Only Texture Painting ([Brush Studio](../BrushStudio/README.md)) keeps the blank Project Zero viewport, from `Viewport.js` / `Workspace.css` (`MountViewport(Host, { Title, Meta, Views, View, Chips, Hint, OnView })` → `{ Body, SetMeta, SetView }`).
 
-`MountViewport(Host, { Title, Meta, Views, View, Chips, Hint, OnView, Head, Foot })` returns `{ Body, Head, Foot, View, SetMeta, SetView }`. It has two forms:
+**Dropdowns.** `CardKit.Dropdown(Act, Options, Current, { Label, Placeholder, Search, Class, Disabled, Extra })` is the shared Project Zero pick list.
 
-- **Blank frame** (Texture Painting): floating title chip, view modes, hint and zoom readout over an empty body that a renderer mounts into.
-- **Header · stage · footer** (pass `Head` / `Foot` HTML): Pattern / Stamp (`ArtworkInspector/ArtworkStage.js`, live SVG artboard) and Map Baking (`BakeInspector/BakeStage.js`, 3D / 2D / split).
-  - `Workspace.css` holds the shared bar parts: doc identity, icon buttons, segments, pills, source chips and menus.
-  - Labels collapse to icons through a container query when the viewport is narrow.
+- Options are `[Label, Value, Lead?, Hint?]` or `{ Group }` headings. *Lead* is an icon name or raw HTML (a swatch, a glyph, a thumbnail).
+- Each option is a button with `data-act` / `data-value`, so cards keep their existing click handling.
+- One document-level installer handles opening (one at a time), outside clicks, fixed placement (never clipped, flips up near the bottom), the keyboard (↓ ↑ Home End Enter Esc) and a filter box for lists longer than ten.
+- `CardKit.Chips(...)` now renders a dropdown too, so every former chip grid became one.
 
-Layout breakpoints:
+Where it is used:
 
-- **Below 1180 px:** the viewport spans the top.
-- **Below 800 px:** the columns stack.
-- **`?outliner=0`:** a viewport · card pair.
+| Workspace | Dropdowns |
+| --- | --- |
+| Material | Field generator, material library |
+| Pattern / Stamp | Motif shape, blend, surface finish, add channel, starter library, long modifier options |
+| Map Baking | Bake target (sets + studies), isolation, part kind, part resolution, add part |
+| Brush Studio | Shape source and grain source (thumbnails), rendering mode, colour gradients, every option list with more than four values |
+
+Short 2–4 way toggles stay segments, for example Value · Field · Ramp · Image, OpenGL / DirectX, and Per part · Atlas · UDIM.
 
 ## What changed from the TextureStudio inspector
 
@@ -37,7 +44,7 @@ Layout breakpoints:
 | --- | --- |
 | Two tabs: *Properties* and *Layer Stack*. | One card. The strata are a compact stack inside it. |
 | A cloud of 28 removable channel pills, followed by an "Inspect Channel" dropdown, a "Source" dropdown, a "Generator" dropdown and a column of sliders. | One quiet row per channel showing its live value. Rows are grouped (Core, Specular, Coat, Sheen, Thin film, Volume, Emission), and groups without authored channels start folded. Opening a row expands **that one channel's** editor in place. |
-| Source and generator are hidden behind dropdowns. | Source is a visible segment (Value · Field · Ramp · Image). The eight field generators are chips. Ramp shape is a segment. |
+| Source and generator are hidden behind dropdowns. | Source is a visible segment (Value · Field · Ramp · Image). The eight field generators are one dropdown with a glyph and short tag each. Ramp shape is a segment. |
 | "Drag pills to scrub values". | You can drag any scalar readout in the list without opening anything. Shift gives fine control. |
 | Separate "Surface Albedo & Microfacet" sliders that duplicate channels. | Channels *are* the values. Only the stratum's own knobs (finish, coat orange peel, flake dispersion and palette, detail presets) are in a folded section. |
 
@@ -56,7 +63,7 @@ Short strata (coat, flakes and new detail strata, with 8 or fewer channels) are 
    - `+ Detail` adds a masked detail stratum, which you can remove again.
 4. **Channels.** Filter, `+ Channel` (adds a missing channel; the list keeps registry order), and grouped rows. One row is open at a time:
    - **Value:** a slider pill with a numeric field, a colour field with hex input, or X/Y/Z inputs for vectors.
-   - **Field:** live preview, generator chips, Scale / Seed / Angle / Contrast, and a colour ramp (or the camouflage palette).
+   - **Field:** live preview, generator dropdown, Scale / Seed / Angle / Contrast, and a colour ramp (or the camouflage palette).
    - **Ramp:** linear, radial or conic, with angle and stops.
    - **Image:** drop or choose a tile. It is resampled to a PNG of at most 256 px and embedded.
    - For non-value sources there is also a *Base value* control and a *Drive directly* switch.
@@ -66,7 +73,7 @@ Short strata (coat, flakes and new detail strata, with 8 or fewer channels) are 
 
 Keyboard: ↑ / ↓ move between channel rows. Esc closes the open editor. Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) undo and redo.
 
-The same card language is reused by the [Pattern / Stamp Studio](../ArtworkInspector/README.md) and [Map Baking](../BakeInspector/README.md) cards. `CardKit.js` holds the shared templates (knob, colour field, stops, segments, chips, stat tile + meters, undo history, dock nav) and `Icons.js` the shared glyphs.
+The same card language is reused by the [Pattern / Stamp Studio](../ArtworkInspector/README.md) and [Map Baking](../BakeInspector/README.md) cards. `CardKit.js` holds the shared templates (knob, colour field, stops, segments, dropdown, stat tile + meters, undo history, dock nav) and `Icons.js` the shared glyphs.
 
 ## Data and compatibility
 

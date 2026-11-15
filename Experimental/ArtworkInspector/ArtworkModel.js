@@ -8,6 +8,7 @@ import {
   ARTWORK_SIZE, ARTWORK_FINISHES, MOTIF_TYPES, MODIFIER_DEFINITIONS, ARTWORK_PBR_CHANNELS, ARTWORK_PBR_CHANNEL_MAP,
   createArtworkLayer, createDefaultModifier, ensureArtworkLayerSurface, setArtworkLayerPbrMask, getArtworkChannelValue,
   setArtworkChannelValue, normalizeGradientStops, evaluateLayerInstances, evaluateArtworkDocument, artworkDocumentToSvgString,
+  artworkDocumentLayersSvg,
 } from "./Engine/Patterns/ArtworkStackEngine.js";
 import { NOISE_SCALED_STARTERS, STAMP_STARTERS } from "./Engine/Patterns/ArtworkStarters.js";
 
@@ -30,6 +31,23 @@ export const LAYER_KINDS = Object.freeze([
 ]);
 export const BLENDS = Object.freeze(["Normal", "Multiply", "Screen", "Overlay", "Add", "Darken"]);
 export const RESOLUTIONS = Object.freeze([256, 512, 1024, 2048]);
+export const BLEND_HINTS = Object.freeze({ Normal: "Paints over", Multiply: "Darkens", Screen: "Lightens", Overlay: "Contrast", Add: "Glows", Darken: "Keeps the darker" });
+
+// A 16 px glyph of each motif, drawn by the engine itself (cached) — the lead icon of the Shape dropdown.
+const GlyphCache = new Map();
+export function MotifGlyph(Type) {
+  if (GlyphCache.has(Type)) return GlyphCache.get(Type);
+  let Svg = "";
+  try {
+    const Layer = createArtworkLayer("motif", { transform: { x: 32, y: 32, width: 44, height: 44, rotation: 0 }, shape: { motifType: Type, color: "#d6d6d6" }, modifiers: [] });
+    ensureArtworkLayerSurface(Layer);
+    const { defs, body } = artworkDocumentLayersSvg({ size: 64, mode: "stamp", layers: [Layer] }, { idPrefix: `glyph-${Type}` });
+    Svg = `<svg viewBox="0 0 64 64" width="16" height="16" aria-hidden="true"><defs>${defs}</defs>${body.replace(/cursor:[a-z]+/g, "")}</svg>`;
+  } catch { Svg = ""; }
+  GlyphCache.set(Type, Svg);
+  return Svg;
+}
+
 
 export function Catalog(Mode) {
   return MODES[Mode].Starters.map((S) => ({ Id: S.id, Name: S.name, Group: S.group || "Starters", Description: S.description || "" }));

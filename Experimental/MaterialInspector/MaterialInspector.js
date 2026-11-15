@@ -9,10 +9,11 @@
 
 import * as M from "./MaterialModel.js";
 import { icon } from "./Icons.js";
-import { Esc, Fixed, Pct, Knob, ColourField, Stops, Toggle, StatTile, SyncSiblings as SyncKit } from "./CardKit.js";
+import { Esc, Fixed, Pct, Knob, ColourField, Stops, Toggle, StatTile, Dropdown, SyncSiblings as SyncKit } from "./CardKit.js";
 
 const GLYPH = { value: "value", field: "field", ramp: "ramp", texture: "image", pattern: "pattern" };
 const MODEL_GLYPH = { surface: "surface", coat: "coat", flakes: "flakes", detail: "detail" };
+const GEN_GLYPH = { "camouflage-smooth": "blend", camouflage: "id", noise: "noise", stripes: "warp", checker: "grid", cells: "scatter", ridged: "ground", rings: "radial" };
 const SHORT_GEN = { "camouflage-smooth": "Camo soft", camouflage: "Camo pixel", noise: "Noise", stripes: "Grain", checker: "Checker", cells: "Cells", ridged: "Ridged", rings: "Rings" };
 
 const S = {
@@ -167,9 +168,7 @@ function EditorHtml(L, Key) {
         <canvas class="mi-preview" width="72" height="72" data-preview="${Key}" aria-label="Field preview"></canvas>
         <div class="mi-field-side">
           <div class="mi-gen-title">${Esc(Def?.label || "Field")}<small>${Esc(Def?.description || "")}</small></div>
-          <div class="mi-gen-grid" role="radiogroup" aria-label="Field generator">
-            ${M.GeneratorDefinitions.map((D) => `<button type="button" role="radio" aria-checked="${D.identity === G?.Procedure}" class="mi-chip ${D.identity === G?.Procedure ? "active" : ""}" data-act="gen" data-gen="${D.identity}" title="${Esc(D.label)}">${Esc(SHORT_GEN[D.identity] || D.label)}</button>`).join("")}
-          </div>
+          ${Dropdown("gen", M.GeneratorDefinitions.map((D) => [D.label.replace("Military camouflage · ", "Camouflage · "), D.identity, GEN_GLYPH[D.identity] || "field", SHORT_GEN[D.identity] || ""]), G?.Procedure, { Label: "Field generator", Search: false })}
         </div>
       </div>
       <div class="mi-knob-grid">
@@ -280,10 +279,7 @@ function CardHtml() {
       <input class="mi-name" data-act="name" data-fid="name" value="${Esc(P.name)}" maxlength="80" spellcheck="false" aria-label="Material name">
       <div class="mi-ident-row">
         <span class="mi-sub">${Esc(P.label || Entry?.label || "")}</span>
-        <select class="mi-library" data-act="library" aria-label="Material library">
-          ${M.CATALOG.map((E) => `<option value="${E.id}" ${E.id === P.id ? "selected" : ""}>${Esc(E.name)}</option>`).join("")}
-          ${Entry ? "" : `<option value="${Esc(P.id)}" selected>${Esc(P.name)} (imported)</option>`}
-        </select>
+        ${Dropdown("library", [...[...new Set(M.CATALOG.map((E) => E.category || "Materials"))].flatMap((C) => [{ Group: C }, ...M.CATALOG.filter((E) => (E.category || "Materials") === C).map((E) => [E.name, E.id])]), ...(Entry ? [] : [[`${P.name} (imported)`, P.id]])], P.id, { Label: "Material library", Class: "compact mi-library-dd", Search: true })}
       </div>
     </section>
 
@@ -456,6 +452,7 @@ function OnClick(Event) {
     return;
   }
   const Act = El.dataset.act, L = Layer();
+  if (El.classList.contains("mi-dd-opt") && Act === "library") return OnChange({ target: { dataset: El.dataset, value: El.dataset.value } });
   if (["search", "name", "rename", "library", "import", "texture-file"].includes(Act)) return;
   if (Act === "open") {
     if (Event.target.closest("[data-scrub]")?.dataset.dragged === "1") return;
@@ -481,11 +478,11 @@ function OnClick(Event) {
     S.LayerId = Layer().Identity; S.Channel = Layer().Channels[0];
     Flash(`${Name} removed`);
   } else if (Act === "source") {
-    Apply(M.SetSourceMode(S.P, L, S.Channel, El.dataset.kind));
+    Apply(M.SetSourceMode(S.P, L, S.Channel, El.dataset.kind ?? El.dataset.value));
   } else if (Act === "ramp") {
     Apply(M.SetSourceMode(S.P, L, S.Channel, "ramp", El.dataset.shape));
   } else if (Act === "gen") {
-    Apply(M.SetGeneratorProcedure(S.P, M.ChannelSource(S.P, L, S.Channel).Generator, El.dataset.gen));
+    Apply(M.SetGeneratorProcedure(S.P, M.ChannelSource(S.P, L, S.Channel).Generator, El.dataset.gen ?? El.dataset.value));
   } else if (Act === "direct") {
     Apply(M.PatchSource(S.P, L, S.Channel, { Direct: !M.ChannelSource(S.P, L, S.Channel).Direct }));
   } else if (Act === "vec-flat") {

@@ -8,7 +8,6 @@
 <link rel="stylesheet" href="../ArtworkInspector/ArtworkInspector.css">
 <link rel="stylesheet" href="./BakeInspector.css">
 <link rel="stylesheet" href="../MaterialInspector/Outliner.css">
-<link rel="stylesheet" href="../MaterialInspector/Workspace.css">
 </head>
 <body>
 <!-- TextureStudio's Baking workspace inspector, redesigned in the Project Zero style, with its bake-queue outliner docked
@@ -16,9 +15,8 @@
      on this page, so "Bake" runs the card's labelled dry run (see README for wiring the real bakers). -->
 <main class="mi-dock">
   <div id="Nav"></div>
-  <div class="mi-trio">
+  <div class="mi-pair">
     <aside id="Outliner" class="ol-host"></aside>
-    <div id="Viewport" class="vp-host"></div>
     <div id="Card" class="mi-host"></div>
   </div>
 </main>
@@ -30,9 +28,7 @@
   const Docked = new URLSearchParams(location.search).get("outliner") !== "0";
   globalThis.BakeInspector = Mount(document.getElementById("Card"), { docked: Docked });
   if (Docked) globalThis.BakeOutliner = MountBakeOutliner(document.getElementById("Outliner"), globalThis.BakeInspector);
-  else { document.getElementById("Outliner").remove(); document.querySelector(".mi-trio").classList.add("solo"); }
-  import { MountBakeStage } from "./BakeStage.js";
-  globalThis.Viewport = MountBakeStage(document.getElementById("Viewport"), globalThis.BakeInspector);
+  else document.getElementById("Outliner").remove();
 </script>
 </body>
 </html>

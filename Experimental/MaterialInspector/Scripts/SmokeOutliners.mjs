@@ -18,6 +18,8 @@ const PAGES = {
   pattern: { Dir: "ArtworkInspector", Card: "ArtworkInspector.js", Outliner: "ArtworkOutliner.js", Fn: "MountArtworkOutliner", Opts: { mode: "pattern" } },
   stamp: { Dir: "ArtworkInspector", Card: "ArtworkInspector.js", Outliner: "ArtworkOutliner.js", Fn: "MountArtworkOutliner", Opts: { mode: "stamp" } },
   bake: { Dir: "BakeInspector", Card: "BakeInspector.js", Outliner: "BakeOutliner.js", Fn: "MountBakeOutliner", Opts: {} },
+  // The same outliner holding a bake set (one character: body parts, clothes, props) instead of a single study.
+  bakeset: { Dir: "BakeInspector", Card: "BakeInspector.js", Outliner: "BakeOutliner.js", Fn: "MountBakeOutliner", Opts: {}, Seed: { key: "Frontier.BakeInspector.v1", model: "BakeModel.js", make: (B) => B.UseTemplate(B.Create(), "outfit") } },
 };
 
 const Only = process.argv[2];
@@ -75,6 +77,7 @@ const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
 let passed = 0;
 const step = async (name, fn) => { const before = errors.length; try { await fn(); } catch (e) { errors.push(`[${name}] threw: ${e.stack}`); } const ok = errors.length === before; passed += ok; console.log(`${ok ? " ok " : "FAIL"} ${name}`); };
 
+if (Page.Seed) { const Model = await import(pathToFileURL(ROOT + Page.Seed.model)); w.localStorage.setItem(Page.Seed.key, JSON.stringify(Page.Seed.make(Model))); }
 const { Mount } = await import(pathToFileURL(ROOT + Page.Card));
 const Mod = await import(pathToFileURL(ROOT + Page.Outliner));
 const Hub = Mount(w.document.getElementById("Card"), { ...Page.Opts, docked: true });
@@ -207,6 +210,48 @@ await step("card edits re-render the outliner", async () => {
   expect(qa(".ol-card").length === 1, "still one card");
   if (!Undo && !Seg) console.log("   (nothing to edit)");
   else console.log(`   outliner ${OL().innerHTML === Before ? "unchanged (edit outside the tree)" : "re-rendered"}`);
+});
+
+if (Only === "bakeset") await step("bake set: parts tree, toggles, own map queue, add part, per-part bake progress", async () => {
+  const S = Hub.State, B = Hub.Model;
+  Out.State.Query = ""; Out.State.Filters.clear();
+  for (const Id of ["set", "cat:Body", "cat:Clothing", "cat:Props"]) Out.State.Expanded[Id] = true;
+  Out.Render();
+  if (S.P.set?.template !== "outfit" || S.P.set.parts.length !== 12) Hub.UseTarget("set:outfit");   // earlier steps click every row, Targets included
+  expect(S.P.set?.parts.length === 12, "outfit template loaded");
+  for (const C of B.PART_CATEGORIES) expect(RowById(`cat:${C}`), `category row ${C}`);
+  const Jacket = S.P.set.parts.find((P) => P.kind === "jacket");
+  click(RowById(`part:${Jacket.id}`)); await sleep(5);
+  expect(S.Part === Jacket.id && w.document.querySelector(`#Card [data-editor="part:${Jacket.id}"]`), "part opens its editor in the card");
+  click(q(`[data-act="part-toggle"][data-id="part:${Jacket.id}"]`)); await sleep(5);
+  expect(!B.FindPart(S.P, Jacket.id).enabled, "part disabled from the tree");
+  click(q(`[data-act="part-toggle"][data-id="part:${Jacket.id}"]`)); await sleep(5);
+  click(q(`[data-act="ol-expand"][data-id="part:${Jacket.id}"]`)); await sleep(5);
+  click(q(`[data-act="pmap-toggle"][data-id="pmap:${Jacket.id}:ao"]`)); await sleep(5);
+  const J = B.FindPart(S.P, Jacket.id);
+  expect(J.maps && !J.maps.includes("ao") && B.FindPart(S.P, S.P.set.parts[0].id).maps === null, "own queue on the jacket only");
+  click(q(`[data-act="cat-toggle"][data-id="cat:Props"]`)); await sleep(5);
+  expect(S.P.set.parts.filter((P) => B.KIND[P.kind].Category === "Props").every((P) => !P.enabled), "props category off");
+  click(q(`[data-act="cat-toggle"][data-id="cat:Props"]`)); await sleep(5);
+  const Opt = q('.mi-dd-opt[data-act="part-add"][data-value="hat"]');
+  Opt.closest("details").open = true; click(Opt); await sleep(5);
+  expect(S.P.set.parts.length === 13 && S.P.set.parts.at(-1).name === "Hat 2" && S.Part === S.P.set.parts.at(-1).id, "add part from the outliner dropdown");
+  Hub.Bake(); await sleep(250);
+  expect(S.Run && S.Run.Parts.length === 13, "bake queues every enabled part");
+  expect(qa(".ol-badge").some((B) => /%$/.test(B.textContent)), "running part shows its own progress");
+  for (let i = 0; i < 300 && S.Run; i++) await sleep(100);
+  expect(!S.Run && qa(".ol-badge").filter((B) => B.textContent === "READY").length >= 12, `parts ready after the bake (${S.Run ? "still running" : qa(".ol-badge").map((B) => B.textContent).join(",")})`);
+  Hub.OpenPart(J.id); await sleep(5);
+  const Res = w.document.querySelector('#Card .mi-dd-opt[data-act="part-res"][data-value="1024"]');
+  Res.closest("details").open = true; click(Res); await sleep(5);
+  expect(B.FindPart(S.P, J.id).resolution === 1024, "jacket resolution from its dropdown");
+  expect(Hub.StaleParts().length >= 1 && Hub.StaleParts().length < 13, `only some parts stale (${Hub.StaleParts().length})`);
+  const Stale = w.document.querySelector('#Card [data-act="bake-stale"]');
+  expect(Stale, "stale-only button");
+  click(Stale); await sleep(30);
+  expect(S.Run && S.Run.Parts.length === Hub.StaleParts().length, "stale-only bake runs just those parts");
+  for (let i = 0; i < 300 && S.Run; i++) await sleep(100);
+  expect(!Hub.StaleParts().length, "all fresh again");
 });
 
 console.log(`\n${passed} passed, ${errors.length ? "with errors" : "0 errors"}`);

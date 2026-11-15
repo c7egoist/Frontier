@@ -1,6 +1,6 @@
 # Pattern / Stamp Studio card
 
-This is the inspector of TextureStudio's **Pattern Studio** (seamless tiles) and **Stamp Studio** (PBR decals), rebuilt as a **single card** in the Project Zero style. It uses the same language as the [Material card](../MaterialInspector/README.md). In the workspace page, the card sits beside an outliner and a **live SVG viewport** (see below).
+This is the inspector of TextureStudio's **Pattern Studio** (seamless tiles) and **Stamp Studio** (PBR decals), rebuilt as a **single card** in the Project Zero style. It uses the same language as the [Material card](../MaterialInspector/README.md). In the workspace page, the card sits beside its layer outliner (outliner · card; there is no viewport).
 
 ```
 python3 Experimental/ArtworkInspector/Serve.py        # http://0.0.0.0:8098/  (?mode=pattern | ?mode=stamp)
@@ -10,36 +10,20 @@ The two studios share one card. The dock bar above it (Material · Pattern · St
 
 ## Screenshots
 
-| Pattern workspace | Stamp workspace (On surface view) |
+| Pattern — Shape dropdown open | Stamp |
 | --- | --- |
-| ![Pattern — outliner, SVG viewport, card](Screenshots/pattern.png) | ![Stamp — outliner, SVG viewport on a surface, card](Screenshots/stamp.png) |
+| ![Pattern — outliner and card, the motif Shape dropdown open with engine-drawn glyphs](Screenshots/pattern.png) | ![Stamp — outliner and card](Screenshots/stamp.png) |
 
-![Pattern viewport — Repeat 3×3 view with the Save menu open](Screenshots/pattern-repeat.png)
+## Dropdowns
 
-## Workspace viewport (`ArtworkStage.js`)
+Every pick list in the card is a Project Zero dropdown (`CardKit.Dropdown`), not a chip grid:
 
-The page uses the shared layout: outliner · **viewport** · card. The viewport has one header bar, a live SVG artboard and one footer bar. It is the decluttered version of TextureStudio's `ArtworkStackWorkspace` stage. The original had two header bands, rulers and a hint footer.
+- **Shape** (motif primitive): each option has a 16 px glyph drawn by the engine itself (`ArtworkModel.MotifGlyph`, cached).
+- **Blend mode**, with a one-word hint per mode (darkens, lightens, glows…).
+- **Surface finish**, with a gloss / metal swatch and its roughness · metal · height.
+- **Add channel**, **starter library** (grouped, filterable) and every modifier option with more than four values.
 
-| TextureStudio | This viewport |
-| --- | --- |
-| Header band 1: eyebrow, status, scene icon, name, badge, resolution combo. | **Header, left:** mode glyph, editable name (with a small mode caption above it), PATTERN / STAMP badge, resolution. |
-| Header band 2: 14 vector tools, *More tools* ▾ (with Grid / Axes / Snap), a 14-entry view select, undo / redo, Save ▾, Send to Material, Send to Paint. | **Header, right:** undo · redo │ **Save ▾** (save project `.pattern.json` / `.stamp.json`, open project, export `.svg`, export `.png` at the document resolution, copy SVG) │ **Send to Material** (Pattern only) · **Send to Paint**. Button labels collapse to icons when the viewport is narrow. |
-| Tools in the header band. | A floating **tool rail** on the canvas: Select · Shape ▾ (circle, rectangle, diamond, triangle, hexagon, star) · Text · Gradient wash · Pan. |
-| Rulers, PBR raster overlay, zoom − % + Fit over the stage. | The artboard is the document's own SVG (`artworkDocumentLayersSvg`, the markup TextureStudio draws). It redraws on every edit from the card or outliner, including during slider drags. The selected layer gets amber corner brackets and a name tag, with no outline drawn over the artwork. |
-| Footer: "Marquee to select · Shift constrain · Alt centred resize · Space pan" plus "N selected". | **Footer:** key hints · the selected layer and its instance count (or a status message) │ view segment │ − zoom + · Fit. |
-
-**Views:**
-
-- **Pattern:** *Tile*, or *Repeat 3×3*, which shows the eight neighbouring tiles dimmed so the seam can be checked.
-- **Stamp:** *Decal* (on a transparency checker), or *On surface*, which shows the decal on a grained ground.
-
-**Interaction:**
-
-- Click a layer on the artboard to select it, and drag to move it. Shift locks the drag to one axis. A drag is a single undo step.
-- The Shape, Text and Gradient tools place a new layer where you click, then return to Select.
-- Wheel zooms around the cursor. Pan with the middle button, the Pan tool, or by holding Space.
-- Keys: V select, R shape (press again to cycle shapes), T text, G gradient, H pan, F fit, + / − zoom, Esc back to Select.
-- *Send to …* writes a `Frontier.Handoff` record (the SVG plus its name) to local storage for the target workspace to pick up.
+Short 2–4 way toggles (gradient source, mask mode, small modifier options) stay segments. The list opens below the button (above it near the bottom of the window), is never clipped by the card, and works from the keyboard: ↓ / ↑ open and move, Home / End, Enter, Esc, and typing filters lists longer than ten.
 
 ## What changed from the TextureStudio inspector
 
@@ -48,7 +32,7 @@ The page uses the shared layout: outliner · **viewport** · card. The viewport 
 | Instances / Scale Span / Coverage trio. | **Instances** (stacked per layer, plus evaluation time), **Coverage** (motif area, excluding the ground), and an **edge** caption: seam wraps for patterns; margin or *clipped* for stamps, which turns red when a decal crosses its border. **Palette** shows the distinct authored colours and their luminance contrast, and warns below 25 %. |
 | Long always-open sections: transform, fill, stroke, PBR (22 sliders), mask, modifiers, ground. | One row per property with a live readout (Shape, Fill, Outline, Placement, Blend, Surface, Mask). One row opens at a time. |
 | Fill and stroke sources as dropdowns with separate stop editors. | Solid · Linear · Radial segment, a stop strip (2–12 stops) and angle. |
-| 22 PBR sliders shown at once. | Finish chips (ink, cotton, wool, ceramic, foil, rubber), then only the channels in use. `+ Channel` adds others; × removes one. |
+| 22 PBR sliders shown at once. | A finish dropdown (ink, cotton, wool, ceramic, foil, rubber), then only the channels in use. `+ Channel` adds others; × removes one. |
 | Modifier cards with every field. | A modifier list with a bypass dot and a one-line readout (for example "Grid 5×5" or "WORLEY · 0.40–1.60×"). One editor opens at a time, with reorder, remove and a dice button for seeds. |
 
 ## Card anatomy
@@ -83,6 +67,6 @@ node Experimental/ArtworkInspector/Scripts/CheckArtworkInspector.mjs
 JSDOM_DIR=/tmp/smoke node Experimental/ArtworkInspector/Scripts/SmokeArtworkInspector.mjs   # npm i --prefix /tmp/smoke jsdom@25
 ```
 
-The smoke test also mounts `ArtworkStage.js` and drives it: live redraw, Repeat 3×3, rename and resolution from the header, placing a star, dragging a layer (one undo step), keys, zoom / Fit, the Save menu, Send to Paint, and Open project.
+The smoke test picks every dropdown the way a user does (open, click the option, check it closes): starter library, shape, blend, finish and add channel.
 
 If `TS_DIR` points at a TextureStudio checkout (`…/Experimental/TextureStudio`), the check also confirms the copied engine files are unchanged.

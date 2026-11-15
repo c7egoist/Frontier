@@ -9,7 +9,7 @@
 //   Mount(Host, { brush, tool, pad }) → Hub { State, Brush(), SetValue(), Select(), Section(), Tool(), Studio(), TogglePad(), Pad, Render }
 
 import { icon } from "../MaterialInspector/Icons.js";
-import { Esc, Knob, ColourField, Stops, SwitchRow, Toggle, Segments, Clamp, Pct, Fixed, SyncSiblings, Download, History } from "../MaterialInspector/CardKit.js";
+import { Esc, Knob, ColourField, Stops, SwitchRow, Toggle, Segments, Dropdown, Clamp, Pct, Fixed, SyncSiblings, Download, History } from "../MaterialInspector/CardKit.js";
 import * as M from "./BrushModel.js";
 import { TOOLS, TOOL, CreateTools, SetToolValue, VisibleToolFields, ERASERS, STUDIOS, TOOL_COLOURS, PALETTE, ToolChanged, ToolChangedBySection, SectionGroups, ToolDefault } from "./ToolModel.js";
 import { MountViewport } from "../MaterialInspector/Viewport.js";
@@ -243,20 +243,26 @@ export function Mount(Host, Options = {}) {
   }
   const MiniCurve = (P) => `<path d="${Array.from({ length: 17 }, (_, I) => `${I ? "L" : "M"}${(2 + (I / 16) * 20).toFixed(1)} ${(14 - sampleCurve(P, I / 16) * 12).toFixed(1)}`).join(" ")}" fill="none" stroke="currentColor" stroke-width="1.5"/>`;
 
+  // Shape / grain source: a large preview of the current source beside a dropdown of every source (with thumbnails).
+  const SourcePick = (Bind, List, Value, Thumb, Label2, Kind) => {
+    const Cur = List.find((S) => S.Id === Value) || List[0];
+    return `<div class="bs-source-pick ${Kind}"><img class="bs-source-big" alt="${Esc(Cur.Label)}" src="${Thumb(Cur.Id)}">${Dropdown("set", List.map((S) => [S.Label, S.Id, `<img alt="" src="${Thumb(S.Id)}">`]), Value, { Label: Label2, Extra: `data-bind="${Bind}"`, Class: `bs-dd-thumbs ${Kind}` })}</div>`;
+  };
+
   // One field → HTML.  `Value` read from the right scope by the caller.
   function FieldHtml(F, Value, Bind, Edited = false) {
     switch (F.T) {
       case "slider": return Knob({ Bind, Label: F.L, Value, Min: F.Min, Max: F.Max, Step: F.Step, Unit: F.Unit, Hint: F.Hint, Tools: ResetBtn(Bind, Edited) }).replace('class="mi-knob"', `class="mi-knob ${Edited ? "edited" : ""}"`);
       case "switch": return `<div class="bs-switch ${Edited ? "edited" : ""}">${SwitchRow("toggle", Value, F.L, F.Hint, `data-bind="${Bind}"`)}${ResetBtn(Bind, Edited)}</div>`;
-      case "seg": return `<div class="bs-field">${Label(F.L, F.Hint, Bind, Edited)}${Segments("set", F.Opts.map((O) => [F.Labels?.[O] || O, O]), Value, { Label: F.L, Extra: `data-bind="${Bind}"` })}</div>`;
-      case "select": return `<div class="bs-field">${Label(F.L, F.Hint, Bind, Edited)}<select class="bs-select" data-bind="${Bind}" data-fid="${Bind}" aria-label="${Esc(F.L)}">${F.Opts.map((O) => `<option value="${Esc(O)}" ${O === Value ? "selected" : ""}>${Esc(F.Labels?.[O] || O)}</option>`).join("")}</select></div>`;
+      case "seg": return `<div class="bs-field">${Label(F.L, F.Hint, Bind, Edited)}${(F.Opts.length > 4 ? Dropdown : Segments)("set", F.Opts.map((O) => [F.Labels?.[O] || O, O]), Value, { Label: F.L, Extra: `data-bind="${Bind}"` })}</div>`;
+      case "select": return `<div class="bs-field">${Label(F.L, F.Hint, Bind, Edited)}${Dropdown("set", F.Opts.map((O) => [F.Labels?.[O] || O, O]), Value, { Label: F.L, Extra: `data-bind="${Bind}"`, Fid: Bind })}</div>`;
       case "colour": return `<div class="bs-field">${Label(F.L, F.Hint, Bind, Edited)}${ColourField(Bind, F.L, Value, "")}</div>`;
       case "curve": return CurveHtml(Bind, Value, F.L, Edited);
-      case "shape": return `<div class="bs-field">${Label(F.L, "", Bind, Edited)}<div class="bs-source-grid" role="radiogroup" aria-label="Shape source">${M.SHAPES.map((S) => `<button type="button" role="radio" aria-checked="${S.Id === Value}" class="bs-source ${S.Id === Value ? "active" : ""}" data-act="set" data-bind="${Bind}" data-value="${S.Id}" title="${Esc(S.Label)}"><img alt="" src="${ShapeThumb(S.Id)}"><span>${Esc(S.Label)}</span></button>`).join("")}</div></div>`;
-      case "grain": return `<div class="bs-field">${Label(F.L, "", Bind, Edited)}<div class="bs-source-grid" role="radiogroup" aria-label="Grain source">${M.GRAINS.map((S) => `<button type="button" role="radio" aria-checked="${S.Id === Value}" class="bs-source grain ${S.Id === Value ? "active" : ""}" data-act="set" data-bind="${Bind}" data-value="${S.Id}" title="${Esc(S.Label)}"><img alt="" src="${GrainThumb(S.Id)}"><span>${Esc(S.Label)}</span></button>`).join("")}</div></div>`;
-      case "render": return `<div class="bs-render-list" role="radiogroup" aria-label="Rendering mode">${M.RENDER_MODES.map((R, I) => `<button type="button" role="radio" aria-checked="${R.Id === Value}" class="bs-render ${R.Id === Value ? "active" : ""}" data-act="set" data-bind="${Bind}" data-value="${R.Id}"><i class="bs-render-art m${I}"></i><span><b>${Esc(R.Label)}</b><small>${Esc(R.Hint)}</small></span></button>`).join("")}</div>`;
+      case "shape": return `<div class="bs-field">${Label(F.L, "", Bind, Edited)}${SourcePick(Bind, M.SHAPES, Value, ShapeThumb, "Shape source", "")}</div>`;
+      case "grain": return `<div class="bs-field">${Label(F.L, "", Bind, Edited)}${SourcePick(Bind, M.GRAINS, Value, GrainThumb, "Grain source", "grain")}</div>`;
+      case "render": return `<div class="bs-field">${Label(F.L || "Rendering mode", "", Bind, Edited)}${Dropdown("set", M.RENDER_MODES.map((R, I) => [R.Label, R.Id, `<i class="bs-render-art m${I}"></i>`, R.Hint]), Value, { Label: "Rendering mode", Extra: `data-bind="${Bind}"`, Class: "bs-dd-render", Search: false })}</div>`;
+      case "gradient": return `<div class="bs-field">${Label(F.L, "", Bind, Edited)}${Dropdown("set", M.COLOUR_GRADIENT_PRESETS.map((G) => [G.label, G.id, `<i class="bs-dd-grad" style="background:linear-gradient(90deg, ${G.stops.join(", ")})"></i>`, G.sub || ""]), Value, { Label: F.L, Extra: `data-bind="${Bind}"` })}</div>`;
       case "channels": return `<div class="bs-field">${Label(F.L, "", Bind, Edited)}<div class="bs-channels">${M.CHANNELS.map((C) => `<button type="button" class="bs-chan ${Value.includes(C.Id) ? "on" : ""}" data-act="chan" data-bind="${Bind}" data-value="${C.Id}" aria-pressed="${Value.includes(C.Id)}"><i style="background:${C.Colour}"></i>${Esc(C.Label)}</button>`).join("")}</div></div>`;
-      case "gradient": return `<div class="bs-field">${Label(F.L, "", Bind, Edited)}<div class="bs-gradients">${M.COLOUR_GRADIENT_PRESETS.map((G) => `<button type="button" class="bs-grad ${G.id === Value ? "active" : ""}" data-act="set" data-bind="${Bind}" data-value="${G.id}" title="${Esc(G.label)} — ${Esc(G.sub || "")}"><i style="background:linear-gradient(90deg, ${G.stops.join(", ")})"></i><span>${Esc(G.label)}</span></button>`).join("")}</div></div>`;
       case "palette": case "stops": return `<div class="bs-field">${Label(F.L, "", Bind, Edited)}${Stops(Bind, Value, 8, 2)}</div>`;
       case "text": return `<div class="bs-field">${Label(F.L, "", Bind, Edited)}<textarea class="bs-text" data-bind="${Bind}" data-fid="${Bind}" rows="2" spellcheck="false" aria-label="${Esc(F.L)}">${Esc(Value)}</textarea></div>`;
       default: return "";

@@ -15,7 +15,7 @@ http://localhost:8097/Experimental/BrushStudio/
 
 ## Layout
 
-The page shares the workspace layout with Pattern, Stamp and Baking: library or outliner · viewport · card. It uses the same dock nav pill, 22 px card radius, DM Sans 300 type and the shared CardKit controls.
+The page is library · viewport · card. It is the only workspace with a viewport; Material, Pattern, Stamp and Baking are outliner · card. It uses the same dock nav pill, 22 px card radius, DM Sans 300 type and the shared CardKit controls.
 
 There is **no amber on this page**. Each tool icon and each studio-section icon has its own colour, drawn on the icon itself with no fill behind it. Edited marks and focus rings are blue.
 
@@ -49,6 +49,12 @@ Responsive layout:
 - **Below 1240 px:** the viewport spans the top and the library sits next to the studio.
 - **Below 820 px:** everything stacks.
 
+## Dropdowns
+
+Pick lists are Project Zero dropdowns (`CardKit.Dropdown`): **Shape source** and **Grain source** show a large preview of the current source beside a dropdown of every source with a thumbnail (filterable). Rendering mode, colour gradients and every option list longer than four are dropdowns too. Short toggles stay segments.
+
+![Shape section — the shape source dropdown with thumbnails](Screenshots/shape-dropdown.png)
+
 ## Brush Studio sections (Procreate's Brush Studio, plus texture painting)
 
 The Paint tool's studio starts with a **Colour** section (primary / secondary discs, swatches, symmetry and blend), followed by the brush sections:
@@ -60,7 +66,7 @@ The Paint tool's studio starts with a **Colour** section (primary / secondary di
 | Taper | pressure taper, touch taper (with linked ends), size / opacity / pressure / tip, tip animation, classic taper |
 | Shape | 16 procedural sources, scatter / rotation / count / jitter / flips / azimuth, roundness (+ graph), tip falloff, filtering |
 | Grain | 12 procedural grains, moving or texturized, scale / zoom / rotation / depth / offset / blend, filtering |
-| Rendering | 6 modes (light → heavy glaze, uniform / intense blending), flow, wet edges, burnt edges, blend mode, luminance |
+| Rendering | 6 modes in a dropdown (light → heavy glaze, uniform / intense blending), flow, wet edges, burnt edges, blend mode, luminance |
 | Wet mix | dilution, charge, attack, pull, grade, blur (+ jitter), wetness jitter |
 | Colour dynamics | stroke gradients and multicolour modes, stamp and stroke HSB jitter, colour pressure and tilt, opacity over the stroke, hue over the stroke |
 | Dynamics | speed → size / opacity, size / opacity jitter, over-the-stroke behaviour |

@@ -51,6 +51,14 @@ const click = (el, detail = 1) => { if (!el) throw new Error("click target missi
 const key = (k, opts = {}, target = w.document.body) => target.dispatchEvent(new w.KeyboardEvent("keydown", { key: k, bubbles: true, ...opts }));
 const fire = (el, type) => el.dispatchEvent(new w.Event(type, { bubbles: true }));
 const setVal = (el, v, final = true) => { if (!el) throw new Error("input missing"); el.value = v; fire(el, "input"); if (final) fire(el, "change"); };
+// Dropdowns (CardKit.Dropdown): open the <details>, then click the option — the same path a user takes.
+const pick = (act, value, root = w.document) => {
+  const opt = q(`.mi-dd-opt[data-act="${act}"][data-value="${CSS.escape(String(value))}"]`, root);
+  if (!opt) throw new Error(`dropdown ${act} has no option ${value}`);
+  const dd = opt.closest("details.mi-dd"); dd.open = true; click(dd.querySelector("summary"));
+  click(opt);
+};
+const options = (act, root = w.document) => qa(`.mi-dd-opt[data-act="${act}"]`, root).map((o) => o.dataset.value);
 const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
 const step = async (name, fn) => { const before = errors.length; try { await fn(); } catch (e) { errors.push(`[${name}] threw: ${e.stack}`); } console.log(`${errors.length > before ? "FAIL" : " ok "} ${name}`); };
 
@@ -141,8 +149,10 @@ await step("field source: generators, knobs, stops, camo palette, direct", async
   let src = M.ChannelSource(St.P, layer(), "roughness");
   expect(src.Mode === "field" && src.Generator, "field declared");
   expect(q('canvas[data-preview="roughness"]')._last, "preview painted");
-  for (const g of M.GeneratorDefinitions) { click(q(`[data-act="gen"][data-gen="${g.identity}"]`)); }
-  click(q('[data-act="gen"][data-gen="cells"]'));
+  expect(options("gen").length === M.GeneratorDefinitions.length, "every generator in the Field dropdown");
+  for (const g of M.GeneratorDefinitions) pick("gen", g.identity);
+  pick("gen", "cells");
+  expect(q('.mi-dd-opt[data-act="gen"]').closest("details").querySelector(".mi-dd-val").textContent.includes("Cellular"), "dropdown shows the current generator");
   expect(St.P.Authoring.Generators.find((g) => g.Identity === src.Generator).Procedure === "cells", "generator switched");
   setVal(q('input[type="range"][data-bind="field:scale"]'), "20");
   expect(St.P.Authoring.Inputs[`field:${src.Generator}:scale`] === 20, "scale knob");
@@ -154,7 +164,7 @@ await step("field source: generators, knobs, stops, camo palette, direct", async
   expect(M.ChannelSource(St.P, layer(), "roughness").Stops[0] === "#112233", "stop edited");
   click(q('[data-act="stop-remove"]'));
   expect(M.ChannelSource(St.P, layer(), "roughness").Stops.length === 2, "stop removed");
-  click(q('[data-act="gen"][data-gen="camouflage"]'));
+  pick("gen", "camouflage");
   setVal(q('[data-bind="camo:2"]'), "#445566");
   expect(St.P.Authoring.Inputs[`field:${src.Generator}:colour2`] === "#445566", "camo palette");
   click(q('[data-act="direct"]'));
@@ -249,7 +259,7 @@ await step("undo / redo", async () => {
 
 await step("library switch (candy paint: flakes), per-material storage", async () => {
   const derezName = St.P.name;
-  setVal(q('[data-act="library"]'), "candy-crimson");
+  pick("library", "candy-crimson");
   expect(St.P.id === "candy-crimson" && qa(".mi-stratum").length === 3, "3 strata");
   const flakes = St.P.Authoring.Layers.find((l) => l.Model === "flakes");
   click(q(`[data-act="layer"][data-layer="${flakes.Identity}"]`));
@@ -263,11 +273,11 @@ await step("library switch (candy paint: flakes), per-material storage", async (
   expect(St.P.flakes === 0.9, "flake density");
   open("colour");
   expect(M.ChannelSource(St.P, layer(), "colour").Mode === "radial", "flake colour radial ramp");
-  setVal(q('[data-act="library"]'), "derez-lattice-dissolve-controlvehicle");
+  pick("library", "derez-lattice-dissolve-controlvehicle");
   expect(St.P.name === derezName, "derez restored from storage");
-  setVal(q('[data-act="library"]'), "candy-crimson");
+  pick("library", "candy-crimson");
   expect(St.P.flakes === 0.9 && St.P.colors.length === 6, "candy edits persisted");
-  for (const e of M.CATALOG) { setVal(q('[data-act="library"]'), e.id); expect(St.P.id === e.id, e.id); expect(q(".mi-editor"), "editor open on load"); }
+  for (const e of M.CATALOG) { pick("library", e.id); expect(St.P.id === e.id, e.id); expect(q(".mi-editor"), "editor open on load"); }
   click(q('[data-act="reset"]'));
   expect(St.P.id === M.CATALOG.at(-1).id, "reset keeps material");
 });

@@ -57,12 +57,94 @@ export function Segments(Act, Options, Current, { Small = true, Fill = true, Lab
   </div>`;
 }
 
-// Chip grid choice (more than ~4 options).
-export function Chips(Act, Options, Current, { Columns = 3, Label = "", Extra = "" } = {}) {
-  return `<div class="mi-chip-grid" style="--cols:${Columns}" role="radiogroup" aria-label="${Esc(Label)}">
-    ${Options.map(([L, V, Ic]) => `<button type="button" role="radio" aria-checked="${String(V) === String(Current)}" class="mi-chip ${String(V) === String(Current) ? "active" : ""}" data-act="${Act}" data-value="${Esc(V)}" ${Extra} title="${Esc(L)}">${Ic || ""}${Esc(L)}</button>`).join("")}
-  </div>`;
+// Pick lists — anything with more than ~4 options — are a dropdown, not a chip grid (shape, blend, finish, field generator,
+// starter library, brush shape source, …).  Chips() keeps its old signature so every caller became a dropdown at once.
+export function Chips(Act, Options, Current, { Label = "", Extra = "" } = {}) {
+  return Dropdown(Act, Options, Current, { Label, Extra });
 }
+
+// Project Zero dropdown.  Options: [Label, Value, Lead?, Hint?] or { Group: "Heading" }.  Lead is an icon name or raw
+// HTML (a swatch, a glyph, a thumbnail).  Each option is a button carrying data-act=Act data-value=Value (+ Extra), so a
+// card's existing click delegation handles the pick unchanged.  Open / close, outside-click, keyboard (↑ ↓ Home End
+// Enter Esc, type to filter) and viewport-safe placement live in one document-level installer (InstallDropdowns).
+export function Dropdown(Act, Options, Current, { Label = "", Extra = "", Placeholder = "Choose…", Search, Class = "", Disabled = false, Fid = "" } = {}) {
+  const Items = Options.filter((O) => Array.isArray(O));
+  const Cur = Items.find(([, V]) => String(V) === String(Current));
+  const Lead = (L) => (!L ? "" : `<span class="mi-dd-lead">${String(L).trim().startsWith("<") ? L : icon(L, 13)}</span>`);
+  const Filter = Search ?? Items.length > 10;
+  const Body = Options.map((O) => {
+    if (!Array.isArray(O)) return `<div class="mi-dd-group" role="presentation">${Esc(O.Group)}</div>`;
+    const [L, V, Ld, Hint] = O, On = String(V) === String(Current);
+    return `<button type="button" role="option" aria-selected="${On}" class="mi-dd-opt ${On ? "active" : ""}" data-act="${Act}" data-value="${Esc(V)}" ${Extra} data-label="${Esc(String(L).toLowerCase())} ${Esc(String(Hint || "").toLowerCase())}">${Lead(Ld)}<span class="mi-dd-text">${Esc(L)}${Hint ? `<small>${Esc(Hint)}</small>` : ""}</span>${On ? `<span class="mi-dd-tick">${icon("check", 12)}</span>` : ""}</button>`;
+  }).join("");
+  return `<details class="mi-dd ${Class}" data-dd ${Disabled ? "data-disabled" : ""}>
+    <summary class="mi-dd-btn" ${Fid ? `data-fid="${Esc(Fid)}"` : ""} aria-label="${Esc(Label)}${Cur ? `: ${Esc(Cur[0])}` : ""}" aria-haspopup="listbox">${Cur ? Lead(Cur[2]) : ""}<span class="mi-dd-val">${Esc(Cur ? Cur[0] : Placeholder)}</span>${Cur?.[3] ? `<small class="mi-dd-hint">${Esc(Cur[3])}</small>` : ""}<span class="mi-dd-chev">${icon("down", 12)}</span></summary>
+    <div class="mi-dd-list" role="listbox" aria-label="${Esc(Label)}">${Filter ? `<input class="mi-dd-search" type="search" placeholder="Filter ${Items.length}…" aria-label="Filter ${Esc(Label)}" data-dd-search>` : ""}<div class="mi-dd-scroll">${Body}</div><p class="mi-dd-none" hidden>No match</p></div>
+  </details>`;
+}
+
+export function InstallDropdowns(Doc = globalThis.document) {
+  if (!Doc || Doc.__MiDropdowns) return;
+  Doc.__MiDropdowns = true;
+  const Win = Doc.defaultView || globalThis;
+  const OpenOnes = () => [...Doc.querySelectorAll("details.mi-dd[open]")];
+  const Close = (D, Focus = false) => { if (!D?.open) return; D.open = false; if (Focus) D.querySelector("summary")?.focus({ preventScroll: true }); };
+  const Opts = (D) => [...D.querySelectorAll(".mi-dd-opt")].filter((B) => !B.hidden);
+  // Fixed placement so a list is never clipped by a scrolling card body; flips above when there is no room below.
+  const Place = (D) => {
+    const List = D.querySelector(".mi-dd-list"), R = D.querySelector("summary").getBoundingClientRect();
+    if (!List || !R.width) return;
+    const H = Win.innerHeight || 800, Below = H - R.bottom - 12, Above = R.top - 12, Max = Math.max(160, Math.min(340, Math.max(Below, Above)));
+    const Up = Below < Math.min(240, List.scrollHeight) && Above > Below;
+    Object.assign(List.style, { position: "fixed", left: `${Math.round(Math.min(R.left, (Win.innerWidth || 1200) - Math.max(R.width, 200) - 8))}px`, minWidth: `${Math.round(Math.max(R.width, 200))}px`, maxHeight: `${Math.round(Max)}px`,
+      top: Up ? "" : `${Math.round(R.bottom + 6)}px`, bottom: Up ? `${Math.round(H - R.top + 6)}px` : "" });
+    D.classList.toggle("up", Up);
+  };
+  Doc.addEventListener("toggle", (E) => {
+    const D = E.target;
+    if (!D.matches?.("details.mi-dd") || !D.open) return;
+    if (D.hasAttribute("data-disabled")) { D.open = false; return; }
+    for (const O of OpenOnes()) if (O !== D) O.open = false;
+    Place(D);
+    const Cur = D.querySelector(".mi-dd-opt.active") || Opts(D)[0];
+    Cur?.scrollIntoView?.({ block: "nearest" });
+    (D.querySelector("[data-dd-search]") || Cur)?.focus({ preventScroll: true });
+  }, true);
+  Doc.addEventListener("click", (E) => {
+    const D = E.target.closest?.("details.mi-dd");
+    for (const O of OpenOnes()) if (O !== D) O.open = false;
+    if (D && E.target.closest(".mi-dd-opt")) Win.setTimeout(() => { if (D.isConnected) Close(D); }, 0);
+  });
+  Doc.addEventListener("input", (E) => {
+    if (!E.target.matches?.("[data-dd-search]")) return;
+    const D = E.target.closest("details.mi-dd"), Q = E.target.value.trim().toLowerCase();
+    let Shown = 0;
+    for (const B of D.querySelectorAll(".mi-dd-opt")) { B.hidden = !!Q && !B.dataset.label.includes(Q); Shown += !B.hidden; }
+    for (const G of D.querySelectorAll(".mi-dd-group")) G.hidden = !!Q;
+    D.querySelector(".mi-dd-none").hidden = Shown > 0;
+    E.stopPropagation();
+  }, true);
+  Doc.addEventListener("keydown", (E) => {
+    const D = E.target.closest?.("details.mi-dd");
+    if (!D) return;
+    const InList = !!E.target.closest(".mi-dd-list");
+    if (!D.open) { if (E.key === "ArrowDown" || E.key === "ArrowUp") { E.preventDefault(); D.open = true; } return; }
+    const List = Opts(D), At = List.indexOf(Doc.activeElement);
+    const Go = (I) => { const B = List[Math.max(0, Math.min(List.length - 1, I))]; B?.focus({ preventScroll: true }); B?.scrollIntoView?.({ block: "nearest" }); };
+    if (E.key === "Escape") { E.preventDefault(); E.stopPropagation(); Close(D, true); }
+    else if (E.key === "ArrowDown") { E.preventDefault(); Go(At + 1); }
+    else if (E.key === "ArrowUp") { E.preventDefault(); if (At <= 0 && D.querySelector("[data-dd-search]")) D.querySelector("[data-dd-search]").focus(); else Go(At - 1); }
+    else if (E.key === "Home" && InList && At > -1) { E.preventDefault(); Go(0); }
+    else if (E.key === "End" && InList && At > -1) { E.preventDefault(); Go(List.length - 1); }
+    else if (E.key === "Enter" && E.target.matches("[data-dd-search]")) { E.preventDefault(); List[0]?.click(); }
+    else if (E.key === "Tab") Close(D);
+    if (InList || D.open) E.stopPropagation();
+  }, true);
+  const Reflow = () => { for (const D of OpenOnes()) Place(D); };
+  Win.addEventListener?.("resize", Reflow);
+  Doc.addEventListener("scroll", (E) => { if (E.target.closest?.(".mi-dd-list")) return; Reflow(); }, true);
+}
+InstallDropdowns();
 
 // ------------------------------------------------------------------------------------------------ statistic tiles
 // A stat tile is label · value · a 10 px meter · one quiet caption.  Meter kinds:

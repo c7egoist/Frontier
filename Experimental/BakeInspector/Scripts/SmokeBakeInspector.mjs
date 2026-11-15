@@ -50,6 +50,14 @@ const click = (el, detail = 1) => { if (!el) throw new Error("click target missi
 const key = (k, opts = {}, target = w.document.body) => target.dispatchEvent(new w.KeyboardEvent("keydown", { key: k, bubbles: true, ...opts }));
 const fire = (el, type) => el.dispatchEvent(new w.Event(type, { bubbles: true }));
 const setVal = (el, v, final = true) => { if (!el) throw new Error("input missing"); el.value = v; fire(el, "input"); if (final) fire(el, "change"); };
+// Dropdowns (CardKit.Dropdown): open the <details>, then click the option — the same path a user takes.
+const pick = (act, value, root = w.document) => {
+  const opt = q(`.mi-dd-opt[data-act="${act}"][data-value="${CSS.escape(String(value))}"]`, root);
+  if (!opt) throw new Error(`dropdown ${act} has no option ${value}`);
+  const dd = opt.closest("details.mi-dd"); dd.open = true; click(dd.querySelector("summary"));
+  click(opt);
+};
+const options = (act, root = w.document) => qa(`.mi-dd-opt[data-act="${act}"]`, root).map((o) => o.dataset.value);
 const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
 const step = async (name, fn) => { if (process.env.TRACE) console.log("> " + name, Math.round(process.memoryUsage().heapUsed / 1e6) + "MB"); const before = errors.length; try { await fn(); } catch (e) { errors.push(`[${name}] threw: ${e.stack}`); } console.log(`${errors.length > before ? "FAIL" : " ok "} ${name}`); };
 
@@ -69,7 +77,7 @@ await step("boot", async () => {
 });
 
 await step("study + sources", async () => {
-  const s = q('[data-act="study"]'); s.value = "torus"; fire(s, "change");
+  pick("study", "torus");
   expect(St.P.studyId === "torus" && q(".bi-name").textContent.includes("Torus"), "study");
   const f = q('[data-act="source"][data-slot="highSource"]');
   Object.defineProperty(f, "files", { value: [{ name: "hero_high.obj", size: 1234 }], configurable: true });
@@ -179,40 +187,6 @@ await step("export + copy + import", async () => {
   expect(q('[data-status]').textContent.includes("Import failed"), "rejects");
 });
 
-await step("workspace stage: header · split · footer", async () => {
-  const { MountBakeStage } = await import(pathToFileURL(ROOT + "BakeStage.js"));
-  const host = w.document.getElementById("Viewport");
-  const Vp = MountBakeStage(host, App);
-  expect(q(".vp-card.bars .vp-top", host) && q(".vp-bottom", host), "header + footer bars");
-  expect(Vp.View === "split" && qa("[data-pane]", host).length === 2, "split view");
-  expect(qa("[data-map]", host).length === St.P.selected.length, "one tile per queued map");
-  const s = q('[data-vp="study"]', host); s.value = "box"; fire(s, "change");
-  expect(St.P.studyId === "box" && q(".bi-name").textContent.includes("Chamfer"), "study from header");
-  const f = q('[data-vp="source"][data-slot="lowSource"]', host);
-  Object.defineProperty(f, "files", { value: [{ name: "crate_low.obj", size: 99 }], configurable: true });
-  fire(f, "change"); expect(St.P.lowSource?.name === "crate_low.obj" && q(".vp-src.custom", host), "low source");
-  expect(q('[data-vp="gpu"]', host).textContent.length > 2, "device pill");
-  click(q('[data-map]', host)); expect(St.Open === q('[data-map]', host).dataset.map, "tile opens the map in the card");
-  click(q('[data-vp-view="3d"]', host)); expect(qa("[data-pane]", host).length === 1 && !q("[data-map]", host), "3D only");
-  click(q('[data-vp-view="2d"]', host)); expect(q('[data-pane="2d"]', host) && !q('[data-pane="3d"]', host), "2D only");
-  click(q('[data-vp="send-paint"]', host)); expect(q('[data-vp="status"]', host).textContent.includes("first"), "send needs a fresh bake");
-  click(q('[data-vp="bake"]', host)); await sleep(30);
-  expect(St.Run && q('[data-vp="bake"]', host).textContent.includes("Cancel"), "bake from header");
-  expect(q('[data-vp="undo"]', host).disabled, "undo locked while baking");
-  for (let i = 0; i < 100 && St.Run; i++) await sleep(100);
-  expect(!St.Run && qa(".bk-tile.done", host).length === St.P.selected.length, "tiles baked");
-  click(q('[data-vp="send-paint"]', host));
-  expect(JSON.parse(w.localStorage.getItem("Frontier.Handoff")).To === "paint", "send to paint");
-  click(q('[data-vp="menu"]', host)); expect(q("[data-menu]", host).classList.contains("open"), "export menu");
-  expect(q('[data-vp="export-map"]', host).disabled, "map PNG waits for a real engine");
-  downloads = [];
-  click(q('[data-vp="export-preset"]', host)); click(q('[data-vp="export-request"]', host));
-  expect(downloads.some((d) => d.endsWith(".bake.json")) && downloads.some((d) => d.endsWith(".bake-request.json")), "exports");
-  click(q('[data-vp="compiler"]', host)); expect(JSON.parse(w.localStorage.getItem("Frontier.Handoff")).To === "geometry-compiler", "GeometryCompiler hand-off");
-  key("b"); await sleep(50); expect(St.Run, "B bakes"); key("Escape"); await sleep(300); expect(!St.Run, "Esc cancels");
-  App.Apply(B.SetValue(St.P, "lowSource", null)); App.Render();
-});
-
 await step("persistence + host bake", async () => {
   const stored = JSON.parse(w.localStorage.getItem("Frontier.BakeInspector.v1"));
   expect(stored.samples === 22, "saved");
@@ -224,6 +198,43 @@ await step("persistence + host bake", async () => {
   click(q('[data-act="bake"]')); await sleep(80);
   expect(got?.surface?.channels.join() === "ao" && St.Result.Device === "WebGPU" && !St.Result.Dry, "host bake");
   expect(stat("state").textContent.includes("WebGPU"), "result caption");
+});
+
+await step("bake set in the card: character template, parts list, output + isolation dropdown, part editor, v2 host bake", async () => {
+  let got = null;
+  w.document.getElementById("Card2").replaceWith(Object.assign(w.document.createElement("div"), { id: "Card3" }));
+  App = Mount(w.document.getElementById("Card3"), { Bake: async (req, { Progress, Jobs }) => { got = req; for (let i = 0; i < Jobs.length; i++) Progress((i + 1) / Jobs.length, `Host · ${Jobs[i].Part} ${Jobs[i].Map}`, i); await sleep(10); return { Device: "WebGPU", Ms: 90 }; } });
+  expect(options("study").includes("set:outfit") && options("study").includes("teapot"), "target dropdown lists bake sets and studies");
+  pick("study", "set:outfit");
+  expect(St.P.set?.parts.length === 12 && q('.bi-name').value === "Ranger", "character set loaded");
+  expect(qa(".bi-part[data-part]").length === 12 && qa(".bi-cat-head").length === 3, "parts grouped body · clothing · props");
+  expect(q('[data-act="bake"]').textContent.includes("12 parts"), "bake button counts parts");
+  click(q('[data-act="part-open"][data-part="p7"]'));
+  expect(q('[data-editor="part:p7"]'), "part editor opens");
+  const name = q('[data-act="part-name"]'); name.value = "Hoodie"; fire(name, "input"); fire(name, "change");
+  expect(B.FindPart(St.P, "p7").name === "Hoodie", "rename part");
+  pick("part-kind", "jacket"); expect(B.FindPart(St.P, "p7").kind === "jacket", "kind dropdown");
+  pick("part-res", "1024"); expect(B.FindPart(St.P, "p7").resolution === 1024, "resolution dropdown");
+  click(q('[data-act="part-follow"]')); click(q('[data-act="part-map"][data-map="thickness"]'));
+  expect(B.PartMaps(St.P, B.FindPart(St.P, "p7")).includes("thickness") && B.FindPart(St.P, "p1").maps === null, "own map queue");
+  const src = q('[data-act="source"][data-slot="highSource"][data-part="p7"]');
+  Object.defineProperty(src, "files", { value: [{ name: "hoodie_hi.obj", size: 2e6 }], configurable: true }); fire(src, "change");
+  expect(B.FindPart(St.P, "p7").highSource?.name === "hoodie_hi.obj" && St.P.highSource === null, "per-part high mesh");
+  click(q('[data-act="set-output"][data-value="udim"]')); expect(St.P.set.output === "udim", "output segment");
+  pick("set-iso", "together"); expect(St.P.set.isolation === "together" && !q('[data-act="part-contact"]'), "isolation dropdown");
+  pick("part-add", "boots"); expect(St.P.set.parts.length === 13 && St.Part === St.P.set.parts.at(-1).id, "add part");
+  click(q('[data-act="part-remove"]')); expect(St.P.set.parts.length === 12, "remove part");
+  click(q('[data-act="part-toggle"][data-part="p12"]')); expect(!B.FindPart(St.P, "p12").enabled && q('[data-act="bake"]').textContent.includes("11 parts"), "skip a part");
+  click(q('[data-act="bake"]')); await sleep(80);
+  expect(got?.schema === "frontier.bake-request.v2" && got.parts.length === 11 && got.parts.find((P) => P.id === "p7").tile && got.set.output === "udim", "v2 request to the host");
+  expect(!St.Run && St.Result.Parts && Object.keys(St.Result.Parts).length === 11 && stat("state").textContent.includes("Fresh"), "fresh after host bake");
+  click(q('[data-act="part-open"][data-part="p7"]')); if (!q('[data-editor="part:p7"]')) click(q('[data-act="part-open"][data-part="p7"]'));
+  pick("part-res", "2048");
+  expect(stat("state").textContent.includes("Stale") && q('[data-act="bake-stale"]'), "one part stale → stale-only offered");
+  got = null; click(q('[data-act="bake-stale"]')); await sleep(80);
+  expect(got.parts.length >= 1 && got.parts.length < 11 && stat("state").textContent.includes("Fresh"), `stale-only bake (${got?.parts.length} parts)`);
+  key("z", { ctrlKey: true }); expect(B.FindPart(St.P, "p7").resolution === 1024, "undo part edit");
+  pick("study", "teapot"); expect(St.P.set === null && q(".bi-sources"), "back to a single study");
 });
 
 console.log(errors.length ? `\n${errors.length} error(s):\n` + errors.join("\n") : "\n0 errors");

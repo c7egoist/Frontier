@@ -91,11 +91,78 @@ await Check("formatters", () => {
   Expect(B.Bytes(1048576) === "1.0 MB" && B.Bytes(2048) === "2 KB" && B.Count(6.7e6) === "6.7 M" && B.Duration(0.141) === "141 ms" && B.Duration(75) === "1 m 15 s", "format");
 });
 
-await Check("workspace stage: every map group has a 2D tile fill, every study a header option", async () => {
-  const Src = readFileSync(ROOT + "BakeStage.js", "utf8");
-  for (const G of B.GROUPS) Expect(Src.includes(`${/[^A-Za-z]/.test(G) ? `"${G}"` : G}:`), `fill for ${G}`);
-  Expect(Src.includes("B.BAKE_STUDY_SHAPES.map"), "study options come from the catalogue");
-  return `${B.GROUPS.length} groups · ${B.BAKE_STUDY_SHAPES.length} studies`;
+// ------------------------------------------------------------------------------------------------ bake sets
+await Check("bake set: outfit template = body parts + clothes + props, single study untouched", () => {
+  const S = B.UseTemplate(B.Create(), "outfit");
+  Expect(S.set.parts.length === 12 && S.set.output === "parts" && S.set.isolation === "name", "template");
+  const Cats = Object.fromEntries(B.PART_CATEGORIES.map((C) => [C, S.set.parts.filter((P) => B.KIND[P.kind].Category === C).length]));
+  Expect(Cats.Body === 4 && Cats.Clothing === 6 && Cats.Props === 2, JSON.stringify(Cats));
+  Expect(new Set(S.set.parts.map((P) => P.id)).size === 12, "unique ids");
+  Expect(B.FindPart(S, "p3").resolution === 256 && B.FindPart(S, "p3").maps.join() === "normalTangent,ao", "eyes: low res, own small queue");
+  Expect(B.Create().set === null && B.Request(B.Create()).schema === "frontier.bake-request.v1", "single study still v1");
+  Expect(B.UseTemplate(S, null).set === null, "back to a single study");
+  return Object.entries(Cats).map(([C, N]) => `${C} ${N}`).join(" · ");
+});
+
+await Check("bake set: estimate sums enabled parts; toggles, categories, add / duplicate / remove", () => {
+  let S = B.UseTemplate(B.Create(), "outfit");
+  const E = B.Estimate(S), Sum = Object.values(E.PerPart).reduce((A, C) => A + C.Rays, 0);
+  Expect(E.Parts === 12 && E.Rays === Sum && E.Jobs === B.Jobs(S).length && E.Files === E.Jobs, "sum over parts");
+  const Off = B.TogglePart(S, "p6"), E2 = B.Estimate(Off);
+  Expect(E2.Parts === 11 && E2.Rays === Sum - E.PerPart.p6.Rays, "disabled part drops out");
+  const NoProps = B.SetCategory(S, "Props", false);
+  Expect(B.EnabledParts(NoProps).every((P) => B.KIND[P.kind].Category !== "Props"), "category off");
+  const { Next, Id } = B.AddPart(S, "hat");
+  Expect(Next.set.parts.length === 13 && B.FindPart(Next, Id).name === "Hat 2", "add numbered part");
+  const D = B.DuplicatePart(Next, Id);
+  Expect(D.Next.set.parts.length === 14 && B.FindPart(D.Next, D.Id).name === "Hat 2 copy", "duplicate");
+  Expect(B.RemovePart(D.Next, D.Id).set.parts.length === 13, "remove");
+  Expect(B.Jobs(S).map((J) => B.KIND[B.FindPart(S, J.Part).kind].Category).join().replace(/(\w+)(,\1)+/g, "$1") === "Body,Clothing,Props", "jobs ordered body → clothing → props");
+  return `${E.Parts} parts · ${E.Jobs} jobs · ${B.Bytes(E.Bytes)} · ${B.Duration(E.Seconds)}`;
+});
+
+await Check("bake set: per-part queue, resolution and cage override the set", () => {
+  let S = B.UseTemplate(B.Create(), "outfit");
+  S = B.TogglePartMap(S, "p6", "ao");
+  Expect(B.PartMaps(S, B.FindPart(S, "p6")).join() === "normalTangent,curvature,height,volumeSdf" && B.FindPart(S, "p1").maps === null, "own queue copies then toggles");
+  S = B.EditPart(S, "p6", { resolution: 1024, cage: { frontDistance: 0.3, rearDistance: 0.05 } });
+  const J = B.FindPart(S, "p6");
+  Expect(B.PartRes(S, J) === 1024 && B.PartCage(S, J, "frontDistance") === 0.3 && B.PartCage(S, B.FindPart(S, "p1"), "frontDistance") === S.frontDistance, "overrides");
+  const R = B.Request(S), RJ = R.parts.find((P) => P.id === "p6");
+  Expect(R.schema === "frontier.bake-request.v2" && RJ.surface.resolution === 1024 && RJ.surface.frontDistance === 0.3 && !RJ.surface.channels.includes("ao"), "request carries overrides");
+  Expect(RJ.surface.files[0] === "ranger_field_jacket_normalTangent.png" && RJ.matchBy === "field_jacket", "per-part files + match-by-name");
+  Expect(B.Normalise({ ...S, set: { ...S.set, parts: [{ id: "p1", kind: "nope", resolution: 333, cage: { frontDistance: 99 } }, { id: "p1", kind: "hat" }] } }).set.parts.map((P) => `${P.id}:${P.kind}:${P.resolution}:${P.cage?.frontDistance}`).join() === "p1:prop:null:0.8,p1x:hat:null:undefined", "normalise parts");
+});
+
+await Check("bake set: atlas and UDIM outputs", () => {
+  const S = B.UseTemplate(B.Create(), "outfit"), A = B.SetSet(S, "output", "atlas"), U = B.SetSet(S, "output", "udim");
+  const EA = B.Estimate(A), Shares = B.EnabledParts(A).reduce((T, P) => T + B.AtlasShare(A, P), 0);
+  Expect(Math.abs(Shares - 1) < 1e-9, "atlas shares sum to 1");
+  const Union = new Set(B.EnabledParts(A).flatMap((P) => B.PartMaps(A, P)).filter((Id) => !B.MAP[Id].isVolume));
+  const Vols = B.EnabledParts(A).filter((P) => B.PartMaps(A, P).includes("volumeSdf")).length;
+  Expect(EA.Files === Union.size + Vols && EA.Bytes === Union.size * 4096 ** 2 * 4 + Vols * 36 ** 3 * 4, `atlas files ${EA.Files}`);
+  Expect(B.Request(A).parts[0].surface.files[0] === "ranger_normalTangent.png" && B.Request(A).set.atlas.resolution === 4096, "atlas request");
+  Expect(B.Request(U).parts.map((P) => P.tile).join() === Array.from({ length: 12 }, (_, I) => 1001 + I).join() && B.Request(U).parts[1].surface.files[0] === "ranger_normalTangent.1002.png", "udim tiles");
+  return `atlas ${EA.Files} files ${B.Bytes(EA.Bytes)}`;
+});
+
+await Check("bake set: staleness is per part (jacket edit leaves the body fresh)", () => {
+  const S = B.UseTemplate(B.Create(), "outfit"), FP = (X, Id) => B.PartFingerprint(X, B.FindPart(X, Id));
+  const T = B.EditPart(S, "p6", { cage: { frontDistance: 0.4, rearDistance: 0.2 } });
+  Expect(FP(S, "p6") !== FP(T, "p6") && FP(S, "p1") === FP(T, "p1"), "only the jacket changes");
+  const NewHigh = B.EditPart(S, "p6", { highSource: { name: "jacket_hi.obj", size: 4e6 } });
+  Expect(FP(S, "p1") !== FP(NewHigh, "p1"), "contact AO: a new jacket mesh re-shades the body");
+  const Iso = B.EditPart(B.EditPart(S, "p1", { contactAo: false }), "p6", { highSource: { name: "jacket_hi.obj", size: 4e6 } });
+  Expect(FP(B.EditPart(S, "p1", { contactAo: false }), "p1") === FP(Iso, "p1"), "without contact AO the body ignores the jacket");
+  Expect(FP(S, "p1") === FP(B.SetValue(S, "deviceMode", "cpu"), "p1"), "device never stales");
+  Expect(FP(S, "p1") !== FP(B.SetValue(S, "samples", 20), "p1"), "shared ray settings stale every part");
+});
+
+await Check("bake set: preset round trip drops mesh files", () => {
+  const S = B.EditPart(B.UseTemplate(B.Create(), "kit"), "p1", { highSource: { name: "pack.obj", size: 9 } });
+  const Raw = JSON.parse(B.ExportPreset(S));
+  Expect(Raw.settings.set.parts.length === 4 && !("highSource" in Raw.settings.set.parts[0]), "no sources in preset");
+  Expect(B.Load(B.ExportPreset(S)).set.parts.map((P) => P.name).join() === "Backpack,Rifle,Canteen,Holster", "reload");
 });
 
 const TS = process.env.TS_DIR;

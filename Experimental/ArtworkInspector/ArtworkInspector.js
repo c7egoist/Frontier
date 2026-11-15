@@ -11,7 +11,7 @@
 
 import * as A from "./ArtworkModel.js";
 import { icon } from "../MaterialInspector/Icons.js";
-import { Esc, Knob, ColourField, Stops, Toggle, SwitchRow, Segments, Chips, StatTile, SyncSiblings, Download, Rebuild, History, HEX } from "../MaterialInspector/CardKit.js";
+import { Esc, Knob, ColourField, Stops, Toggle, SwitchRow, Segments, Chips, Dropdown, StatTile, SyncSiblings, Download, Rebuild, History, HEX } from "../MaterialInspector/CardKit.js";
 
 const S = {
   Mode: "pattern", Doc: null, Open: null, AddLayer: false, AddMod: false, Renaming: null, Folds: {},
@@ -148,7 +148,7 @@ function SlotEditor(L, Slot, Label) {
 function ShapeEditor(L) {
   const Types = A.MOTIF_TYPES.filter((M) => M.id !== "svg-path" || L.shape.motifType === "svg-path");
   const Fields = A.SHAPE_FIELDS[L.shape.motifType] || [];
-  return Chips("shape", Types.map((M) => [M.label.replace("Botanical ", "").replace("5-Petal ", "").replace("Cog / ", "").replace(" / Bar", "").replace(" / Stroke", "").replace("Vector ", ""), M.id]), L.shape.motifType, { Columns: 3, Label: "Motif shape" })
+  return Dropdown("shape", Types.map((M) => [M.label, M.id, A.MotifGlyph(M.id)]), L.shape.motifType, { Label: "Motif shape", Search: false })
     + (Fields.length ? Grid(Fields.map((F) => Knob({ Bind: `layer:shape.${F.Key}`, Label: F.Label, Value: L.shape[F.Key] ?? F.Min, Min: F.Min, Max: F.Max, Step: F.Step }))) : "")
     + (L.shape.motifType === "svg-path" ? Note("Vector paths are drawn and node-edited on the TextureStudio canvas.") : "");
 }
@@ -183,7 +183,7 @@ function PlaceEditor(L) {
 }
 
 function BlendEditor(L) {
-  return Chips("blend", A.BLENDS.map((B) => [B, B]), L.blend || "Normal", { Columns: 3, Label: "Blend mode" })
+  return Dropdown("blend", A.BLENDS.map((B) => [B, B, "blend", A.BLEND_HINTS[B]]), L.blend || "Normal", { Label: "Blend mode" })
     + Knob({ Bind: "layer:opacity", Label: "Opacity", Value: L.opacity ?? 1, Min: 0, Max: 1, Step: 0.01 });
 }
 
@@ -192,11 +192,11 @@ function SurfaceEditor(L) {
   const Remove = (C) => `<button type="button" class="mi-x ai-chan-x" data-act="chan-off" data-key="${C.key}" title="Remove ${Esc(C.label)}" aria-label="Remove ${Esc(C.label)}">${icon("close", 10)}</button>`;
   const Scalars = On.filter((C) => !C.isColor), Colours = On.filter((C) => C.isColor && C.key !== "albedo");
   const Off = A.ARTWORK_PBR_CHANNELS.filter((C) => !Surf.channels[C.key]);
-  return Chips("finish", Object.entries(A.ARTWORK_FINISHES).map(([K, F]) => [F.label, K]), Surf.finish, { Columns: 3, Label: "Surface finish" })
+  return Dropdown("finish", Object.entries(A.ARTWORK_FINISHES).map(([K, F]) => [F.label, K, `<i class="ai-finish-dot" style="--r:${F.roughness};--m:${F.metalness}"></i>`, `rough ${F.roughness.toFixed(2)} · metal ${F.metalness.toFixed(1)} · height ${F.height.toFixed(2)}`]), Surf.finish, { Label: "Surface finish" })
     + SwitchRow("chan-albedo", !!Surf.channels.albedo, "Albedo", Surf.channels.albedo ? "Taken from the layer fill" : "Layer leaves albedo untouched")
     + (Scalars.length ? Grid(Scalars.map((C) => Knob({ Bind: `surf:${C.key}`, Label: C.label, Value: +A.ChannelValue(L, C.key), Min: C.min ?? 0, Max: C.max ?? 1, Step: C.step ?? 0.01, Tools: Remove(C) })).join("")) : "")
     + Colours.map((C) => `<div class="ai-chan-colour"><span class="mi-knob-label"><span>${Esc(C.label)}</span>${Remove(C)}</span>${ColourField(`surf:${C.key}`, C.label, String(A.ChannelValue(L, C.key) || C.defaultVal))}</div>`).join("")
-    + (Off.length ? `<label class="ai-add-select">${icon("plus", 11)}<select data-act="chan-add" aria-label="Add a PBR channel"><option value="">Add channel · ${Off.length} more</option>${Off.map((C) => `<option value="${C.key}">${Esc(C.label)} — ${Esc(C.sub || "")}</option>`).join("")}</select></label>` : "");
+    + (Off.length ? Dropdown("chan-add", Off.map((C) => [C.label, C.key, "plus", C.sub || ""]), null, { Label: "Add a PBR channel", Placeholder: `Add channel · ${Off.length} more`, Class: "compact ai-add-dd" }) : "");
 }
 
 function MaskEditor(L) {
@@ -227,7 +227,7 @@ function ModifierEditor(L, M, Index) {
     ${Note(Def?.description || "")}
     ${Options.map((F) => (F.Options.length <= 4 && F.Options.every(([Lb]) => Lb.length <= 8)
       ? Segments("mod-opt", F.Options, M[F.Key], { Label: F.Label, Extra: Extra(F) })
-      : Chips("mod-opt", F.Options, M[F.Key], { Columns: F.Options.length === 5 ? 5 : 2, Label: F.Label, Extra: Extra(F) }))).join("")}
+      : `<div class="mi-sub-label">${Esc(F.Label)}</div>` + Dropdown("mod-opt", F.Options, M[F.Key], { Label: F.Label, Extra: Extra(F) }))).join("")}
     ${Ranges.length ? Grid(Ranges.map((F) => Knob({ Bind: `mod:${M.id}:${F.Key}`, Label: F.Label, Value: +(M[F.Key] ?? F.Min), Min: F.Min, Max: F.Max, Step: F.Step, Unit: F.Unit || "", Tools: F.Seed ? Dice(`mod:${M.id}:${F.Key}`) : "" })).join("")) : ""}
     ${Colours.map((F) => `<div class="ai-chan-colour"><span class="mi-knob-label"><span>${Esc(F.Label)}</span></span>${ColourField(`mod:${M.id}:${F.Key}`, F.Label, HEX.test(M[F.Key]) ? M[F.Key] : "#7aa6d9")}</div>`).join("")}
     ${Switches.map((F) => SwitchRow("mod-switch", !!M[F.Key], F.Label, "", Extra(F))).join("")}
@@ -345,10 +345,7 @@ function CardHtml() {
         <input class="mi-name" data-act="name" data-fid="name" value="${Esc(D.name)}" maxlength="80" spellcheck="false" aria-label="${Mode.Title} name">
         <div class="mi-ident-row">
           <span class="mi-sub" title="${Esc(Entry?.Description || "")}">${Esc(Entry?.Description || (Entry ? `${D.layers.length} layer${D.layers.length === 1 ? "" : "s"} · ${S.Mode === "pattern" ? "seamless" : "decal"} ${D.size || 512} px` : "Imported document"))}</span>
-          <select class="mi-library" data-act="library" aria-label="Starter library">
-            ${Groups.map((G) => `<optgroup label="${Esc(G)}">${Cat.filter((E) => E.Group === G).map((E) => `<option value="${E.Id}" ${E.Id === D.starterId ? "selected" : ""}>${Esc(E.Name)}</option>`).join("")}</optgroup>`).join("")}
-            ${Entry ? "" : `<option value="" selected>${Esc(D.name)} (imported)</option>`}
-          </select>
+          ${Dropdown("library", [...Groups.flatMap((G) => [{ Group: G }, ...Cat.filter((E) => E.Group === G).map((E) => [E.Name, E.Id])]), ...(Entry ? [] : [[`${D.name} (imported)`, ""]])], Entry ? D.starterId : "", { Label: "Starter library", Class: "compact mi-library-dd", Search: true })}
         </div>
       </div>
     </section>
@@ -466,6 +463,8 @@ function OnClick(Event) {
     return;
   }
   const Act = El.dataset.act, L = Layer(), D = S.Doc, V = El.dataset.value;
+  // Dropdown picks for what used to be <select>s run the same change path.
+  if (El.classList.contains("mi-dd-opt") && ["library", "chan-add"].includes(Act)) return OnChange({ target: { dataset: El.dataset, value: V } });
   if (["name", "rename", "library", "import", "chan-add"].includes(Act) || El.matches("input[type=file]")) return;
   switch (Act) {
     case "undo": return Step(true);

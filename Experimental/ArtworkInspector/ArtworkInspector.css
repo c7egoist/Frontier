@@ -45,3 +45,10 @@
 .ai-add-select select option { background: #1b1b1b; color: #ddd; }
 .ai-pop button span { display: inline-flex; align-items: center; gap: 8px; }
 .ai-pop { width: 240px; }
+
+/* finish swatch in the Surface finish dropdown: gloss highlight fades with roughness, tint warms with metalness */
+.ai-finish-dot { width: 14px; height: 14px; border-radius: 50%; display: block;
+  background: radial-gradient(circle at 34% 30%, rgb(255 255 255 / calc((1 - var(--r)) * 0.95)) 0 16%, transparent 48%),
+              linear-gradient(140deg, color-mix(in srgb, #e0b86a calc(var(--m) * 100%), #9a9a9a), #262626); }
+.ai-add-dd { margin-top: 4px; }
+.mi-library-dd { max-width: 190px; flex: 0 1 190px; }
