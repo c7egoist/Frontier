@@ -6,7 +6,7 @@ self.onmessage = (event) => {
   const { ticket, request } = event.data;
   try {
     const report = (fraction, label) => self.postMessage({ ticket, type: 'progress', fraction, label });
-    const hierarchy = buildClusterHierarchy(request.positions, request.indices, request.build, report);
+    const hierarchy = buildClusterHierarchy(request.positions, request.indices, { ...request.build, families: request.families || null }, report);
     self.postMessage({ ticket, type: 'done', result: hierarchy }, hierarchyTransferables(hierarchy));
   } catch (error) {
     self.postMessage({ ticket, type: 'error', message: String((error && error.message) || error) });

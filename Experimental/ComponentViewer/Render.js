@@ -131,6 +131,51 @@ export function lodGeometry(asset, level) {
   });
 }
 
+// One level of the cluster hierarchy drawn with its materials: each surviving triangle keeps its source family, so the
+// level gets one group per material slot exactly like the full-detail mesh. Flat normals (positions are shared, the
+// triangles around them changed).
+export function lodMaterialGeometry(asset, level) {
+  const h = asset.out.lod, g = asset.out.geometry;
+  if (!h || !g) return null;
+  const L = Math.max(0, Math.min(h.levels.length - 1, level));
+  return cached(`${asset.id}:${asset.revision}:lodmat${L}`, () => {
+    const tris = [];
+    for (let c = 0; c < h.clusterLevel.length; c++) {
+      if (h.clusterLevel[c] !== L) continue;
+      for (let i = h.clusterFirst[c] / 3, end = i + h.clusterSize[c] / 3; i < end; i++) tris.push(i);
+    }
+    const fam = h.triangleFamily || null;
+    if (fam) tris.sort((a, b) => fam[a] - fam[b] || a - b);
+    const slots = assetSlots(asset).map((s) => s.family);
+    const pos = new Float32Array(tris.length * 9), nor = new Float32Array(tris.length * 9);
+    const geo = new THREE.BufferGeometry();
+    const p = g.positions;
+    let groupStart = 0, current = fam && tris.length ? fam[tris[0]] : slots[0];
+    for (let i = 0; i < tris.length; i++) {
+      const t = tris[i];
+      const f = fam ? fam[t] : slots[0];
+      if (f !== current) { geo.addGroup(groupStart * 3, (i - groupStart) * 3, Math.max(0, slots.indexOf(current))); groupStart = i; current = f; }
+      const a = h.cornerVertex[t * 3] * 3, b = h.cornerVertex[t * 3 + 1] * 3, d = h.cornerVertex[t * 3 + 2] * 3;
+      const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2];
+      const vx = p[d] - p[a], vy = p[d + 1] - p[a + 1], vz = p[d + 2] - p[a + 2];
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+      [a, b, d].forEach((v, k) => {
+        const o = i * 9 + k * 3;
+        pos[o] = p[v]; pos[o + 1] = p[v + 1]; pos[o + 2] = p[v + 2];
+        nor[o] = nx; nor[o + 1] = ny; nor[o + 2] = nz;
+      });
+    }
+    geo.addGroup(groupStart * 3, (tris.length - groupStart) * 3, Math.max(0, slots.indexOf(current)));
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    geo.computeBoundingSphere();
+    geo.computeBoundingBox();
+    geo.userData = { level: L, triangles: tris.length };
+    return geo;
+  });
+}
+
 let checker = null;
 export function checkerTexture() {
   if (checker) return checker;
@@ -177,10 +222,8 @@ export function meshObject(asset, { channel = 'lit', lod = -1, overrides = {}, c
   const useLod = (channel === 'lod' && asset.out.lod) || (lod >= 0 && asset.out.lod);
   if (useLod) {
     const level = channel === 'lod' && lod < 0 ? 0 : lod;
-    const geo = lodGeometry(asset, level);
-    const mat = channel === 'lod' ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, side: THREE.DoubleSide, flatShading: true })
-      : channelMaterials(asset, channel, overrides)[0];
-    mesh = new THREE.Mesh(geo, mat);
+    if (channel === 'lod') mesh = new THREE.Mesh(lodGeometry(asset, level), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, side: THREE.DoubleSide, flatShading: true }));
+    else mesh = new THREE.Mesh(lodMaterialGeometry(asset, level), channelMaterials(asset, channel, overrides));
   } else {
     mesh = new THREE.Mesh(renderGeometry(asset), channelMaterials(asset, channel, overrides));
   }

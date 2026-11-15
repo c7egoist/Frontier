@@ -65,8 +65,8 @@ export function segmented({ options, value, onChange, cls = '' }) {
   return wrap;
 }
 
-export function segmentedField({ label, ...rest }) {
-  return el('div', { class: 'field' }, el('span', {}, label), el('span'), el('div', { class: 'field-wide' }, segmented(rest)));
+export function segmentedField({ label, note = '', ...rest }) {
+  return el('div', { class: 'field' }, el('span', {}, label), el('span'), el('div', { class: 'field-wide' }, segmented(rest)), note ? el('small', {}, note) : null);
 }
 
 export function toggle({ label, value, onChange, note = '' }) {

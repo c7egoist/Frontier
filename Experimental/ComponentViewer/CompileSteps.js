@@ -32,7 +32,7 @@ export function defaultSettings(name = 'Untitled', overrides = {}) {
     geometry: { ...identityTransform(), centre: 'floor', normals: 'angle', angle: 40 },
     uv: { enabled: true, normalLimitDeg: 60, mergeBelow: 24, mergeLimitDeg: 75 },
     sdf: { enabled: true, resolution: 40, band: 2 },
-    lod: { enabled: true, clusterTriangles: 128, groupClusters: 4, simplifyRatio: 0.5 },
+    lod: { enabled: true, clusterTriangles: 128, groupClusters: 4, simplifyRatio: 0.5, preserveMaterials: true, seams: 'slide' },
     collision: { enabled: true, type: 'box', margin: 0 },
     icon: { enabled: true, size: 256, yaw: 35, pitch: 22, shading: 'lit', background: 'transparent' },
     meta: { name, category: 'Prop', tags: '', notes: '' },
@@ -160,10 +160,12 @@ const RUNNERS = {
   async lod(asset, ctx, progress) {
     const g = asset.out.geometry;
     const set = asset.settings.lod;
-    const build = { clusterTriangles: set.clusterTriangles, groupClusters: set.groupClusters, simplifyRatio: set.simplifyRatio };
-    const h = await ctx.lodWorker({ positions: new Float32Array(g.positions), indices: new Uint32Array(g.indices), build }, progress);
+    const build = { clusterTriangles: set.clusterTriangles, groupClusters: set.groupClusters, simplifyRatio: set.simplifyRatio, preserveMaterials: set.preserveMaterials !== false, pinSeams: set.seams === 'pin' };
+    const families = g.families ? new Uint32Array(g.families) : null;
+    const h = await ctx.lodWorker({ positions: new Float32Array(g.positions), indices: new Uint32Array(g.indices), families, build }, progress);
     asset.out.lod = h;
-    asset.steps.lod.summary = `${h.levels.length} levels · ${fmt(h.clusterCount)} clusters`;
+    const mats = h.materialFamilies > 1 ? ` · ${h.materialFamilies} materials${h.preserveMaterials ? (h.config.pinSeams ? ' pinned' : ' held') : ''}` : '';
+    asset.steps.lod.summary = `${h.levels.length} levels · ${fmt(h.clusterCount)} clusters${mats}`;
   },
 
   async collision(asset) {

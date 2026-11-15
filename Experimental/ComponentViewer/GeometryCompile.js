@@ -317,11 +317,22 @@ export function createGeometryCompile({ ctx, onFinish }) {
         rangeField({ label: 'Clusters per group', value: set.groupClusters, min: 2, max: 8, step: 1, onChange: (v) => { set.groupClusters = v; changed('lod'); } }),
         rangeField({ label: 'Keep ratio', value: set.simplifyRatio, min: 0.3, max: 0.7, step: 0.05, format: (v) => `${Math.round(v * 100)}%`, note: 'Each group simplifies its interior to this share; borders stay locked so levels meet without cracks.', onChange: (v) => { set.simplifyRatio = v; changed('lod'); } }),
       ));
+      const familyCount = asset.out.geometry && asset.out.geometry.families ? new Set(asset.out.geometry.families).size : 1;
+      const seamField = segmentedField({ label: 'Material seams', options: [{ id: 'slide', label: 'Slide' }, { id: 'pin', label: 'Pin' }], value: set.seams || 'slide',
+        note: 'Slide: seam vertices may move along the seam, so borders simplify like outlines. Pin: seam vertices never move, so borders stay exact and reduction stops earlier near them.',
+        onChange: (v) => { set.seams = v; changed('lod'); } });
+      seamField.hidden = set.preserveMaterials === false;
+      box.append(section('MATERIALS'), panel(
+        toggle({ label: 'Preserve materials', value: set.preserveMaterials !== false,
+          note: familyCount > 1 ? `${familyCount} material slots. Each material is clustered as its own mesh and the seams between materials are held, so every face keeps its colour. Clusters on either side still share the same vertices and edges.` : 'Only one material slot on this object, so this has no effect.',
+          onChange: (v) => { set.preserveMaterials = v; seamField.hidden = !v; changed('lod', { rerender: false }); } }),
+        seamField,
+      ));
       const h = asset.out.lod;
       if (h) {
         const top = h.levels.length - 1;
         box.append(section('PREVIEW'), panel(
-          segmentedField({ label: 'Colour', options: [{ id: 'clusters', label: 'Clusters' }, { id: 'shaded', label: 'Shaded' }], value: view.lod, onChange: (v) => { view.lod = v; renderPreview(); } }),
+          segmentedField({ label: 'Colour', options: [{ id: 'clusters', label: 'Clusters' }, { id: 'shaded', label: 'Materials' }], value: view.lod, onChange: (v) => { view.lod = v; renderPreview(); } }),
           rangeField({ label: 'LOD level', value: Math.min(view.lodLevel, top), min: 0, max: top, step: 1, format: (v) => `LOD ${v} of ${top}`, onInput: (v) => { view.lodLevel = v; renderPreview(); highlightLevel(); } }),
         ));
         const table = el('div', { class: 'level-list' });
@@ -329,12 +340,17 @@ export function createGeometryCompile({ ctx, onFinish }) {
         h.levels.forEach((L, i) => {
           const row = el('button', { type: 'button', class: `level-row ${i === view.lodLevel ? 'active' : ''}`, dataset: { level: i } },
             el('i', { class: 'swatch', style: { background: `hsl(${(i * 47) % 360} 55% 58%)` } }),
-            el('div', {}, el('b', {}, `LOD ${i}`), el('small', {}, `${fmt(L.clusters)} clusters · err ${L.error.toFixed(4)}`)),
+            el('div', {}, el('b', {}, `LOD ${i}`), el('small', {}, `${fmt(L.clusters)} clusters · err ${L.error.toFixed(4)}${h.materialFamilies > 1 ? ` · wrong mat ${((L.materialError || 0) * 100).toFixed(1)}%` : ''}`)),
             el('div', { class: 'level-meter' }, el('span', {}, fmt(L.triangles)), el('div', { class: 'meter' }, el('i', { style: { width: `${(L.triangles / max) * 100}%` } }))));
           row.addEventListener('click', () => { view.lodLevel = i; renderSettings(); renderPreview(); });
           table.append(row);
         });
-        box.append(section('HIERARCHY'), table, panel(rows([['Clusters', fmt(h.clusterCount)], ['Groups', fmt(h.groupCount)], ['Build', formatMs(h.buildMs)], ['Stalled', h.stalled ? 'yes' : 'no']])));
+        const mixed = h.clusterFamily ? [...h.clusterFamily].filter((f) => f < 0).length : 0;
+        const topError = h.levels[top].materialError || 0;
+        box.append(section('HIERARCHY'), table, panel(rows([['Clusters', fmt(h.clusterCount)], ['Groups', fmt(h.groupCount)],
+          ...(h.materialFamilies > 1 ? [['Materials', `${h.materialFamilies} · ${h.preserveMaterials ? (h.config.pinSeams ? 'seams pinned' : 'seams held') : 'not preserved'}`], ['Mixed-material clusters', fmt(mixed)], ['Wrong material at top LOD', `${(topError * 100).toFixed(1)}% of surface`]] : []),
+          ['Build', formatMs(h.buildMs)], ['Stalled', h.stalled ? 'yes' : 'no']])),
+          h.materialFamilies > 1 ? el('p', { class: 'muted-note' }, 'Wrong material: the share of a level\'s surface showing a different material from the source surface nearest to it. Cluster borders and material seams index one shared vertex buffer, so neighbouring clusters meet without cracks.') : '');
       }
     },
 

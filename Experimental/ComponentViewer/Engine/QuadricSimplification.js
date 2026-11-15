@@ -11,6 +11,18 @@
 //
 // Reported error is sqrt(quadric cost / accumulated area): an RMS-distance estimate in object units.
 // It is an estimate, not a certified Hausdorff bound.
+//
+// Material families (Component Viewer addition). Triangles are never re-created, only re-linked, so every surviving
+// triangle keeps its source family. With preserveMaterials the seams between families are held as well:
+//  - a vertex whose fan holds one family is unrestricted;
+//  - a seam vertex (two families, exactly two seam edges) may only slide along one of its seam edges, the way an open
+//    border slides, so the seam stays a polyline and each side keeps its colour;
+//  - a vertex where three or more families meet, or where a seam meets an open or locked border, never moves;
+//  - seam edges also get perpendicular constraint planes, so the seam keeps its shape in the error metric;
+//  - pinSeams holds every seam vertex in place instead (exact colour borders, less reduction near seams);
+//  - a collapse that would delete the last triangles of a family in the group is refused, so small regions such as a
+//    headlight strip never vanish from a level.
+// Vertices are never split: both sides of a seam keep indexing the one shared vertex buffer, as at cluster borders.
 
 export const FREE = 0, BORDER = 1, LOCKED = 2;
 
@@ -67,8 +79,11 @@ class CollapseQueue {
  *                             collapse from poisoning the monotone error of every level above it)
  * @returns {{ indices: Uint32Array, error: number, collapses: number }}
  */
-export function simplifyGroup(positions, triangles, kindOf, targetTriangles, maxError = Infinity) {
+export function simplifyGroup(positions, triangles, kindOf, targetTriangles, maxError = Infinity, { families = null, preserveMaterials = false, pinSeams = false } = {}) {
   const triCount = triangles.length / 3;
+  const fam = new Int32Array(triCount);
+  if (families) for (let t = 0; t < triCount; t++) fam[t] = families[t];
+  const seams = !!(families && preserveMaterials);
 
   // Local vertex remap.
   const localOf = new Map();
@@ -127,10 +142,10 @@ export function simplifyGroup(positions, triangles, kindOf, targetTriangles, max
     const area = len * 0.5;
     const d = -(nx * px[v[0]] + ny * py[v[0]] + nz * pz[v[0]]);
     for (let k = 0; k < 3; k++) addPlane(v[k], nx, ny, nz, d, area);
-    // Open edges get a perpendicular constraint plane so borders keep their outline.
+    // Open edges (and material seams when preserved) get a perpendicular constraint plane so they keep their outline.
     for (let k = 0; k < 3; k++) {
       const a = v[k], b = v[(k + 1) % 3];
-      if (edgeUse.get(edgeKey(a, b)) !== 1) continue;
+      if (edgeUse.get(edgeKey(a, b)) !== 1 && !(seams && seamEdgeAtStart(t, a, b))) continue;
       const ex = px[b] - px[a], ey = py[b] - py[a], ez = pz[b] - pz[a];
       let bx = ey * nz - ez * ny, by = ez * nx - ex * nz, bz = ex * ny - ey * nx;
       const bl = Math.hypot(bx, by, bz);
@@ -141,6 +156,85 @@ export function simplifyGroup(positions, triangles, kindOf, targetTriangles, max
       addPlane(a, bx, by, bz, bd, w);
       addPlane(b, bx, by, bz, bd, w);
     }
+  }
+
+  const seamMark = new Int32Array(seams ? n : 0);
+  let seamCounter = 0;
+  const familyAlive = new Map();
+  if (seams) for (let t = 0; t < triCount; t++) if (alive[t]) familyAlive.set(fam[t], (familyAlive.get(fam[t]) || 0) + 1);
+
+  // Would collapsing u onto v delete the last triangles of a family? (The triangles on edge u–v die.)
+  function keepsEveryFamily(u, v) {
+    if (!seams) return true;
+    const fan = fans[u];
+    let fa = -1, na = 0, fb = -1, nb = 0;
+    for (let i = 0; i < fan.length; i++) {
+      const t = fan[i], q = t * 3;
+      if (tri[q] !== v && tri[q + 1] !== v && tri[q + 2] !== v) continue;
+      if (fa < 0 || fam[t] === fa) { fa = fam[t]; na++; } else { fb = fam[t]; nb++; }
+    }
+    return (fa < 0 || familyAlive.get(fa) > na) && (fb < 0 || familyAlive.get(fb) > nb);
+  }
+
+  // Before any collapse: is edge a–b of triangle t a seam (its other triangle has another family)?
+  function seamEdgeAtStart(t, a, b) {
+    const fa = fans[a];
+    for (let i = 0; i < fa.length; i++) {
+      const o = fa[i];
+      if (o === t) continue;
+      const q = o * 3;
+      if ((tri[q] === b || tri[q + 1] === b || tri[q + 2] === b) && fam[o] !== fam[t]) return true;
+    }
+    return false;
+  }
+
+  // Current seam status of edge u–v: the triangles on it carry different families.
+  function isSeamEdge(u, v) {
+    let first = -1;
+    const fan = fans[u];
+    for (let i = 0; i < fan.length; i++) {
+      const t = fan[i], q = t * 3;
+      if (tri[q] !== v && tri[q + 1] !== v && tri[q + 2] !== v) continue;
+      if (first < 0) first = fam[t];
+      else if (fam[t] !== first) return true;
+    }
+    return false;
+  }
+
+  // 0 = one family around u, 1 = simple seam vertex (two families, two seam edges), 2 = material corner (pinned).
+  function materialState(u) {
+    const fan = fans[u];
+    if (!fan.length) return 0;
+    const f0 = fam[fan[0]];
+    let f1 = -1;
+    for (let i = 1; i < fan.length; i++) {
+      const f = fam[fan[i]];
+      if (f === f0 || f === f1) continue;
+      if (f1 >= 0) return 2;
+      f1 = f;
+    }
+    if (f1 < 0) return 0;
+    const m = ++seamCounter; // own scratch marks: proposeAround is mid-iteration on `mark` when this runs
+    let seamEdges = 0;
+    for (let i = 0; i < fan.length; i++) {
+      const q = fan[i] * 3;
+      for (let k = 0; k < 3; k++) {
+        const w = tri[q + k];
+        if (w === u || seamMark[w] === m) continue;
+        seamMark[w] = m;
+        if (isSeamEdge(u, w) && ++seamEdges > 2) return 2;
+      }
+    }
+    return seamEdges === 2 ? 1 : 2;
+  }
+
+  // Material rule for moving u onto v (see header).
+  function respectsMaterials(u, v) {
+    if (!seams) return true;
+    const state = materialState(u);
+    if (state === 0) return true;
+    if (state === 2 || pinSeams || kind[u] !== FREE) return false;
+    return isSeamEdge(u, v);
   }
 
   const stamp = new Int32Array(n);
@@ -173,6 +267,7 @@ export function simplifyGroup(positions, triangles, kindOf, targetTriangles, max
   function propose(u, v) {
     if (kind[u] === LOCKED) return;
     if (kind[u] === BORDER && (kind[v] === FREE || sharedTriangles(u, v) !== 1)) return;
+    if (!respectsMaterials(u, v)) return;
     const cost = collapseCost(u, v);
     // A tiny length term orders zero-cost collapses on flat regions short-edge first (avoids slivers).
     const dx = px[u] - px[v], dy = py[u] - py[v], dz = pz[u] - pz[v];
@@ -273,7 +368,7 @@ export function simplifyGroup(positions, triangles, kindOf, targetTriangles, max
     const u = queue.topU, v = queue.topV;
     if (stamp[u] !== queue.topSu || stamp[v] !== queue.topSv) continue;
     if (kind[u] === BORDER && sharedTriangles(u, v) !== 1) continue;
-    if (!linkConditionHolds(u, v) || !avoidsLockedBridge(u, v) || !keepsOrientation(u, v)) continue;
+    if (!linkConditionHolds(u, v) || !avoidsLockedBridge(u, v) || !keepsOrientation(u, v) || !respectsMaterials(u, v) || !keepsEveryFamily(u, v)) continue;
 
     const cost = collapseCost(u, v);
     const weight = quadric[u * Q + 10] + quadric[v * Q + 10];
@@ -286,6 +381,7 @@ export function simplifyGroup(positions, triangles, kindOf, targetTriangles, max
       const t = fu[i], o = t * 3;
       if (tri[o] === v || tri[o + 1] === v || tri[o + 2] === v) {
         alive[t] = 0; aliveCount--;
+        if (seams) familyAlive.set(fam[t], familyAlive.get(fam[t]) - 1);
         // Drop the dead triangle from the fans of its third vertex and of v.
         for (let k = 0; k < 3; k++) {
           const w = tri[o + k];
@@ -307,10 +403,12 @@ export function simplifyGroup(positions, triangles, kindOf, targetTriangles, max
   }
 
   const out = new Uint32Array(aliveCount * 3);
+  const outFamilies = new Uint32Array(aliveCount);
   let o = 0;
   for (let t = 0; t < triCount; t++) {
     if (!alive[t]) continue;
+    outFamilies[o / 3] = fam[t];
     out[o++] = globalOf[tri[t * 3]]; out[o++] = globalOf[tri[t * 3 + 1]]; out[o++] = globalOf[tri[t * 3 + 2]];
   }
-  return { indices: out, error: Math.sqrt(worstSquared), collapses };
+  return { indices: out, families: outFamilies, error: Math.sqrt(worstSquared), collapses };
 }

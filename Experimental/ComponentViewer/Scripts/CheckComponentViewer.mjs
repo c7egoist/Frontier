@@ -25,7 +25,7 @@ const CUBE_OBJ = `# cube\nv -1 -1 -1\nv 1 -1 -1\nv 1 1 -1\nv -1 1 -1\nv -1 -1 1\
 
 const ctx = {
   sdfWorker: async (r) => bakeSdf(r.positions, r.indices, { resolution: r.resolution, band: r.band }),
-  lodWorker: async (r) => buildClusterHierarchy(r.positions, r.indices, r.build),
+  lodWorker: async (r) => buildClusterHierarchy(r.positions, r.indices, { ...r.build, families: r.families || null }),
   renderIcon: async () => 'data:image/png;base64,stub',
 };
 
@@ -153,6 +153,70 @@ await test('Vehicle body compiles with authored pivot kept (centre: none) and 8 
   await compileAll(asset, ctx);
   assert.ok(Math.abs(asset.out.geometry.bounds.lo[1] - -0.10586) < 1e-4);
   assert.equal(new Set(asset.out.geometry.families).size, 8);
+});
+
+// Edge use across every cluster of one level: a crack shows up as a new open edge, a fin as a 3+ edge.
+function levelEdges(h, level, vertexCount) {
+  const use = new Map();
+  for (let c = 0; c < h.clusterCount; c++) {
+    if (h.clusterLevel[c] !== level) continue;
+    const f = h.clusterFirst[c];
+    for (let i = 0; i < h.clusterSize[c]; i += 3) for (let k = 0; k < 3; k++) {
+      const a = h.cornerVertex[f + i + k], b = h.cornerVertex[f + i + (k + 1) % 3];
+      const key = a < b ? a * vertexCount + b : b * vertexCount + a;
+      use.set(key, (use.get(key) || 0) + 1);
+    }
+  }
+  let open = 0, over = 0;
+  for (const u of use.values()) { if (u === 1) open++; else if (u > 2) over++; }
+  return { open, over };
+}
+
+await test('Cluster LOD keeps per-face materials; preserved seams cut colour drift and stay crack-free', () => {
+  const src = constructSource('torus', 12000);
+  const V = src.positions.length / 3;
+  const families = new Uint32Array(src.indices.length / 3);
+  for (let t = 0; t < families.length; t++) {
+    let x = 0, y = 0, z = 0;
+    for (let k = 0; k < 3; k++) { const a = src.indices[t * 3 + k] * 3; x += src.positions[a]; y += src.positions[a + 1]; z += src.positions[a + 2]; }
+    families[t] = ((Math.floor(Math.atan2(z, x) * 3) + 20) % 4) + (y > 0.1 ? 4 : 0);
+  }
+  const used = new Set(families);
+  const plain = buildClusterHierarchy(src.positions, src.indices, { families, preserveMaterials: false });
+  const held = buildClusterHierarchy(src.positions, src.indices, { families, preserveMaterials: true });
+  const pinned = buildClusterHierarchy(src.positions, src.indices, { families, preserveMaterials: true, pinSeams: true });
+  for (const h of [plain, held, pinned]) {
+    assert.equal(h.triangleFamily.length, h.cornerVertex.length / 3);
+    for (const f of h.triangleFamily) assert.ok(used.has(f), 'every LOD triangle carries a source family');
+    for (const L of h.levels) assert.deepEqual(levelEdges(h, L.level, V), { open: 0, over: 0 }, `level ${L.level} watertight`);
+  }
+  assert.ok([...held.clusterFamily].every((f) => f >= 0), 'preserved: every cluster holds one material');
+  assert.ok([...plain.clusterFamily].some((f) => f < 0), 'plain: clusters mix materials');
+  // Compare at matched triangle budgets: the preserved build moves far less colour.
+  const at = (h, tris) => h.levels.reduce((best, L) => (Math.abs(L.triangles - tris) < Math.abs(best.triangles - tris) ? L : best));
+  for (const budget of [3000, 600]) {
+    const a = at(plain, budget), b = at(held, budget);
+    assert.ok(b.materialError < a.materialError * 0.6, `~${budget} tris: held ${b.materialError} vs plain ${a.materialError}`);
+  }
+  for (const L of pinned.levels) assert.ok(L.materialError < 0.01, `pinned seams keep colour within 1% (level ${L.level}: ${L.materialError})`);
+});
+
+await test('Vehicle body LOD: 8 materials survive every level, level 2 moves under 1% of colour', async () => {
+  const raw = readFacet(buf(readFileSync(join(models, 'ControlVehicleBody.facet'))));
+  const asset = createAsset({ name: 'Body', raw, settings: { source: { up: 'z' }, geometry: { centre: 'none' }, sdf: { enabled: false } } });
+  await compileAll(asset, ctx);
+  const h = asset.out.lod;
+  assert.equal(h.materialFamilies, 8);
+  assert.ok(h.preserveMaterials);
+  assert.ok(h.levels[2].materialError < 0.01, `L2 drift ${h.levels[2].materialError}`);
+  for (let L = 0; L < h.levels.length; L++) {
+    const fams = new Set();
+    for (let c = 0; c < h.clusterCount; c++) if (h.clusterLevel[c] === L) fams.add(h.clusterFamily[c]);
+    assert.equal(fams.size, 8, `level ${L} keeps all 8 materials`);
+  }
+  const V = asset.out.geometry.positions.length / 3;
+  const base = levelEdges(h, 0, V);
+  for (const L of h.levels) { const e = levelEdges(h, L.level, V); assert.ok(e.open <= base.open && e.over <= base.over, `level ${L.level} adds no cracks`); }
 });
 
 console.log('Component Viewer model');

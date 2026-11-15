@@ -95,7 +95,7 @@ class FakeWorker {
       try {
         let result;
         if (this.url.includes('SdfWorker')) { const { bakeSdf } = await import(pathToFileURL(ROOT + 'Engine/SdfBake.js')); result = bakeSdf(data.request.positions, data.request.indices, { resolution: data.request.resolution, band: data.request.band }); }
-        else { const { buildClusterHierarchy } = await import(pathToFileURL(ROOT + 'Engine/ClusterHierarchy.js')); result = buildClusterHierarchy(data.request.positions, data.request.indices, data.request.build); }
+        else { const { buildClusterHierarchy } = await import(pathToFileURL(ROOT + 'Engine/ClusterHierarchy.js')); result = buildClusterHierarchy(data.request.positions, data.request.indices, { ...data.request.build, families: data.request.families || null }); }
         this.onmessage({ data: { ticket: data.ticket, type: 'done', result } });
       } catch (e) { this.onmessage({ data: { ticket: data.ticket, type: 'error', message: e.message } }); }
     }, 0);

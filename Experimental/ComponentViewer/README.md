@@ -21,12 +21,36 @@ and every step after it stale:
 | Geometry | Scale, mirror, rotate, pivot (centre, floor or authored), flip normals, normals mode (smooth/flat/angle split) | auto |
 | UV Charts | Chart unwrap and pack (from Frontier-1), checker / chart preview, OBJ + UVs and SVG sheet export | Bake |
 | SDF Bake | Signed distance field in a worker, slice view and raymarched preview, `.r32` export | Bake |
-| Cluster LOD | Nanite-style cluster hierarchy in a worker, levels with triangle counts and error | Bake |
+| Cluster LOD | Nanite-style cluster hierarchy in a worker, levels with triangle counts, error and wrong-material share; **Preserve materials** toggle (below) | Bake |
 | Collision | Box, sphere or capsule fit, the SDF as a distance-field collider, or none | auto |
 | Icon Bake | Content-browser icon inside a square capture frame, clay or normal shading, PNG export | auto |
 | Metadata | Name, category and tags | auto |
 
 **Compile & open** adds the compiled asset to Content and opens it as a new Blueprint class. Esc cancels.
+
+### Material-aware cluster LOD
+
+Every LOD triangle is a surviving source triangle, so it always keeps its material slot. Forced LODs and the
+*Materials* preview draw each face with its own slot. With **Preserve materials** on (the default):
+
+- Each material is clustered as if it were its own mesh, so every cluster holds one material.
+- The simplifier holds the seams between materials, using the same machinery as open borders:
+  - **Slide** (default): seam vertices may move only along the seam.
+  - **Pin**: seam vertices never move, so borders stay exact and reduction stops earlier.
+- Vertices where three or more materials meet never move, and no collapse may remove the last faces of a material
+  in a group.
+- It is still one mesh. Clusters on either side of a seam index the same shared vertices and edges, are grouped
+  together across the seam and simplify together. Every level stays crack-free, and the check script verifies this
+  with edge counts.
+
+*Wrong material* is the share of a level's surface that shows a different material from the source surface nearest
+to it.
+
+| Mesh | Off | Slide | Pin |
+|---|---|---|---|
+| ControlVehicle body, LOD 2 | 2.6% at 726 tris | 0.02% at 744 tris | 0.3% at 884 tris |
+| Torus, 8 material regions | 24% at 1254 tris | 0.9% at 1928 tris | 0.3% at 3984 tris |
+
 
 **Component Viewer** (the Blueprint editor):
 
