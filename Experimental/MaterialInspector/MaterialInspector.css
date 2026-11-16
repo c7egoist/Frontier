@@ -322,3 +322,38 @@ input[type="range"]:focus-visible { outline: 1px solid var(--amber); outline-off
 .mi-dd.compact > .mi-dd-btn { min-height: 26px; border-radius: 13px; font-size: 10.5px; padding: 0 8px 0 10px; background: #171717; }
 .mi-dd.compact .mi-dd-hint { display: none; }
 .mi-dd { max-width: 100%; }
+
+/* ---------------------------------------------------------------------------------------------- ChannelStack.js
+   The shared channel list (Material · Brush tool channels · Paint layer channels).  Reuses .mi-group / .mi-row /
+   .mi-editor / .mi-swatch / .mi-readout above; only the enable switch, the on-count badge and the off state are new. */
+.cs-stack { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cs-head { display: flex; align-items: center; gap: 8px; margin: 4px 0 4px; min-height: 26px; }
+.cs-head h3 { font-size: 12px; font-weight: 400; color: #d4d4d4; margin: 0; }
+.cs-head small { font-size: 8px; letter-spacing: 1.1px; color: #666; text-transform: uppercase; }
+.cs-bulk { margin-left: auto; display: inline-flex; gap: 2px; }
+.cs-bulk .mi-text-btn { min-height: 22px; padding: 0 8px; font-size: 10px; border-radius: 11px; background: transparent; color: #7b7b7b; }
+.cs-bulk .mi-text-btn:hover { background: #ffffff0a; color: #ddd; }
+.cs-search { margin: 0 0 4px; }
+.cs-group-line, .cs-row-line { display: flex; align-items: center; gap: 6px; padding-right: 6px; }
+.cs-group-line > .mi-group-head, .cs-row-line > .mi-row-head { flex: 1; min-width: 0; }
+.cs-group-line > .toggle { transform: scale(0.78); transform-origin: right center; opacity: 0.75; }
+.cs-group-line > .toggle:hover { opacity: 1; }
+.cs-row-line > .toggle { transform: scale(0.86); transform-origin: right center; }
+.cs-on { display: inline-flex; align-items: center; padding: 1px 6px; border-radius: 8px; background: #1a1a1a; color: #5f5f5f; font-size: 9px; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.cs-on.lit { background: #261f10; color: var(--amber); }
+.cs-row.off .mi-row-name { color: #707070; }
+.cs-row.off .mi-swatch { opacity: 0.38; filter: saturate(0.3); }
+.cs-row.off .mi-readout { color: #5a5a5a; background: #121212; }
+.mi-readout.kind-off { color: #555; }
+.mi-swatch.cs-peek-off { opacity: 0.25; }
+.mi-row-head[aria-disabled="true"] { cursor: default; }
+.cs-card { gap: 8px; }
+.cs-field { display: flex; flex-direction: column; gap: 6px; }
+.cs-label { font-size: 10px; color: #8a8a8a; display: flex; gap: 6px; align-items: baseline; }
+.cs-label small { color: #5c5c5c; font-size: 9px; }
+.cs-off-note { display: flex; gap: 6px; align-items: center; padding: 6px 9px; border-radius: 10px; background: #141414; }
+.cs-foot-tag { font-size: 9px; color: #5d5d5d; white-space: nowrap; }
+/* Blue tone — the Brush page has no amber (edits are blue there). */
+.cs-stack.tone-blue .mi-row.open { border-color: #4f8cff40; }
+.cs-stack.tone-blue .cs-on.lit { background: #101a2a; color: #7fb0ff; }
+.cs-stack.tone-blue .mi-search:focus-within { border-color: #4f8cff55; }

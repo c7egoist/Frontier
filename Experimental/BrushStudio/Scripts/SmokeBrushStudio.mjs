@@ -109,7 +109,7 @@ await step("every section renders and every field type edits the brush", async (
     for (const S of qa('select[data-bind^="b|"], select[data-bind^="p|"]', Panel).slice(0, 3)) { const Opt = [...S.options].find((O) => O.value !== S.value); if (Opt) { setVal(S, Opt.value); Kinds.select = (Kinds.select || 0) + 1; } }
     for (const C of qa('input[type="color"][data-bind^="b|"]', Panel).slice(0, 2)) { setVal(C, "#3366aa"); Kinds.colour = (Kinds.colour || 0) + 1; }
     for (const P of qa('[data-act="curve-preset"]', Panel).slice(0, 2)) { click(P); Kinds.curve = (Kinds.curve || 0) + 1; }
-    for (const Ch of qa('[data-act="chan"][data-bind^="b|"]', Panel).slice(0, 2)) { click(Ch); Kinds.channel = (Kinds.channel || 0) + 1; }
+    for (const Ch of qa('[data-act="cs-toggle"][data-bind^="b|"]', Panel).slice(1, 3)) { const Fresh = qa('[data-act="cs-toggle"]').find((E) => E.dataset.bind === Ch.dataset.bind && E.dataset.ch === Ch.dataset.ch); if (Fresh) { click(Fresh); Kinds.channel = (Kinds.channel || 0) + 1; } }
     await sleep(2);
   }
   const By = M.ChangedBySection(App.Brush());
@@ -250,7 +250,7 @@ await step("every tool opens its own studio and every section's controls edit th
       for (const S of qa("select[data-bind]", Panel()).slice(0, 3)) { const Fresh = qa("select", Panel()).find((E) => Bind(E) === Bind(S)); const Opt = Fresh && [...Fresh.options].find((O) => O.value !== Fresh.value); if (Opt) { setVal(Fresh, Opt.value); N++; } }
       for (const C of qa('input[type="color"][data-bind]', Panel()).slice(0, 2)) { setVal(C, "#22aa66"); N++; }
       const Txt = q("textarea[data-bind]", Panel()); if (Txt) { setVal(Txt, "Hello pad"); N++; }
-      for (const Ch of qa('[data-act="chan"]', Panel()).slice(0, 2)) { const Fresh = qa('[data-act="chan"]', Panel()).find((E) => Bind(E) === Bind(Ch) && E.dataset.value === Ch.dataset.value); if (Fresh) { click(Fresh); N++; } }
+      for (const Ch of qa('[data-act="cs-toggle"]', Panel()).slice(1, 3)) { const Fresh = qa('[data-act="cs-toggle"]', Panel()).find((E) => Bind(E) === Bind(Ch) && E.dataset.ch === Ch.dataset.ch); if (Fresh) { click(Fresh); N++; } }
       for (const A of ["swatch", "swap-colours", "nudge", "gradient-clear", "curve-clear", "text-cancel"]) { const B = byAct(A, Panel())[0]; if (B) { click(B); N++; } }
       expect(St.Studio === T.Id, `${T.Id} studio stayed open`);
     }
@@ -269,6 +269,79 @@ await step("every tool opens its own studio and every section's controls edit th
     Notes.push(`${T.Id} ${N}`);
   }
   return Notes.join(" · ");
+});
+
+await step("channel stacks: brush and every channel-writing tool switch channels on / off and edit per-channel cards", async () => {
+  const Panel = () => q(".bs-settings");
+  const Find = (Act, Ch, Root = Panel()) => qa(`[data-act="${Act}"]`, Root).find((E) => !Ch || E.dataset.ch === Ch || E.dataset.group === Ch);
+  // Brush Studio → Materials: 22 channels in five groups, Core open, the rest folded.
+  click(byAct("tool").find((B) => B.dataset.tool === "paint"));
+  App.Section("materials");
+  const Stack = q('.cs-stack[data-bind="b|mat.stack"]', Panel());
+  expect(Stack, "brush stack");
+  const Groups = qa(".mi-group", Stack).map((G) => G.dataset.group);
+  expect(Groups.join() === "Core,Surface,Coat,Optics,Emission", `groups ${Groups}`);
+  expect(q('.mi-group[data-group="Core"].open', Stack) && !q('.mi-group[data-group="Coat"].open', Stack), "Core open, Coat folded");
+  // Unfold Coat, switch Clearcoat on: it opens its card; set the value and the flow.
+  click(Find("cs-group", "Coat"));
+  click(Find("cs-toggle", "clearcoat"));
+  expect(App.Brush().values["mat.channels"].includes("clearcoat"), "clearcoat on");
+  expect(St.Stacks["b|mat.stack"].Open === "clearcoat" && q('.cs-row[data-row="clearcoat"].open', Panel()), "card opened");
+  setVal(q('input[type="range"][data-bind="b|mat.stack@clearcoat.value"]', Panel()), "66");
+  setVal(q('input[type="range"][data-bind="b|mat.stack@clearcoat.flow"]', Panel()), "40");
+  expect(M.BRUSH_STACK.Read(App.Brush().values).per.clearcoat.value === 66 && App.Brush().values["mat.stack"].per.clearcoat.flow === 40, "clearcoat card writes");
+  expect(q('.cs-row[data-row="clearcoat"] .mi-readout', Panel()).textContent.includes("66"), "readout follows the slider");
+  // Linked keys: the roughness card writes mat.roughness.
+  click(Find("cs-open", "roughness"));
+  setVal(q('input[type="range"][data-bind="b|mat.stack@roughness.value"]', Panel()), "12");
+  expect(App.Brush().values["mat.roughness"] === 12, "roughness card writes mat.roughness");
+  const Src = qa('[data-act="set"][data-bind="b|mat.stack@roughness.source"]', Panel()).find((E) => E.dataset.value === "Grain");
+  click(Src);
+  expect(App.Brush().values["mat.roughSource"] === "Grain" && q('input[type="range"][data-bind="b|mat.stack@roughness.amount"]', Panel()), "source shows amount");
+  // Field reset puts the reset-point value back.
+  const Fr = qa('[data-act="field-reset"]', Panel()).find((E) => E.dataset.bind === "b|mat.stack@roughness.value");
+  expect(Fr, "edited field has a reset button");
+  click(Fr);
+  expect(App.Brush().values["mat.roughness"] === App.Brush().reset.values["mat.roughness"], "field reset");
+  // Search, bulk and the last-channel guard.
+  const Search = q('[data-act="cs-search"]', Panel()); setVal(Search, "sheen", false);
+  expect(qa(".cs-row", Panel()).length === 3, `sheen filter ${qa(".cs-row", Panel()).length}`);
+  setVal(q('[data-act="cs-search"]', Panel()), "", false);
+  click(Find("cs-bulk") && qa('[data-act="cs-bulk"]', Panel()).find((E) => E.dataset.value === "none"));
+  expect(App.Brush().values["mat.channels"].length === 1, "One keeps a single channel");
+  click(Find("cs-toggle", App.Brush().values["mat.channels"][0]));
+  expect(App.Brush().values["mat.channels"].length === 1, "cannot switch the last channel off");
+  click(qa('[data-act="cs-bulk"]', Panel()).find((E) => E.dataset.value === "all"));
+  expect(App.Brush().values["mat.channels"].length === M.PAINT_CHANNELS.length, "All switches 22 on");
+  // Every channel-writing tool has its own stack with its own card.
+  const Cards = { fill: ["material", "roughness", "opacity"], stamp: ["material", "height", "source"], text: ["material", "height", "opacity"], gradient: ["material", "roughness", "end"], erase: ["channels", "height", "strength"], smudge: ["channels", "metalness", "strength"] };
+  const Out = [], { TOOL_STACKS } = await import(pathToFileURL(ROOT + "ToolModel.js"));
+  const TOOL_STACKS_DEF = Object.fromEntries(Object.entries(TOOL_STACKS).map(([K, L]) => [K, L.Default]));
+  for (const [Tool, [Sec, Ch, Key]] of Object.entries(Cards)) {
+    click(byAct("tool").find((B) => B.dataset.tool === Tool));
+    click(byAct("section").find((B) => B.dataset.section === Sec));
+    const Bind = `t|${Tool}|stack`;
+    expect(q(`.cs-stack[data-bind="${Bind}"]`, Panel()), `${Tool} stack`);
+    if (!St.Tools[Tool].stack.on?.includes(Ch) && !(St.Tools[Tool].channels || []).includes(Ch)) click(Find("cs-toggle", Ch));
+    if (St.Stacks[Bind]?.Open !== Ch) click(Find("cs-open", Ch));
+    const El = q(`input[type="range"][data-bind="${Bind}@${Ch}.${Key}"]`, Panel()) || q(`[data-bind="${Bind}@${Ch}.${Key}"]`, Panel());
+    expect(El, `${Tool} ${Ch}.${Key} field`);
+    if (El.type === "range") setVal(El, String(Math.round((+El.min + +El.max) / 3)));
+    else click(qa(`[data-bind="${Bind}@${Ch}.${Key}"]`, Panel()).find((E) => !E.classList.contains("active")));
+    const Read = TOOL_STACKS[Tool].Read(St.Tools[Tool]);
+    expect(Read.on.includes(Ch), `${Tool} ${Ch} on`);
+    expect(JSON.stringify(Read.per[Ch][Key]) !== JSON.stringify(TOOL_STACKS_DEF[Tool].per[Ch][Key]), `${Tool} ${Ch}.${Key} unchanged`);
+    Out.push(`${Tool} ${Ch}.${Key}=${Read.per[Ch][Key]}`);
+  }
+  // Move: channels only; switching albedo off keeps it still.
+  click(byAct("tool").find((B) => B.dataset.tool === "move"));
+  click(byAct("section").find((B) => B.dataset.section === "channels"));
+  click(Find("cs-toggle", "albedo"));
+  expect(!St.Tools.move.stack.on.includes("albedo"), "move albedo off");
+  // The pad still replays every op in every channel view with the per-channel cards applied.
+  click(byAct("tool").find((B) => B.dataset.tool === "fill")); await tap(0.5, 0.5);
+  for (const V of ["roughness", "height", "albedo"]) { App.SetView(V); await sleep(5); }
+  return Out.join(" · ");
 });
 
 await step("studio link: a brush-using tool opens the Brush Studio and Escape returns", async () => {

@@ -14,7 +14,7 @@ python3 Experimental/MaterialInspector/Serve.py        # http://0.0.0.0:8097/
 
 ![Field source — the generator is a dropdown (glyph, name, short tag) beside the live preview](Screenshots/material-field-dropdown.png)
 
-Other workspaces: [Pattern / Stamp](../ArtworkInspector/README.md#screenshots), [Map Baking](../BakeInspector/README.md#screenshots) and [Brush Studio](../BrushStudio/README.md).
+Other workspaces: [Pattern / Stamp](../ArtworkInspector/README.md#screenshots), [Map Baking](../BakeInspector/README.md#screenshots), [Brush Studio](../BrushStudio/README.md) and [Texture Paint](../PaintInspector/README.md).
 
 ## Layout and dropdowns
 
@@ -105,6 +105,63 @@ Each studio page shows its card next to a matching **outliner card**. The outlin
 | Map Baking | `../BakeInspector/BakeOutliner.js` | study → map groups → maps, plus the study set |
 
 The outliner and the card share one hub, so changes made in either one show up in the other. Add `?outliner=0` to the URL to show the card on its own.
+
+## ChannelStack — the reusable channel dropdown
+
+`ChannelStack.js` is the Material Inspector's channel groups turned into one component. Three pages use it:
+
+| Page | What it shows | Options that differ |
+| :--- | :--- | :--- |
+| **Material** (`MaterialInspector.js` → `GroupsHtml`) | the material's authored channels | `Switch:false`, `FlatBelow:8`, its own `Swatch` / `Head` / `Editor` / `GroupBadge` hooks, `Acts:{ Group:"group" }` |
+| **Brush** (`BrushStudio.js` → `StackHtml`) | which channels the brush and each tool write, one slider card per channel per tool | `Field` (Brush Studio's edited / reset aware fields), `Edited`, `Tone:"blue"` |
+| **Paint** (`PaintInspector.js` → `ChannelSection`) | which channels a layer writes; value, opacity and blend for each one | `Readout` (opacity / blend summary), `Albedo` (stamp / text tint) |
+
+**Look.** It uses the Material design throughout: group heads with a chevron, a count and six peek swatches while folded, 39 px rows with swatch · name · hint · readout, and one open editor card at a time. Editing adds a switch per channel and per group, an `n/m` on-count, All / Core / One bulk buttons and a search box above 10 channels.
+
+**Catalogue.** `PAINT_CHANNELS` is derived from the engine's own registry. It reads `ALL_PAINT_CHANNELS` in `Engine/PbrChannelDefinitions.js`, which is a byte-identical copy of `TextureStudio/Engine/PbrChannelDefinitions.js`; `CheckPaintInspector.mjs` fails if the two drift.
+
+- It holds 22 channels in 5 groups: Core (albedo, roughness, metalness, height, normal, ao, opacity) · Surface · Coat · Optics · Emission.
+- Each entry is `{ Id, Label, Hint, Short, Group, Tint, Type, Unit, Min, Max, Def }`.
+- Scalars are shown in display units: engine × 100. `ToEngine(Ch, V)` and `FromEngine(Ch, V)` convert between the two.
+
+### Value and card
+
+```js
+Value = { on: ["albedo", "roughness"], per: { roughness: { value: 40, opacity: 100, blend: "Inherit" }, … } }
+Card  = [ { K, T: "slider" | "seg" | "select" | "colour" | "switch" | "note", L, Def, Min, Max, Step, Unit, Opts, Hint,
+            For: ["scalar" | "colour"], Only: [ids], When(Per, Ch) → bool, Ranged } ]          // or Card(Ch) → fields
+```
+
+- A field with `K:"value"`, or one marked `Ranged`, takes the channel's own range and unit. Every other slider runs 0–100 %.
+- `per` keeps settings for channels that are switched off, so switching one back on restores them.
+
+### API
+
+| Export | Purpose |
+| :--- | :--- |
+| `ChannelStack(Spec)` → html | the component (spec below) |
+| `StackUi()` → `{ Open, Folds, Query }` | UI state; the host keeps one per stack |
+| `StackAction(Act, El, Value, Ui, Card, { Min, Channels, Groups })` | handles every `cs-*` click and returns `{ Ui:true }`, `{ Next }`, `{ Refused }` or `null` |
+| `ParseStackBind(Bind)` → `{ Base, Ch, Key }` | splits a field address `${Bind}@${Ch}.${Key}` |
+| `NormaliseStack(Raw, Card, Default)` · `StackDefault(On, Card, Overrides)` | repairs or seeds a value |
+| `AssignStackField(V, Ch, Key, Raw, Card)` · `ToggleStackChannel(V, Ch, Min)` · `ToggleStackGroup(V, Group, Enable, Min)` | pure edits that return a new value (`null` when it would leave fewer than `Min` channels on) |
+| `CardFields(Card, Ch)` · `CardDefaults(Card, Ch)` | the fields and defaults that apply to one channel |
+| `LinkedStack({ Key, Link, Card, On, Overrides })` → `{ Default, Store, Read, Assign, Field }` | for stores whose flat keys stay the source of truth: Brush Studio's `mat.channels`, `mat.roughness`, … `Link` maps `on` → `"mat.channels"` and `"roughness.value"` → `"mat.roughness"`, so older presets and the painter keep working |
+
+**Spec.** `{ Id, Bind, Title, Hint, Value, Card, Ui, Channels, Groups, Switch = true, Search, Bulk = true, FlatBelow = 0, Tone, Extra, Bare, Empty, Albedo, DefaultOpen(G, Ids), Field(F, V, Bind, Ch), Swatch(Ch), Readout(Ch) → { Text, Kind }, Head(Ch), Editor(Ch), GroupBadge(G, Ids), Edited(Ch), Acts: { Open, Group } }`. Leave out `Value` for a display-only stack, as Material does.
+
+**Acts and binds.** Every control carries `data-act`: `cs-open`, `cs-group`, `cs-toggle`, `cs-group-toggle`, `cs-bulk`, `cs-set` (seg / select picks) or `cs-search`. Every field carries `data-bind="${Bind}@${Ch}.${Key}"`, so a host's existing `input` / `change` handler can route slider edits through `ParseStackBind`.
+
+```js
+// minimal host
+const Ui = StackUi();
+Root.innerHTML = ChannelStack({ Bind: "tool:stack", Value, Card, Ui });
+Root.onclick = (E) => { const El = E.target.closest("[data-act^='cs-']"); const R = El && StackAction(El.dataset.act, El, Value, Ui, Card);
+                        if (R?.Next) Value = R.Next; if (R) Render(); };
+Root.oninput = (E) => { const At = ParseStackBind(E.target.dataset.bind || ""); if (At) { Value = AssignStackField(Value, At.Ch, At.Key, E.target.value, Card); } };
+```
+
+CSS: the `.cs-*` block at the end of `MaterialInspector.css`, built on the `.mi-group` / `.mi-row` / `.mi-editor` rules.
 
 ## Checks
 

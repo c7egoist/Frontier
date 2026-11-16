@@ -11,7 +11,7 @@
 //     Pad: { Render(), Replay(), Schedule(full), Clear(), Undo(), Redo(), CanUndo(), CanRedo(), Ops, Stats,
 //            CommitGradient(), CommitText(), CommitCurve(), CommitMove(), Resize(), Destroy(), SampleAt(x, y) }
 
-import { RenderStroke, FloodFill, DrawStamp, DrawGradient, DrawText, ApplyMove, ShadeHeight, SampleImage, ChannelValue, CHANNEL_BASE, Scratch } from "./Painter.js";
+import { RenderStroke, FloodFill, DrawStamp, DrawGradient, DrawText, ApplyMove, ShadeHeight, SampleImage, ChannelValue, ChannelGrey, CHANNEL_BASE, Scratch } from "./Painter.js";
 import { PreviewPoints } from "./BrushEngine.js";
 import { CurvePath, ProfilePressure } from "./ToolModel.js";
 import { MakeCanvas } from "./Sources.js";
@@ -64,17 +64,28 @@ export function CreatePad(Root, Api) {
       MirrorSets(Op.Points, Op.Symmetry).forEach((Pts, I) => { Plan = RenderStroke(Ctx, Brush, Pts.map(Dev), { Seed: Op.Seed + I * 101, Scale: Scale(), Final, Channel: Ch, Snapshot: Snap }) || Plan; });
       return Plan;
     }
+    // Per-channel cards (ChannelStack) travel with the op as Op.Stack = { per: { channel: { strength, opacity, … } } }.
+    const Per = Op.Stack?.per?.[Ch];
     if (Op.Kind === "erase") {
       if (!Op.Channels.includes(Ch)) return null;
-      return RenderStroke(Ctx, Op.Brush, Op.Points.map(Dev), { Seed: Op.Seed, Scale: Scale(), Final, Erase: true, Strength: Op.Strength });
+      return RenderStroke(Ctx, Op.Brush, Op.Points.map(Dev), { Seed: Op.Seed, Scale: Scale(), Final, Erase: true, Strength: Op.Strength * (Per?.strength ?? 100) / 100 });
     }
     if (Op.Kind === "smudge") {
+      if (Op.Channels && !Op.Channels.includes(Ch)) return null;
       const Snap = Snapshot || Ctx.getImageData(0, 0, Ctx.canvas.width, Ctx.canvas.height);
-      return RenderStroke(Ctx, Op.Brush, Op.Points.map(Dev), { Seed: Op.Seed, Scale: Scale(), Final, Smudge: Op.Strength, SmudgePaint: Ch === "albedo" ? Op.Paint : 0, Snapshot: Snap, Channel: Ch });
+      return RenderStroke(Ctx, Op.Brush, Op.Points.map(Dev), { Seed: Op.Seed, Scale: Scale(), Final, Smudge: Op.Strength * (Per?.strength ?? 100) / 100, SmudgePaint: Ch === "albedo" ? Op.Paint : 0, Snapshot: Snap, Channel: Ch });
+    }
+    const D = Pad.Dpr;
+    if (Op.Kind === "gradient" && Ch !== "albedo") {
+      // A gradient ramps scalar channels from the card's start to end value; colour channels follow the stops.
+      if (!(Op.channels || []).includes(Ch)) return null;
+      const Stops = Per && "start" in Per ? [ChannelGrey(Ch, Per.start), ChannelGrey(Ch, Per.end)] : Op.Stops;
+      DrawGradient(Ctx, { ...Op, Stops, Blend: "Normal", Opacity: Op.Opacity * (Per?.opacity ?? 100) / 100, From: [Op.From[0] * D, Op.From[1] * D], To: [Op.To[0] * D, Op.To[1] * D] });
+      return null;
     }
     const Value = ChannelValue(Op, Ch);
     if (Value === false) return null;
-    const D = Pad.Dpr;
+    if (Ch !== "albedo" && Per?.opacity != null) Op = { ...Op, Opacity: Op.Opacity * Per.opacity / 100 };
     if (Op.Kind === "fill") FloodFill(Ctx, { ...Op, X: Op.X * D, Y: Op.Y * D, Feather: Op.Feather * D, Grow: Math.round(Op.Grow * D), Value });
     else if (Op.Kind === "stamp") DrawStamp(Ctx, { ...Op, Size: Op.Size * D, Points: Op.Points.map(([X, Y, A]) => [X * D, Y * D, A]), Value });
     else if (Op.Kind === "gradient") DrawGradient(Ctx, { ...Op, From: [Op.From[0] * D, Op.From[1] * D], To: [Op.To[0] * D, Op.To[1] * D], Value });
@@ -82,6 +93,8 @@ export function CreatePad(Root, Api) {
     return null;
   }
 
+  // Move ops carry the channels they move (Move Studio → Channels); older ops move everything.
+  const Moves = (Op, Channel) => !Op.Channels || Op.Channels.includes(Channel || "albedo");
   const MoveArgs = (M) => ({ ...M, Dx: M.Dx * Pad.Dpr, Dy: M.Dy * Pad.Dpr });
 
   // Replay every op into Committed for the current view (and the preview stroke into its own layer).
@@ -93,8 +106,8 @@ export function CreatePad(Root, Api) {
     let Dabs = 0;
     for (let I = 0; I < Ops.length; I++) {
       const Op = Ops[I], Next = Ops[I + 1];
-      if (Op.Kind === "move") { if (Op.Target !== "Last item") ApplyMove(Ctx, MoveArgs(Op)); continue; }
-      if (Next?.Kind === "move" && Next.Target === "Last item") {
+      if (Op.Kind === "move") { if (Op.Target !== "Last item" && Moves(Op, Channel)) ApplyMove(Ctx, MoveArgs(Op)); continue; }
+      if (Next?.Kind === "move" && Next.Target === "Last item" && Moves(Next, Channel)) {
         // Render this op alone, transform it, then lay it down.
         const Solo = Scratch("solo", W, H), Sx = Solo.getContext("2d");
         Sx.setTransform(1, 0, 0, 1, 0, 0); Sx.globalAlpha = 1; Sx.globalCompositeOperation = "source-over"; Sx.clearRect(0, 0, W, H);
@@ -147,7 +160,8 @@ export function CreatePad(Root, Api) {
       const Wx = Ctx2(Work);
       Wx.setTransform(1, 0, 0, 1, 0, 0); Wx.globalAlpha = 1; Wx.globalCompositeOperation = "source-over"; Wx.filter = "none";
       Wx.clearRect(0, 0, W, H);
-      if (Tool === "move" && MoveActive(Tools.move) && !Live) {
+      if (Tool === "move" && MoveActive(Tools.move) && !Live && !Moves(MoveFromTool(Tools.move), Ch)) Wx.drawImage(Committed, 0, 0);
+      else if (Tool === "move" && MoveActive(Tools.move) && !Live) {
         if (Tools.move.target === "Last item" && Pad.Ops.length) {
           ReplayInto(Wx, Pad.Ops.slice(0, -1), Ch);
           const Solo = Scratch("solo-preview", W, H), Sx = Solo.getContext("2d");
@@ -225,9 +239,9 @@ export function CreatePad(Root, Api) {
 
   // ---------------------------------------------------------------------------------------------- tool → op helpers
   const MoveActive = (M) => M.dx || M.dy || M.u || M.v || M.scale !== 100 || M.rotation || M.flipX || M.flipY;
-  const MoveFromTool = (M) => ({ Kind: "move", Target: M.target, Dx: M.dx + (M.u / 100) * Pad.W, Dy: M.dy + (M.v / 100) * Pad.H, Scale: M.scale, Rotation: M.rotation, FlipX: M.flipX, FlipY: M.flipY, Wrap: M.wrap });
-  const Pbr = (T) => ({ channels: [...T.channels], roughness: T.roughness, metalness: T.metalness, height: T.height, emissive: T.emissive });
-  const GradientOp = (G) => ({ Kind: "gradient", Type: G.type, Spread: G.spread, Stops: [...G.stops], From: [G.line[0][0] * Pad.W, G.line[0][1] * Pad.H], To: [G.line[1][0] * Pad.W, G.line[1][1] * Pad.H], Opacity: G.opacity, Blend: G.blend, Limit: G.limit, channels: ["albedo"] });
+  const MoveFromTool = (M) => ({ Kind: "move", Target: M.target, Dx: M.dx + (M.u / 100) * Pad.W, Dy: M.dy + (M.v / 100) * Pad.H, Scale: M.scale, Rotation: M.rotation, FlipX: M.flipX, FlipY: M.flipY, Wrap: M.wrap, Channels: [...M.stack.on] });
+  const Pbr = (T) => ({ channels: [...T.channels], roughness: T.roughness, metalness: T.metalness, height: T.height, emissive: T.emissive, Stack: structuredClone(T.stack) });
+  const GradientOp = (G) => ({ Kind: "gradient", Type: G.type, Spread: G.spread, Stops: [...G.stops], From: [G.line[0][0] * Pad.W, G.line[0][1] * Pad.H], To: [G.line[1][0] * Pad.W, G.line[1][1] * Pad.H], Opacity: G.opacity, Blend: G.blend, Limit: G.limit, channels: [...G.stack.on], Stack: structuredClone(G.stack) });
   const TextOp = (T) => ({ Kind: "text", Content: T.content, Font: T.font, Weight: T.weight, Italic: T.italic, Align: T.align, Size: T.size, Spacing: T.spacing, LineHeight: T.lineHeight, Arc: T.arc, Rotation: T.rotation, Colour: T.colour, Opacity: T.opacity, Outline: T.outline, OutlineColour: T.outlineColour, At: [T.at[0] * Pad.W, T.at[1] * Pad.H], ...Pbr(T) });
 
   function Push(Op) {
@@ -315,8 +329,8 @@ export function CreatePad(Root, Api) {
     const Tool = Api.Tool(), Tools = Api.Tools();
     const Brush = Tool === "erase" ? Api.EraserBrush() : Tool === "smudge" ? Api.SmudgeBrush() : Api.Brush();
     const P0 = Sample(E, null, Brush);
-    const Op = Tool === "erase" ? { Kind: "erase", Brush, Points: [P0], Seed: SeedCounter++, Channels: [...Tools.erase.channels], Strength: Tools.erase.strength / 100 }
-      : Tool === "smudge" ? { Kind: "smudge", Brush, Points: [P0], Seed: SeedCounter++, Strength: Tools.smudge.strength / 100, Paint: Tools.smudge.paint / 100 }
+    const Op = Tool === "erase" ? { Kind: "erase", Brush, Points: [P0], Seed: SeedCounter++, Channels: [...Tools.erase.channels], Strength: Tools.erase.strength / 100, Stack: structuredClone(Tools.erase.stack) }
+      : Tool === "smudge" ? { Kind: "smudge", Brush, Points: [P0], Seed: SeedCounter++, Strength: Tools.smudge.strength / 100, Paint: Tools.smudge.paint / 100, Channels: [...Tools.smudge.stack.on], Stack: structuredClone(Tools.smudge.stack) }
       : { Kind: "paint", Brush, Points: [P0], Seed: SeedCounter++, Symmetry: Tools.paint.symmetry };
     const NeedsSnapshot = Tool === "smudge" || (Tool === "paint" && Brush.values["render.mode"].endsWith("blending"));
     Live = { Op, Snapshot: NeedsSnapshot ? Ctx2(Committed).getImageData(0, 0, Committed.width, Committed.height) : null };

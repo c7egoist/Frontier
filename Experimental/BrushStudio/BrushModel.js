@@ -10,6 +10,7 @@
 
 import { PAINT_TOOLS, PAINT_FAMILIES, PAINT_SWATCHES, paintTool, toolSchema } from "./Engine/PaintToolCatalogue.js";
 import { CURVE_PRESETS, COLOUR_DYNAMIC_MODES, OPACITY_DYNAMIC_MODES, COLOUR_GRADIENT_PRESETS } from "./Engine/BrushDynamics.js";
+import { PAINT_CHANNELS, PAINT_CHANNEL, BLEND_CHANNEL, LinkedStack } from "../MaterialInspector/ChannelStack.js";
 
 export { PAINT_TOOLS, PAINT_FAMILIES, PAINT_SWATCHES, CURVE_PRESETS, COLOUR_DYNAMIC_MODES, OPACITY_DYNAMIC_MODES, COLOUR_GRADIENT_PRESETS };
 
@@ -51,6 +52,30 @@ export const CHANNELS = Object.freeze([
   { Id: "height", Label: "Height", Colour: "#7f7fff" },
   { Id: "emissive", Label: "Emissive", Colour: "#ff9a3b" },
 ]);
+
+export { PAINT_CHANNELS, PAINT_CHANNEL };
+
+// The brush's per-channel card (ChannelStack): what the brush writes into each paint channel it is switched on for.
+// Albedo takes the brush colour; emissive glows in the primary colour at its strength.  The old five channel keys
+// (mat.channels / mat.roughness / mat.roughSource / …) stay the source of truth for what they already held.
+export const BRUSH_CARD = Object.freeze([
+  { K: "value", L: "Value", T: "slider", For: ["scalar"], Def: (Ch) => Ch.Def },
+  { K: "value", L: "Colour", T: "colour", For: ["colour"], Skip: ["albedo", "emissive"], Def: (Ch) => Ch.Def },
+  { K: "strength", L: "Strength", T: "slider", Only: ["emissive"], Def: 40, Hint: "Glow of the primary colour" },
+  { K: "source", L: "Source", T: "seg", For: ["scalar"], Opts: ["None", "Shape", "Grain"], Def: (Ch) => (Ch.Id === "height" ? "Grain" : "None"), Hint: "Texture the value with the shape or grain" },
+  { K: "amount", L: "Amount", T: "slider", For: ["scalar"], Def: (Ch) => (Ch.Id === "height" ? 60 : 50), When: (P) => P.source !== "None" },
+  { K: "flow", L: "Flow", T: "slider", Def: 100, Hint: "Share of the stroke this channel receives" },
+  { K: "blend", L: "Blend", T: "select", Opts: BLEND_CHANNEL, Def: "Normal" },
+  { K: "albedo-note", T: "note", Only: ["albedo"], Text: "Colour comes from the Colour section and the colour dynamics." },
+]);
+export const BRUSH_LINK = Object.freeze({
+  on: "mat.channels",
+  "roughness.value": "mat.roughness", "roughness.source": "mat.roughSource", "roughness.amount": "mat.roughAmount",
+  "metalness.value": "mat.metalness", "metalness.source": "mat.metalSource", "metalness.amount": "mat.metalAmount",
+  "height.value": "mat.height", "height.source": "mat.heightSource", "height.amount": "mat.heightAmount",
+  "emissive.strength": "mat.emissive",
+});
+export const BRUSH_STACK = LinkedStack({ Key: "mat.stack", Link: BRUSH_LINK, Card: BRUSH_CARD, On: ["albedo", "roughness", "height"] });
 
 // ------------------------------------------------------------------------------------------------ schema
 // Field: { K, L, T: slider | seg | switch | select | colour | curve | shape | grain | render | channels | gradient | palette,
@@ -261,23 +286,19 @@ export const SECTIONS = Object.freeze([
     ] },
   ] },
   { Id: "materials", Label: "Materials", Glyph: "material", Hint: "PBR channels the brush paints", Groups: [
-    { Title: "Channels", Fields: [{ K: "mat.channels", L: "Channels", T: "channels", Def: ["albedo", "roughness", "height"] }] },
-    { Title: "Roughness", When: (V) => V["mat.channels"].includes("roughness"), Fields: [
+    { Title: "Paint channels", Hint: "Switch channels on · open one for its card", Fields: [{ K: "mat.stack", L: "Paint channels", T: "stack", Stack: BRUSH_STACK, Def: BRUSH_STACK.Store({}) }] },
+    // The linked keys the stack reads and writes (never drawn on their own — ChannelStack shows them inside each card).
+    { Title: "Linked channel keys", Hidden: true, When: () => false, Fields: [
+      { K: "mat.channels", L: "Channels", T: "channels", Def: ["albedo", "roughness", "height"] },
       S("mat.roughness", "Value", 0, 100, 55),
       G("mat.roughSource", "Source", ["None", "Shape", "Grain"], "None", "Texture the value with the shape or grain"),
-      S("mat.roughAmount", "Amount", 0, 100, 50, "", { When: (V) => V["mat.roughSource"] !== "None" }),
-    ] },
-    { Title: "Metallic", When: (V) => V["mat.channels"].includes("metalness"), Fields: [
+      S("mat.roughAmount", "Amount", 0, 100, 50),
       S("mat.metalness", "Value", 0, 100, 0),
       G("mat.metalSource", "Source", ["None", "Shape", "Grain"], "None"),
-      S("mat.metalAmount", "Amount", 0, 100, 50, "", { When: (V) => V["mat.metalSource"] !== "None" }),
-    ] },
-    { Title: "Height", When: (V) => V["mat.channels"].includes("height"), Fields: [
+      S("mat.metalAmount", "Amount", 0, 100, 50),
       S("mat.height", "Relief", -100, 100, 25, "Raise (+) or carve (−)"),
       G("mat.heightSource", "Source", ["None", "Shape", "Grain"], "Grain"),
-      S("mat.heightAmount", "Amount", 0, 100, 60, "", { When: (V) => V["mat.heightSource"] !== "None" }),
-    ] },
-    { Title: "Emission", When: (V) => V["mat.channels"].includes("emissive"), Fields: [
+      S("mat.heightAmount", "Amount", 0, 100, 60),
       S("mat.emissive", "Strength", 0, 100, 40, "Glow of the primary colour"),
     ] },
   ] },
@@ -419,7 +440,8 @@ export function Normalise(Values = {}) {
       case "grain": Out[K] = GRAINS.some((E) => E.Id === V) ? V : F.Def; break;
       case "render": Out[K] = RENDER_MODES.some((E) => E.Id === V) ? V : F.Def; break;
       case "gradient": Out[K] = COLOUR_GRADIENT_PRESETS.some((E) => E.id === V) ? V : F.Def; break;
-      case "channels": { const L = Array.isArray(V) ? CHANNELS.map((C) => C.Id).filter((C) => V.includes(C)) : null; Out[K] = L?.length ? L : [...F.Def]; break; }
+      case "channels": { const L = Array.isArray(V) ? PAINT_CHANNELS.map((C) => C.Id).filter((C) => V.includes(C)) : null; Out[K] = L?.length ? L : [...F.Def]; break; }
+      case "stack": Out[K] = F.Stack.Store(V); break;
       case "palette": { const L = Array.isArray(V) ? V.filter((C) => HEX.test(C)).map((C) => C.toLowerCase()).slice(0, 8) : []; Out[K] = L.length >= 2 ? L : [...F.Def]; break; }
       default: Out[K] = V ?? F.Def;
     }

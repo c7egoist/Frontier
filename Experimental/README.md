@@ -29,6 +29,7 @@
 | **`ForceFieldVisualization/`** | Shared 3D force-field glyph and streamline builder consumed by `ParticleEditor/` and `ForceFieldEditor/`. |
 | **`Shared/UvTextureBridge.js`** | Cross-studio UV layout & mesh transfer bridge connecting `UVEditor/` and `TextureStudio/`. |
 | **`VehicleProvingGrounds/{Archive,Source}/`** | Binary `FCT1` `ControlVehicle` body/rim/tyre streams and authored powertrain/Pacejka/thermal sheets loaded by `VehicleLab/`. |
+| **`MaterialInspector/` · `ArtworkInspector/` · `BakeInspector/` · `BrushStudio/` · `PaintInspector/`** | TextureStudio's six workspaces as Project Zero dock pages (Material · Pattern · Stamp · Baking · Brush · Paint), sharing `MaterialInspector/{CardKit,OutlinerKit,ChannelStack}.js`. `ChannelStack` is the reusable channel dropdown (see `MaterialInspector/README.md`). |
 | **`UI_COMPONENT_GUIDELINES.md`** | Visual layout, typography, and custom inspector widget specification shared across the reference studios. |
 
 ---

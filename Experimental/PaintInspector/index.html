@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Texture Paint · Frontier</title>
+<link rel="stylesheet" href="../MaterialInspector/MaterialInspector.css">
+<link rel="stylesheet" href="./PaintInspector.css">
+<link rel="stylesheet" href="../MaterialInspector/Outliner.css">
+<!-- PaintModel.js builds layers with TextureStudio's own engine (createPaintLayer, PAINT_BLENDS, material presets), which
+     imports bare "three" — map it to the vendored build. -->
+<script type="importmap">{ "imports": { "three": "../TextureStudio/Vendor/three.esm.min.js" } }</script>
+</head>
+<body>
+<!-- TextureStudio's Texture Paint workspace — its Layers panel and Layer Inspector — redesigned in the Project Zero style:
+     the layer outliner docked beside the layer card (one shared state through the inspector; ?outliner=0 shows the card
+     alone, ?layer=<id> opens a layer).  The card edits the paint document; strokes are painted on the Brush page. -->
+<main class="mi-dock">
+  <div id="Nav"></div>
+  <div class="mi-pair">
+    <aside id="Outliner" class="ol-host"></aside>
+    <div id="Card" class="mi-host"></div>
+  </div>
+</main>
+<script type="module">
+  import { Mount } from "./PaintInspector.js";
+  import { MountPaintOutliner } from "./PaintOutliner.js";
+  import { DockNav } from "../MaterialInspector/CardKit.js";
+  document.getElementById("Nav").outerHTML = DockNav("paint");
+  const Query = new URLSearchParams(location.search), Docked = Query.get("outliner") !== "0";
+  globalThis.PaintInspector = Mount(document.getElementById("Card"), { docked: Docked, layer: Query.get("layer") });
+  if (Docked) globalThis.PaintOutliner = MountPaintOutliner(document.getElementById("Outliner"), globalThis.PaintInspector);
+  else document.getElementById("Outliner").remove();
+</script>
+</body>
+</html>

@@ -31,6 +31,19 @@ For the shared visual language, look at the Particle and Photometric studios alo
 - Mark read-only source assets with a lock affordance. Show warning/caution status when a source or dependency is missing or invalid, and a hidden/visibility status when an item is disabled. Tooltips should explain each status.
 - Simulation controls must run a meaningful preview using the relevant model/parameters, expose run/pause/reset behavior as appropriate, and present useful live readouts. Label simplified previews honestly; do not imply they execute arbitrary code or a production solver when they do not.
 
+## Shared texturing components
+
+The Material, Pattern / Stamp, Map Baking, Brush and Texture Paint pages share one kit in `MaterialInspector/`. Reuse it instead of writing page-local copies:
+
+- **`CardKit.js`** provides the shared card pieces: knobs, colour fields, switches, segments, `Dropdown` (every pick list), stat tiles, `History` (undo / redo), `DockNav` (the six-page pill) and `Download`.
+- **`OutlinerKit.js`** provides `Shell`, `TreeRow`, `GroupRow` and `CreateOutliner`: search, filters, keyboard, rename, delete and drag to reorder or nest.
+- **`ChannelStack.js`** is the channel dropdown. Any list of PBR / paint channels that can be switched on and off uses it, with one card per channel. It covers the Material channel groups, the Brush channels and per-tool cards, and the Paint layer channels.
+  - Pass a `Card` (the fields each channel shows) and keep a `StackUi()` per stack.
+  - Route `cs-*` clicks through `StackAction` and `@ch.key` binds through `ParseStackBind`.
+  - Hosts that already store channel settings as flat keys wrap them with `LinkedStack`, so older documents keep loading.
+  - The channel catalogue comes from TextureStudio's `PbrChannelDefinitions.js`; never hand-copy channel lists.
+  - The full reference is [MaterialInspector/README.md § ChannelStack](./MaterialInspector/README.md#channelstack--the-reusable-channel-dropdown).
+
 ## Debugging and visualization
 
 - Keep debug channels selectable and named. Their graphic should be understandable at a glance and use consistent semantic colors.

@@ -8,6 +8,7 @@
 // opening a row expands that channel's editor in place, and source / generator choice are visible segments and chips.
 
 import * as M from "./MaterialModel.js";
+import { ChannelStack } from "./ChannelStack.js";
 import { icon } from "./Icons.js";
 import { Esc, Fixed, Pct, Knob, ColourField, Stops, Toggle, StatTile, Dropdown, SyncSiblings as SyncKit } from "./CardKit.js";
 
@@ -115,29 +116,19 @@ function RowHead(L, Key) {
     </button>`;
 }
 
+// The grouped channel list is the shared ChannelStack (display-only here: no enable switches — a stratum's channels are
+// fixed — with this card's own swatches, scrub readouts and source editors plugged in).
 function GroupsHtml(L) {
-  const Q = S.Query.trim().toLowerCase();
-  const Visible = L.Channels.filter((K) => !Q || (M.CHANNEL[K].Caption + " " + M.CHANNEL[K].Hint + " " + M.CHANNEL[K].Group).toLowerCase().includes(Q));
-  if (!Visible.length) return `<p class="mi-empty">No channel on this stratum matches “${Esc(S.Query)}”.</p>`;
-  // Short strata (coat, flakes, fresh detail) read better as one flat list; group heads only pay off on long ones.
-  const Single = Visible.length <= 8 || M.GROUPS.filter((G) => Visible.some((K) => M.CHANNEL[K].Group === G)).length === 1;
-  const RowHtml = (K) => `<div class="mi-row ${S.Channel === K ? "open" : ""}" data-row="${K}">${RowHead(L, K)}${S.Channel === K ? EditorHtml(L, K) : ""}</div>`;
-  if (Single) return `<div class="mi-group open flat">${Visible.map(RowHtml).join("")}</div>`;
-  return M.GROUPS.map((G) => {
-    const Keys = Visible.filter((K) => M.CHANNEL[K].Group === G);
-    if (!Keys.length) return "";
-    const Authored = Keys.filter((K) => M.ChannelSource(S.P, L, K).Mode !== "value").length;
-    const Id = `${L.Identity}:${G}`;
-    const Open = Q ? true : S.Groups[Id] ?? (G === "Core" || Authored > 0 || Keys.includes(S.Channel));
-    return `<div class="mi-group ${Open ? "open" : ""}" data-group="${Esc(G)}">
-      <button type="button" class="mi-group-head" data-act="group" data-group-id="${Esc(Id)}" data-open="${Open}" aria-expanded="${Open}">
-        <span class="mi-chev">${icon("chevron", 11)}</span><span>${Esc(G)}</span><small>${Keys.length}</small>
-        ${Authored ? `<span class="mi-auth" title="${Authored} channel${Authored > 1 ? "s" : ""} driven by a field, ramp or image">${icon("field", 10)}${Authored}</span>` : ""}
-        ${Open ? "" : `<span class="mi-peek">${Keys.slice(0, 6).map((K) => SwatchHtml(L, K)).join("")}</span>`}
-      </button>
-      ${Open ? Keys.map(RowHtml).join("") : ""}
-    </div>`;
-  }).join("");
+  const Authored = (Ids) => Ids.filter((K) => M.ChannelSource(S.P, L, K).Mode !== "value").length;
+  return ChannelStack({
+    Id: L.Identity, Bare: true, Switch: false, FlatBelow: 8, Groups: M.GROUPS, Acts: { Group: "group" },
+    Channels: L.Channels.map((K) => ({ Id: K, Label: M.CHANNEL[K].Caption, Hint: M.CHANNEL[K].Hint, Group: M.CHANNEL[K].Group })),
+    Ui: { Open: S.Channel, Query: S.Query, Folds: Object.fromEntries(M.GROUPS.filter((G) => `${L.Identity}:${G}` in S.Groups).map((G) => [G, S.Groups[`${L.Identity}:${G}`]])) },
+    Empty: `No channel on this stratum matches “${S.Query}”.`,
+    Swatch: (C) => SwatchHtml(L, C.Id), Head: (C) => RowHead(L, C.Id), Editor: (C) => EditorHtml(L, C.Id),
+    DefaultOpen: (G, Ids) => G === "Core" || Authored(Ids) > 0 || Ids.includes(S.Channel),
+    GroupBadge: (G, Ids) => { const N = Authored(Ids); return N ? `<span class="mi-auth" title="${N} channel${N > 1 ? "s" : ""} driven by a field, ramp or image">${icon("field", 10)}${N}</span>` : ""; },
+  });
 }
 
 // ------------------------------------------------------------------------------------------------ inline channel editor

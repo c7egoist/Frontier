@@ -11,7 +11,8 @@
 import { icon } from "../MaterialInspector/Icons.js";
 import { Esc, Knob, ColourField, Stops, SwitchRow, Toggle, Segments, Dropdown, Clamp, Pct, Fixed, SyncSiblings, Download, History } from "../MaterialInspector/CardKit.js";
 import * as M from "./BrushModel.js";
-import { TOOLS, TOOL, CreateTools, SetToolValue, VisibleToolFields, ERASERS, STUDIOS, TOOL_COLOURS, PALETTE, ToolChanged, ToolChangedBySection, SectionGroups, ToolDefault } from "./ToolModel.js";
+import { TOOLS, TOOL, CreateTools, SetToolValue, PatchTool, TOOL_STACKS, VisibleToolFields, ERASERS, STUDIOS, TOOL_COLOURS, PALETTE, ToolChanged, ToolChangedBySection, SectionGroups, ToolDefault } from "./ToolModel.js";
+import { ChannelStack, StackAction, StackUi, ParseStackBind, VisibleCardFields } from "../MaterialInspector/ChannelStack.js";
 import { MountViewport } from "../MaterialInspector/Viewport.js";
 import { paintTool, toolSchema, toolArtURL } from "./Engine/PaintToolCatalogue.js";
 import { RenderStroke } from "./Painter.js";
@@ -37,6 +38,7 @@ export function Mount(Host, Options = {}) {
     Brushes: {}, Custom: [], ActiveId: Options.brush || "brush-hog-bristle-flat-12-oil", Section: "stroke", Open: new Set(), Filter: "",
     Tool: TOOL[Options.tool] ? Options.tool : "paint", PrevTool: "paint", Studio: null, ToolSection: {}, PadOpen: Options.pad !== false, View: "albedo", Paper: "paper", Live: true, Preview: true,
     Tools: CreateTools(), Recent: [], Colours: [], Stats: {}, Note: "",
+    Stacks: {},   // ChannelStack UI per stack bind: { Open, Folds, Query }
   };
   St.Studio = St.Tool;
   if (!M.PAINT_TOOLS.some((T) => T.id === St.ActiveId)) St.ActiveId = M.PAINT_TOOLS.find((T) => T.key === "brush").id;
@@ -185,6 +187,8 @@ export function Mount(Host, Options = {}) {
 
   // Bind addresses: b|sec.key  ·  p|param  ·  t|tool|key  ·  m|meta   (palette / stop entries add :index)
   function Write(Bind, Raw, { Live = false } = {}) {
+    const At = ParseStackBind(Bind);
+    if (At) { const S = StackOf(At.Base); if (S) ApplyStackPatch(S, S.L.Field(S.Flat, At.Ch, At.Key, Raw), { Live }); return; }
     const [Scope, A, B2] = Bind.split("|");
     if (Scope === "b") {
       const [Key, Index] = A.split(":"), F = M.FIELDS[Key];
@@ -218,6 +222,70 @@ export function Mount(Host, Options = {}) {
       St.Brushes[St.ActiveId] = { ...Brush(), [A]: Clean };
       if (!Live) { RenderLibrary(); RenderHead(); RenderSections(); }
       else { RenderHead(); }
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------- channel stacks
+  // Paint channels are a ChannelStack (MaterialInspector/ChannelStack.js) everywhere: the brush's Materials section, the
+  // Paint / Curve tool popups (both show the brush's stack) and each tool's own channel stack (Fill, Stamp, Text,
+  // Gradient, Erase, Smudge, Move).  Bind "b|mat.stack" or "t|<tool>|stack"; card fields bind "<stack>@<channel>.<key>".
+  const ToolBase = CreateTools();
+  const StackUiOf = (Bind) => (St.Stacks[Bind] ||= StackUi());
+  function StackOf(Base) {
+    const [Scope, A, B2] = Base.split("|");
+    if (Scope === "b" && M.FIELDS[A]?.T === "stack") return { Scope, Bind: Base, L: M.FIELDS[A].Stack, Flat: Brush().values, Reset: Brush().reset.values };
+    if (Scope === "t" && B2 === "stack" && TOOL_STACKS[A]) return { Scope, Bind: Base, Tool: A, L: TOOL_STACKS[A], Flat: St.Tools[A], Reset: ToolBase[A] };
+    return null;
+  }
+  function ApplyStackPatch(S, Patch, { Live = false } = {}) {
+    if (S.Scope === "b") EditBrush((Br) => ({ ...Br, values: M.Normalise({ ...Br.values, ...Patch }) }), { Live });
+    else {
+      St.Tools = PatchTool(St.Tools, S.Tool, Patch);
+      if (S.Tool === "erase") EraseMemo = null;
+      if (S.Tool === "smudge") SmudgeMemo = null;
+      if (SettingsSig() !== SigSettings) RenderSettings(); else { RefreshEdited(); PaintPreviews(); }
+      RenderSections(); RenderHead(); RenderSide();
+    }
+    Pad.Schedule(St.View !== "albedo" || S.Scope === "b");
+  }
+  const StackFieldEdited = (S, Ch, K) => { const A = S.L.Read(S.Flat).per[Ch], B = S.L.Read(S.Reset).per[Ch]; return JSON.stringify(A?.[K]) !== JSON.stringify(B?.[K]); };
+  function StackAlbedo(S) {
+    if (S.Scope === "b") return { Albedo: Brush().values["colour.primary"], AlbedoText: Brush().values["colour.primary"].toUpperCase() };
+    const V = St.Tools[S.Tool];
+    if (S.Tool === "gradient") return { Albedo: `linear-gradient(90deg, ${V.stops.join(", ")})`, AlbedoText: `${V.stops.length} stops` };
+    return V.colour ? { Albedo: V.colour, AlbedoText: V.colour.toUpperCase() } : {};
+  }
+  function StackHtml(Title, Bind) {
+    const S = StackOf(Bind);
+    if (!S) return "";
+    const Full = S.L.Read(S.Flat), Base = S.L.Read(S.Reset);
+    const Edited = (C) => Full.on.includes(C.Id) !== Base.on.includes(C.Id) || JSON.stringify(Full.per[C.Id]) !== JSON.stringify(Base.per[C.Id]);
+    return ChannelStack({
+      Bind, Title, Value: Full, Card: S.L.Card, Ui: StackUiOf(Bind), Tone: "blue", Edited, ...StackAlbedo(S),
+      Hint: S.Scope === "b" ? "this brush" : `${TOOL[S.Tool].Label.toLowerCase()} tool`,
+      Field: (F, V, B, Ch) => FieldHtml(F, V, B, StackFieldEdited(S, Ch.Id, F.K)),
+    });
+  }
+  function StackSig(Bind) {
+    const S = StackOf(Bind);
+    if (!S) return "";
+    const Full = S.L.Read(S.Flat), Ui = StackUiOf(Bind), Ch = Ui.Open && M.PAINT_CHANNEL[Ui.Open];
+    return `${Full.on.join(",")}~${Ui.Open}~${JSON.stringify(Ui.Folds)}~${Ui.Query}~${Ch ? VisibleCardFields(S.L.Card, Ch, Full.per[Ch.Id]).map((F) => F.K).join(",") : ""}`;
+  }
+  const FieldSig = (F, Tool) => (F.T === "stack" ? StackSig(Tool ? `t|${Tool}|${F.K}` : `b|${F.K}`) : F.K === "@mat.stack" ? StackSig("b|mat.stack") : "");
+  // After a slider drag: refresh row readouts and swatches without rebuilding the open card.
+  function RefreshStacks() {
+    for (const El of Settings.querySelectorAll(".cs-stack[data-bind]")) {
+      const T = document.createElement("template");
+      T.innerHTML = StackHtml(El.getAttribute("aria-label"), El.dataset.bind);
+      for (const Row of El.querySelectorAll(".cs-row")) {
+        const Twin = T.content.querySelector(`.cs-row[data-row="${Row.dataset.row}"]`);
+        if (!Twin) continue;
+        Row.classList.toggle("edited", Twin.classList.contains("edited"));
+        for (const Sel of [".mi-readout", ".mi-swatch"]) { const A = Row.querySelector(`.mi-row-head ${Sel}`), B = Twin.querySelector(`.mi-row-head ${Sel}`); if (A && B && A.outerHTML !== B.outerHTML) A.outerHTML = B.outerHTML; }
+      }
+      const Count = El.querySelector(".cs-head small"), Twin = T.content.querySelector(".cs-head small");
+      if (Count && Twin) Count.textContent = Twin.textContent;
     }
   }
 
@@ -262,7 +330,7 @@ export function Mount(Host, Options = {}) {
       case "grain": return `<div class="bs-field">${Label(F.L, "", Bind, Edited)}${SourcePick(Bind, M.GRAINS, Value, GrainThumb, "Grain source", "grain")}</div>`;
       case "render": return `<div class="bs-field">${Label(F.L || "Rendering mode", "", Bind, Edited)}${Dropdown("set", M.RENDER_MODES.map((R, I) => [R.Label, R.Id, `<i class="bs-render-art m${I}"></i>`, R.Hint]), Value, { Label: "Rendering mode", Extra: `data-bind="${Bind}"`, Class: "bs-dd-render", Search: false })}</div>`;
       case "gradient": return `<div class="bs-field">${Label(F.L, "", Bind, Edited)}${Dropdown("set", M.COLOUR_GRADIENT_PRESETS.map((G) => [G.label, G.id, `<i class="bs-dd-grad" style="background:linear-gradient(90deg, ${G.stops.join(", ")})"></i>`, G.sub || ""]), Value, { Label: F.L, Extra: `data-bind="${Bind}"` })}</div>`;
-      case "channels": return `<div class="bs-field">${Label(F.L, "", Bind, Edited)}<div class="bs-channels">${M.CHANNELS.map((C) => `<button type="button" class="bs-chan ${Value.includes(C.Id) ? "on" : ""}" data-act="chan" data-bind="${Bind}" data-value="${C.Id}" aria-pressed="${Value.includes(C.Id)}"><i style="background:${C.Colour}"></i>${Esc(C.Label)}</button>`).join("")}</div></div>`;
+      case "stack": return StackHtml(F.L, Bind);
       case "palette": case "stops": return `<div class="bs-field">${Label(F.L, "", Bind, Edited)}${Stops(Bind, Value, 8, 2)}</div>`;
       case "text": return `<div class="bs-field">${Label(F.L, "", Bind, Edited)}<textarea class="bs-text" data-bind="${Bind}" data-fid="${Bind}" rows="2" spellcheck="false" aria-label="${Esc(F.L)}">${Esc(Value)}</textarea></div>`;
       default: return "";
@@ -385,14 +453,14 @@ export function Mount(Host, Options = {}) {
   // ---------------------------------------------------------------------------------------------- settings column
   function ToolSig() {
     const Sec = ToolSec(), Tool = St.Studio, V = St.Tools[Tool], Bv = Brush().values;
-    return `${Tool}|${Sec.Id}|${St.ActiveId}|` + SectionGroups(Tool, Sec).map((G) => VisibleToolFields(G, V, Bv).map((F) => F.K).join(",")).join(";");
+    return `${Tool}|${Sec.Id}|${St.ActiveId}|` + SectionGroups(Tool, Sec).filter((G) => !G.When || G.When(V, Bv)).map((G) => VisibleToolFields(G, V, Bv).map((F) => F.K + FieldSig(F, Tool)).join(",")).join(";");
   }
   function SettingsSig() {
     if (ToolSec()) return ToolSig();
     const Sec = M.SECTIONS.find((S) => S.Id === St.Section), V = Brush().values;
     if (St.Section === "instrument") return `${St.Section}|${Brush().instrument}|${JSON.stringify(Brush().params)}`;
     if (St.Section === "about") return `${St.Section}|${St.ActiveId}`;
-    return `${St.Section}|${St.ActiveId}|` + Sec.Groups.filter((G) => !G.When || G.When(V)).map((G) => M.VisibleFields(G, V).map((F) => F.K).join(",")).join(";");
+    return `${St.Section}|${St.ActiveId}|` + Sec.Groups.filter((G) => !G.When || G.When(V)).map((G) => M.VisibleFields(G, V).map((F) => F.K + FieldSig(F)).join(",")).join(";");
   }
 
   function RenderSettings() {
@@ -468,7 +536,9 @@ export function Mount(Host, Options = {}) {
       if (!El) continue;
       const Bind = El.dataset.bind;
       let On;
-      if (Bind.startsWith("t|")) { const [, Tl, K2] = Bind.split("|"); if (!TCh[Tl]) TCh[Tl] = ToolChanged(Tl, St.Tools[Tl]); On = TCh[Tl].has(K2.split(":")[0]); }
+      const At = ParseStackBind(Bind);
+      if (At) { const S = StackOf(At.Base); if (!S) continue; On = StackFieldEdited(S, At.Ch, At.Key); }
+      else if (Bind.startsWith("t|")) { const [, Tl, K2] = Bind.split("|"); if (!TCh[Tl]) TCh[Tl] = ToolChanged(Tl, St.Tools[Tl]); On = TCh[Tl].has(K2.split(":")[0]); }
       else {
         const Key = Bind.startsWith("b|") ? Bind.slice(2).split(":")[0] : Bind.startsWith("p|") ? `instrument.${Bind.slice(2)}` : null;
         if (!Key) continue;
@@ -481,6 +551,7 @@ export function Mount(Host, Options = {}) {
       if (On && !Btn) Slot.insertAdjacentHTML("beforeend", ResetBtn(Bind, true));
       if (!On && Btn) Btn.remove();
     }
+    RefreshStacks();
     const Count = ToolSec() ? ToolChangedBySection(St.Studio, St.Tools[St.Studio])[SectionId()] : M.ChangedBySection(B)[St.Section];
     const RS = Settings.querySelector('[data-act="reset-section"]');
     if (RS) RS.disabled = !Count;
@@ -764,6 +835,8 @@ export function Mount(Host, Options = {}) {
     if (Scope === "b" || Scope === "p" || Scope === "t") Write(Bind, Value);
   }
   function FieldReset(Bind) {
+    const At = ParseStackBind(Bind);
+    if (At) { const S = StackOf(At.Base); if (S) { ApplyStackPatch(S, S.L.Field(S.Flat, At.Ch, At.Key, S.L.Read(S.Reset).per[At.Ch]?.[At.Key])); RenderSettings(); } return; }
     const [Scope, A] = Bind.split("|"), B = Brush();
     if (Scope === "b") EditBrush((Br) => ({ ...Br, values: M.Normalise({ ...Br.values, [A]: structuredClone(B.reset.values[A]) }) }));
     else if (Scope === "p") EditBrush((Br) => M.SetParam(Br, A, B.reset.params[A]));
@@ -774,6 +847,11 @@ export function Mount(Host, Options = {}) {
 
   Host.addEventListener("input", (E) => {
     const El = E.target;
+    if (El.dataset.act === "cs-search") {
+      StackUiOf(El.dataset.bind).Query = El.value; const Pos = El.selectionStart; RenderSettings();
+      const N = Settings.querySelector(`[data-act="cs-search"][data-bind="${CSS.escape(El.dataset.bind)}"]`); N?.focus(); try { N?.setSelectionRange(Pos, Pos); } catch { /* */ }
+      return;
+    }
     if (El.dataset.act === "filter") { St.Filter = El.value; const Pos = El.selectionStart; RenderLibrary(); const N = Lib.querySelector('[data-act="filter"]'); N?.focus(); try { N?.setSelectionRange(Pos, Pos); } catch { /* */ } return; }
     const Bind = El.dataset.bind;
     if (!Bind) return;
@@ -810,13 +888,13 @@ export function Mount(Host, Options = {}) {
       case "section": { const Id = El.dataset.section; if (IsBrushStudio() && !STUDIOS.paint.Sections.some((S) => S.Id === Id)) St.Section = Id; else if (IsBrushStudio()) St.Section = Id; else St.ToolSection[St.Studio] = Id; RenderSections(); RenderSettings(); Settings.scrollTop = 0; break; }
       case "set": ApplySet(Bind, El.dataset.value); if (Bind.startsWith("b|") || Bind.startsWith("p|")) RenderSettings(); break;
       case "toggle": ApplyToggle(Bind); if (!Bind.startsWith("t|")) RenderSettings(); break;
-      case "chan": {
-        const [Scope, A, B2] = Bind.split("|"), Id = El.dataset.value;
-        const List = Scope === "b" ? Brush().values[A] : St.Tools[A][B2];
-        const Next = List.includes(Id) ? List.filter((C) => C !== Id) : [...List, Id];
-        if (!Next.length) { Flash("Keep at least one channel"); break; }
-        if (Scope === "b") { EditBrush((Br) => M.SetValue(Br, A, Next)); RenderSettings(); } else Write(Bind, Next);
-        if (St.View !== "albedo") Pad.Schedule(true);
+      case "cs-open": case "cs-group": case "cs-toggle": case "cs-group-toggle": case "cs-bulk": {
+        const S = StackOf(Bind);
+        if (!S) break;
+        const Res = StackAction(Act, El, S.L.Read(S.Flat), StackUiOf(Bind), S.L.Card);
+        if (Res?.Refused) Flash(Res.Refused);
+        else if (Res?.Next) ApplyStackPatch(S, S.L.Assign(Res.Next));
+        RenderSettings();
         break;
       }
       case "curve-preset": { const [, Key] = Bind.split("|"); EditBrush((Br) => M.SetValue(Br, Key, structuredClone(M.CURVE_PRESETS[El.dataset.value]))); RedrawCurves(); break; }

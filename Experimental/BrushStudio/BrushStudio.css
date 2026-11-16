@@ -124,11 +124,6 @@
 .bs-render-art.m5::before { background: #4d9bff; } .bs-render-art.m5::after { opacity: .85; mix-blend-mode: hard-light; }
 
 /* channels, gradients */
-.bs-channels { display: flex; flex-wrap: wrap; gap: 4px; }
-.bs-chan { min-height: 26px; padding: 2px 10px 2px 7px; border-radius: 13px; background: #121212; color: #7a7a7a; font-size: 10px; }
-.bs-chan i { width: 9px; height: 9px; border-radius: 50%; opacity: .35; }
-.bs-chan.on { background: #262626; color: #eee; border-color: #ffffff1a; }
-.bs-chan.on i { opacity: 1; box-shadow: 0 0 6px currentColor; }
 .bs-gradients { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
 .bs-grad { justify-content: flex-start; gap: 7px; min-height: 26px; padding: 3px 8px 3px 4px; border-radius: 10px; background: #121212; font-size: 10px; color: #9a9a9a; }
 .bs-grad i { width: 28px; height: 14px; border-radius: 5px; flex: none; }
@@ -296,3 +291,10 @@
 .bs-dd-render .bs-render-art { width: 22px; height: 16px; border-radius: 5px; }
 .bs-dd-render .bs-render-art::before, .bs-dd-render .bs-render-art::after { top: 5px; height: 6px; width: 11px; border-radius: 3px; }
 .bs-dd-render .bs-render-art::before { left: 3px; } .bs-dd-render .bs-render-art::after { left: 8px; }
+
+/* Paint channels — ChannelStack (MaterialInspector/ChannelStack.js) inside a studio group, Brush-page blue edits. */
+.bs-group .cs-stack { margin: 0 -6px; }
+.bs-group .cs-head h3 { display: none; }
+.bs-group .cs-head { margin-top: -2px; }
+.cs-row .cs-dot { width: 5px; height: 5px; border-radius: 50%; background: #4f8cff; flex: none; margin-left: -6px; }
+.cs-stack .mi-editor .bs-field, .cs-stack .mi-editor .mi-knob { margin: 0; }

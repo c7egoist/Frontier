@@ -232,8 +232,8 @@ export function History(Limit = 80) {
   return H;
 }
 
-// Card switcher shown on the demo dock (outside the card) so the four cards are one click apart.
+// Card switcher shown on the demo dock (outside the card) so the six cards are one click apart.
 export function DockNav(Current) {
-  const Cards = [["material", "Material", "../MaterialInspector/"], ["pattern", "Pattern", "../ArtworkInspector/?mode=pattern"], ["stamp", "Stamp", "../ArtworkInspector/?mode=stamp"], ["bake", "Baking", "../BakeInspector/"], ["brush", "Brush", "../BrushStudio/"]];
+  const Cards = [["material", "Material", "../MaterialInspector/"], ["pattern", "Pattern", "../ArtworkInspector/?mode=pattern"], ["stamp", "Stamp", "../ArtworkInspector/?mode=stamp"], ["bake", "Baking", "../BakeInspector/"], ["brush", "Brush", "../BrushStudio/"], ["paint", "Paint", "../PaintInspector/"]];
   return `<nav class="mi-docknav" aria-label="Inspector cards">${Cards.map(([Id, L, Href]) => `<a href="${Href}" class="${Id === Current ? "active" : ""}" ${Id === Current ? 'aria-current="page"' : ""}>${icon(Id, 12)}${L}</a>`).join("")}</nav>`;
 }

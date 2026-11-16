@@ -65,6 +65,7 @@ const P = {
   grip: '<circle cx="9" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="17" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="17" r="1" fill="currentColor" stroke="none"/>',
   lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>',
   unlock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 6.8-1.2"/>',
+  paint: '<rect x="4" y="3.5" width="13" height="5.5" rx="1.6"/><path d="M17 6.2h2.5v5.3H11v3"/><rect x="9.4" y="14.5" width="3.2" height="6" rx="1.1"/>',
   brush: '<path d="M20 4c-3.5 1.5-8 6-9.5 8.5l2 2C15 13 19 8 20 4z"/><path d="M10.5 12.5c-2.2 0-3.5 1.6-3.5 3.5 0 1.4-1 2.5-2.5 3 3.5 1 7.5 0 8-4.5"/>',
   pencil: '<path d="M4 20l1.2-4.4L15.8 5a2 2 0 0 1 2.9 0l.3.3a2 2 0 0 1 0 2.9L8.4 18.8z"/><path d="m14 7 3 3" opacity=".6"/>',
   eraser: '<path d="M9 20h11"/><path d="m4.5 14.5 9-9a2 2 0 0 1 2.8 0l2.2 2.2a2 2 0 0 1 0 2.8L11 18H8z"/><path d="m9 10 5 5" opacity=".55"/>',

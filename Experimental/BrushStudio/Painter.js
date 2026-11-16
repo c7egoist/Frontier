@@ -66,11 +66,15 @@ export function BrushChannel(Values, Channel) {
   if (Channel === "height") return Grey(0.5 + Values["mat.height"] / 200);
   return null;   // emissive keeps the stroke colour (scaled by strength at composite time)
 }
+// A scalar channel value (display units) as the grey a channel view stores: height is signed around mid-grey.
+export const ChannelGrey = (Channel, V) => Grey(Channel === "height" ? 0.5 + V / 200 : V / 100);
+const Luma = (Hex) => { const N = parseInt(String(Hex).slice(1), 16); return (0.2126 * ((N >> 16) & 255) + 0.7152 * ((N >> 8) & 255) + 0.0722 * (N & 255)) / 255; };
 export function ChannelValue(Op, Channel) {
   if (!Channel || Channel === "albedo") return null;
   if (!(Op.channels || []).includes(Channel)) return false;
   if (Channel === "roughness") return Grey(Op.roughness / 100);
   if (Channel === "metalness") return Grey(Op.metalness / 100);
+  if (Op.Stack?.per?.[Channel]?.source === "Decal map") return Grey(Channel === "height" ? 0.5 + (Luma(Op.Colour) - 0.5) * (Op.height / 100) : Luma(Op.Colour));
   if (Channel === "height") return Grey(0.5 + Op.height / 200);
   return null;
 }
@@ -181,6 +185,8 @@ export function RenderStroke(Ctx, Brush, Points, O = {}) {
   const Op = O.Erase ? "destination-out" : BLEND_OPS[V["render.blend"]] || "source-over";
   let Alpha = Blending ? 1 : Uniform ? Plan.Opacity * Clamp(0.35 + (AlphaSum / Plan.Dabs.length) * 0.65) : Plan.Mode === "heavy-glaze" ? Math.min(1, Plan.Opacity * 1.25) : Plan.Opacity;
   if (O.Channel === "emissive" && !O.Erase) Alpha *= V["mat.emissive"] / 100;
+  // Per-channel flow from the brush's ChannelStack card (Materials → Paint channels).
+  if (O.Channel && !O.Erase && !O.Smudge) Alpha *= (V["mat.stack"]?.per?.[O.Channel]?.flow ?? 100) / 100;
   Alpha *= O.Strength ?? 1;
   Ctx.save();
   Ctx.globalCompositeOperation = Op === "source-over" || O.Erase || !O.Channel || O.Channel === "albedo" || O.Channel === "emissive" ? Op : "source-over";

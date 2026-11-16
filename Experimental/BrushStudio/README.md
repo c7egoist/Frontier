@@ -72,7 +72,7 @@ The Paint tool's studio starts with a **Colour** section (primary / secondary di
 | Dynamics | speed → size / opacity, size / opacity jitter, over-the-stroke behaviour |
 | Stylus | pressure curve editor, pressure → size / opacity / flow / bleed / smoothing, tilt curve and tilt targets, mouse and touch simulation |
 | Properties | stamp preview, orient to screen, preview scale, smudge, min / max size and opacity |
-| **Materials** | which PBR channels the brush paints, plus roughness / metallic / height / emission values, each textured by the shape or grain |
+| **Materials** | a **Channels dropdown** ([ChannelStack](../MaterialInspector/README.md#channelstack--the-reusable-channel-dropdown)) listing all 22 PBR channels in 5 groups. Each channel has an on / off switch, and opening it shows its slider card (value or colour, strength, source = shape / grain, amount, flow, blend). The old five keys (`mat.channels`, `mat.roughness`, …) stay the source of truth via `LinkedStack` |
 | **Instrument** | the catalogue tool's own controls (shape, paint, bristle, grade, nib, ink…). Each control maps onto the studio settings, and the mapping is shown under the control |
 | About this brush | name, author, created date, signature, brush data, and *Create new reset point* / *Reset all settings* |
 
@@ -122,6 +122,25 @@ Pad keys:
 - Ctrl+Z and Ctrl+Shift+Z undo and redo on the pad.
 - Alt+Z undoes settings changes.
 - Esc returns from the Brush Studio to the current tool's studio.
+
+## Channels per tool
+
+Every tool studio that writes texels has its own **Channels** dropdown. It uses the same component and design as the Material Inspector's channel groups, and each channel gets **its own slider card for that tool** (`ToolModel.TOOL_CARDS`):
+
+| Tool | Card per channel |
+| :--- | :--- |
+| Paint (Brush Studio → Materials) | value / colour · strength · source (shape / grain) · amount · flow · blend |
+| Fill | value · opacity · blend |
+| Stamp | source · value · opacity · blend |
+| Text | value · opacity |
+| Gradient | start → end (channel range) · opacity |
+| Eraser | strength · edge |
+| Smudge | strength |
+| Move | on / off only |
+
+A channel that is switched off keeps its card settings. The bind for the brush is `b|mat.stack`; for a tool it is `t|<tool>|stack`, and a field inside either is `…@<channel>.<key>`. The pad applies each op's `Stack`, so a stroke writes only the enabled channels, each at its own strength.
+
+![Channels dropdown in the Brush Studio](Screenshots/channels-brush.png)
 
 ## Files
 

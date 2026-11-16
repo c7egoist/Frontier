@@ -20,7 +20,8 @@
 // history (sampled colours) · nudge (move arrows) · instrument (eraser catalogue picker) · readout (status line).
 
 import { PAINT_TOOLS, COLOUR_GRADIENT_PRESETS } from "./BrushModel.js";
-import { SHAPES, GRAINS, BLEND_MODES, CHANNELS } from "./BrushModel.js";
+import { SHAPES, GRAINS, BLEND_MODES } from "./BrushModel.js";
+import { PAINT_CHANNELS, BLEND_CHANNEL, LinkedStack } from "../MaterialInspector/ChannelStack.js";
 
 const Clamp = (V, Lo, Hi) => Math.max(Lo, Math.min(Hi, V));
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -42,16 +43,56 @@ export const FONTS = Object.freeze([
   { Id: "script", Label: "Script", Css: '"Brush Script MT", "Segoe Script", cursive' },
 ]);
 
-// PBR block reused by Fill / Stamp / Text / Gradient: which channels the operation writes and the values it writes.
-const Pbr = (Prefix = "") => [
-  { Title: "Material channels", Hint: "What this writes when texture painting", Fields: [{ K: "channels", L: "Channels", T: "channels", Def: ["albedo", "roughness"] }] },
-  { Title: "Channel values", When: (V) => V.channels.some((C) => C !== "albedo"), Fields: [
-    S("roughness", "Roughness", 0, 100, 60, "", { When: Has("roughness") }),
-    S("metalness", "Metal", 0, 100, 0, "", { When: Has("metalness") }),
-    S("height", "Relief", -100, 100, Prefix === "text" ? 35 : 15, "Raise (+) or carve (−)", { When: Has("height") }),
-    S("emissive", "Emission", 0, 100, 40, "", { When: Has("emissive") }),
-  ] },
+// ------------------------------------------------------------------------------------------------ channel cards
+// Every tool that writes paint channels shows them as a ChannelStack (MaterialInspector/ChannelStack.js): switch a
+// channel on or off, open it, and set that channel's own card for this tool.  The per-tool cards differ — a fill writes
+// a value at an opacity, an eraser removes at a strength, a gradient ramps from a start to an end value, Move only needs
+// to know which channels travel.  Keys the pad already read (channels / roughness / metalness / height / emissive) stay
+// the source of truth through the stack's Link; everything else lives in the tool's "stack" store.
+const VALUE = [
+  { K: "value", L: "Value", T: "slider", For: ["scalar"], Def: (Ch) => Ch.Def },
+  { K: "value", L: "Colour", T: "colour", For: ["colour"], Skip: ["albedo", "emissive"], Def: (Ch) => Ch.Def },
+  { K: "strength", L: "Glow strength", T: "slider", Only: ["emissive"], Def: 40 },
 ];
+const Note = (Text, Only = ["albedo"]) => ({ K: `note:${Only.join("+")}`, T: "note", Only, Text });
+const NoAlbedo = (F) => ({ ...F, Skip: [...(F.Skip || []), "albedo"] });
+export const TOOL_CARDS = Object.freeze({
+  fill: [...VALUE.map(NoAlbedo), NoAlbedo({ K: "opacity", L: "Opacity", T: "slider", Def: 100 }), NoAlbedo({ K: "blend", L: "Blend", T: "select", Opts: BLEND_CHANNEL, Def: "Normal" }), Note("Colour, opacity and blend come from the Source section.")],
+  stamp: [NoAlbedo({ K: "source", L: "Value from", T: "seg", For: ["scalar"], Opts: ["Flat", "Decal map"], Def: "Flat", Hint: "Decal map: the tint's brightness drives the value" }), ...VALUE.map(NoAlbedo), NoAlbedo({ K: "opacity", L: "Opacity", T: "slider", Def: 100 }), NoAlbedo({ K: "blend", L: "Blend", T: "select", Opts: BLEND_CHANNEL, Def: "Normal" }), Note("Tint, opacity and blend come from the Look section.")],
+  text: [...VALUE.map(NoAlbedo).map((F) => (F.K === "value" && F.T === "slider" ? { ...F, Def: (Ch) => (Ch.Id === "height" ? 35 : Ch.Def) } : F)), NoAlbedo({ K: "opacity", L: "Opacity", T: "slider", Def: 100 }), Note("Colour and opacity come from the Look section.")],
+  gradient: [
+    { K: "start", L: "Start value", T: "slider", For: ["scalar"], Ranged: true, Def: (Ch) => Math.max(Ch.Min, 0) },
+    { K: "end", L: "End value", T: "slider", For: ["scalar"], Ranged: true, Def: (Ch) => Math.min(Ch.Max, 100) },
+    NoAlbedo({ K: "opacity", L: "Opacity", T: "slider", Def: 100 }),
+    Note("Albedo uses the colour stops."), Note("Colour channels follow the colour stops.", ["specularColor", "sheenColor", "attenuationColor", "emissive"]),
+  ],
+  erase: [
+    { K: "strength", L: "Strength", T: "slider", Def: 100, Hint: "Share of the eraser's strength" },
+    { K: "edge", L: "Edge", T: "seg", Opts: ["Inherit", "Soft", "Hard"], Def: "Inherit", Hint: "Inherit follows the Tip section" },
+  ],
+  smudge: [{ K: "strength", L: "Strength", T: "slider", Def: 100, Hint: "Share of the smudge strength" }],
+  move: [],
+});
+const PBR_LINK = { on: "channels", "roughness.value": "roughness", "metalness.value": "metalness", "height.value": "height", "emissive.strength": "emissive" };
+const FIVE = ["albedo", "roughness", "metalness", "height", "emissive"];
+export const TOOL_STACKS = Object.freeze({
+  fill: LinkedStack({ Key: "stack", Link: PBR_LINK, Card: TOOL_CARDS.fill, On: ["albedo", "roughness"] }),
+  stamp: LinkedStack({ Key: "stack", Link: PBR_LINK, Card: TOOL_CARDS.stamp, On: ["albedo", "roughness"] }),
+  text: LinkedStack({ Key: "stack", Link: PBR_LINK, Card: TOOL_CARDS.text, On: ["albedo", "roughness"] }),
+  gradient: LinkedStack({ Key: "stack", Card: TOOL_CARDS.gradient, On: ["albedo"] }),
+  erase: LinkedStack({ Key: "stack", Link: { on: "channels" }, Card: TOOL_CARDS.erase, On: FIVE }),
+  smudge: LinkedStack({ Key: "stack", Card: TOOL_CARDS.smudge, On: FIVE }),
+  move: LinkedStack({ Key: "stack", Card: TOOL_CARDS.move, On: FIVE }),
+});
+const Stack = (Tool, L = "Channels") => ({ K: "stack", L, T: "stack", Stack: TOOL_STACKS[Tool], Def: TOOL_STACKS[Tool].Store({}) });
+// The linked keys (never drawn on their own; the stack shows them inside each channel card).
+const LINKED = "Linked channel keys";
+const Linked = (Prefix = "") => ({ Title: LINKED, When: () => false, Fields: [
+  { K: "channels", L: "Channels", T: "channels", Def: ["albedo", "roughness"] },
+  S("roughness", "Roughness", 0, 100, 60), S("metalness", "Metal", 0, 100, 0),
+  S("height", "Relief", -100, 100, Prefix === "text" ? 35 : 15), S("emissive", "Emission", 0, 100, 40),
+] });
+const Pbr = (Tool) => [{ Title: "Material channels", Hint: "What this writes when texture painting", Fields: [Stack(Tool)] }, Linked(Tool)];
 
 export const TOOLS = Object.freeze([
   { Id: "paint", Label: "Paint", Glyph: "brush", Key: "B", Verb: "Drag to paint with the active brush", Groups: [
@@ -60,7 +101,7 @@ export const TOOLS = Object.freeze([
     { Title: "Colour", Fields: [{ K: "colours", T: "colours" }] },
     { Title: "Feel", Fields: [B("stab.streamline", { L: "StreamLine" }), B("pen.size", { L: "Pressure → size" }), B("dyn.jitterSize", { L: "Size jitter" }), B("shape.hardness")] },
     { Title: "Pressure curve", Fields: [B("pen.pressureCurve")] },
-    { Title: "Texture painting", Fields: [B("mat.channels"), B("mat.roughness", { L: "Roughness", When: (V, Br) => Br["mat.channels"].includes("roughness") }), B("mat.metalness", { L: "Metal", When: (V, Br) => Br["mat.channels"].includes("metalness") }), B("mat.height", { L: "Relief", When: (V, Br) => Br["mat.channels"].includes("height") })] },
+    { Title: "Texture painting", Fields: [B("mat.stack")] },
     { Title: "Symmetry & blend", Fields: [G("symmetry", "Symmetry", ["Off", "Vertical", "Horizontal", "Quadrant"], "Off", "Mirror strokes across the pad"), B("render.blend")] },
   ] },
   { Id: "smudge", Label: "Smudge", Glyph: "smudge", Key: "S", Verb: "Drag to push paint around", Groups: [
@@ -76,6 +117,7 @@ export const TOOLS = Object.freeze([
       S("streamline", "StreamLine", 0, 100, 25),
       S("spacing", "Spacing", 1, 100, 6, "Lower = smoother drag"),
     ] },
+    { Title: "Channels to smudge", Hint: "Leave a channel out to keep it still", Fields: [Stack("smudge")] },
   ] },
   { Id: "erase", Label: "Erase", Glyph: "eraser", Key: "E", Verb: "Drag to erase", Groups: [
     { Title: "Eraser", Fields: [
@@ -92,7 +134,8 @@ export const TOOLS = Object.freeze([
       S("streamline", "Stabilizer", 0, 100, 20), S("pressure", "Pressure → size", 0, 100, 40),
       W("taper", "Taper ends", true),
     ] },
-    { Title: "Channels to erase", Hint: "Leave a channel out to protect it", Fields: [{ K: "channels", L: "Channels", T: "channels", Def: ["albedo", "roughness", "metalness", "height", "emissive"] }] },
+    { Title: "Channels to erase", Hint: "Leave a channel out to protect it", Fields: [Stack("erase")] },
+    { Title: LINKED, When: () => false, Fields: [{ K: "channels", L: "Channels", T: "channels", Def: [...FIVE] }] },
   ] },
   { Id: "fill", Label: "Fill", Glyph: "fill", Key: "G", Verb: "Click to fill", Groups: [
     { Title: "Scope", Fields: [
@@ -108,7 +151,7 @@ export const TOOLS = Object.freeze([
       S("grainScale", "Grain scale", 10, 400, 100, "", { When: (V) => V.source === "Grain" }),
       S("opacity", "Opacity", 1, 100, 100), Sel("blend", "Blend mode", BLEND_MODES, "Normal"),
     ] },
-    ...Pbr(),
+    ...Pbr("fill"),
   ] },
   { Id: "stamp", Label: "Stamp", Glyph: "stamp", Key: "P", Verb: "Click to stamp · drag to scatter", Groups: [
     { Title: "Stamp", Fields: [
@@ -127,7 +170,7 @@ export const TOOLS = Object.freeze([
       S("opacity", "Opacity", 1, 100, 100), S("hardness", "Hardness", 0, 100, 85),
       Sel("blend", "Blend mode", BLEND_MODES, "Normal"),
     ] },
-    ...Pbr(),
+    ...Pbr("stamp"),
   ] },
   { Id: "gradient", Label: "Gradient", Glyph: "gradient", Key: "D", Verb: "Drag across the pad to lay a gradient", Groups: [
     { Title: "Shape", Fields: [
@@ -142,6 +185,7 @@ export const TOOLS = Object.freeze([
       S("opacity", "Opacity", 1, 100, 100), Sel("blend", "Blend mode", BLEND_MODES, "Normal"),
       G("limit", "Paint", ["Everywhere", "Painted", "Empty"], "Everywhere", "Painted keeps the gradient inside existing paint"),
     ] },
+    { Title: "Material channels", Hint: "Ramp each channel from a start to an end value", Fields: [Stack("gradient")] },
     { Title: "Line", Fields: [{ K: "readout", T: "readout" }, Act([["Apply", "gradient-apply", "check", "primary"], ["Clear line", "gradient-clear", "close"]])] },
   ] },
   { Id: "text", Label: "Text", Glyph: "text", Key: "T", Verb: "Click to place text", Groups: [
@@ -167,6 +211,7 @@ export const TOOLS = Object.freeze([
   ] },
   { Id: "curve", Label: "Curve", Glyph: "curve", Key: "C", Verb: "Click to add points · Enter or double-click to stroke", Groups: [
     { Title: "Brush", Fields: [{ K: "brushcard", T: "brushcard" }] },
+    { Title: "Brush channels", Hint: "The curve strokes with the brush's own channel cards", Fields: [B("mat.stack")] },
     { Title: "Path", Fields: [
       G("mode", "Path", ["Smooth", "Polyline"], "Smooth"), W("closed", "Closed loop", false),
       S("smoothness", "Smoothness", 0, 100, 50, "Tension of the spline", { When: (V) => V.mode === "Smooth" }),
@@ -188,6 +233,7 @@ export const TOOLS = Object.freeze([
       W("flipX", "Flip horizontal", false), W("flipY", "Flip vertical", false),
       G("wrap", "Edges", ["Clip", "Tile"], "Clip", "Tile wraps paint around the edges — seamless textures"),
     ] },
+    { Title: "Channels to move", Hint: "Channels left out stay where they are", Fields: [Stack("move")] },
     { Title: "Commit", Fields: [Act([["Apply", "move-apply", "check", "primary"], ["Reset", "move-reset", "reset"]])] },
   ] },
   { Id: "eyedropper", Label: "Eyedropper", Glyph: "pipette", Key: "I", Verb: "Click to sample a colour", Groups: [
@@ -227,7 +273,8 @@ function Coerce(F, V) {
     case "shape": return SHAPES.some((E) => E.Id === V) ? V : F.Def;
     case "grain": return GRAINS.some((E) => E.Id === V) ? V : F.Def;
     case "gradient": return COLOUR_GRADIENT_PRESETS.some((E) => E.id === V) ? V : F.Def;
-    case "channels": { const L = Array.isArray(V) ? CHANNELS.map((C) => C.Id).filter((C) => V.includes(C)) : null; return L?.length ? L : [...F.Def]; }
+    case "channels": { const L = Array.isArray(V) ? PAINT_CHANNELS.map((C) => C.Id).filter((C) => V.includes(C)) : null; return L?.length ? L : [...F.Def]; }
+    case "stack": return F.Stack.Store(V);
     case "stops": { const L = Array.isArray(V) ? V.filter((C) => HEX.test(C)).map((C) => C.toLowerCase()).slice(0, 8) : []; return L.length >= 2 ? L : [...F.Def]; }
     case "history": return Array.isArray(V) ? V.filter((C) => HEX.test(C)).slice(0, 12) : [];
     default: return V ?? F.Def;
@@ -249,6 +296,13 @@ export function SetToolValue(Tools, Tool, Key, Value) {
   // Choosing a gradient preset loads its stops.
   if (Tool === "gradient" && Key === "preset") { const P = COLOUR_GRADIENT_PRESETS.find((E) => E.id === Value); if (P) Next.gradient.stops = [...P.stops]; }
   return Next;
+}
+
+// Merge a patch of several keys (a channel stack write touches its store and its linked keys at once).
+export function PatchTool(Tools, Tool, Patch) {
+  const Own = OwnFields(Tool), Next = { ...Tools[Tool] };
+  for (const [K, V] of Object.entries(Patch)) { const F = Own.find((E) => E.K === K); Next[K] = F ? Coerce(F, V) : V; }
+  return { ...Tools, [Tool]: Next };
 }
 
 export const VisibleToolFields = (Group, Values, BrushValues) => Group.Fields.filter((F) => !F.When || F.When(Values, BrushValues));
@@ -294,18 +348,18 @@ export const TOOL_COLOURS = Object.freeze({ paint: "#ff6b9a", smudge: "#b48cff",
 export const PALETTE = Object.freeze(["#4d9bff", "#46d267", "#ff6b9a", "#b48cff", "#36d3c4", "#ff8a5c", "#7cc4ff", "#f08cff", "#5fe0a0", "#ff6b5e", "#8f9bff", "#4fd1e8", "#c792ea", "#9aa4b2", "#e8e8e8"]);
 const Sec = (Id, Label, Glyph, Hint, Groups) => ({ Id, Label, Glyph, Hint, Groups });
 const About = () => Sec("about", "About", "info", "Shortcut, what changed, reset", []);
-const Material = Sec("material", "Material", "material", "PBR channels this writes", ["Material channels", "Channel values"]);
+const Material = Sec("material", "Material", "material", "PBR channels this writes", ["Material channels", "Linked channel keys"]);
 
 export const STUDIOS = Object.freeze({
   paint: { Title: "Brush Studio", Sub: "Texture-painting brush", Sections: [Sec("paint-colour", "Colour", "sphere", "Primary, secondary, swatches, symmetry", ["Colour", "Symmetry & blend"])] },
-  smudge: { Title: "Smudge Studio", Sub: "Push and blend paint", Sections: [Sec("tip", "Tip", "smudge", "Finger or current brush", ["Tip"]), Sec("smudge", "Smudge", "wave", "Strength, finger painting, smoothing", ["Smudge"]), About("smudge")] },
-  erase: { Title: "Eraser Studio", Sub: "Remove paint per channel", Sections: [Sec("eraser", "Eraser", "eraser", "Catalogue eraser or current brush", ["Eraser"]), Sec("tip", "Tip", "shape", "Size, strength, flow, edge", ["Tip"]), Sec("feel", "Feel", "pressure", "Stabilizer, pressure, taper", ["Feel"]), Sec("channels", "Channels", "layers", "Protect channels from erasing", ["Channels to erase"]), About("erase")] },
+  smudge: { Title: "Smudge Studio", Sub: "Push and blend paint", Sections: [Sec("tip", "Tip", "smudge", "Finger or current brush", ["Tip"]), Sec("smudge", "Smudge", "wave", "Strength, finger painting, smoothing", ["Smudge"]), Sec("channels", "Channels", "layers", "Which channels the smudge drags", ["Channels to smudge"]), About("smudge")] },
+  erase: { Title: "Eraser Studio", Sub: "Remove paint per channel", Sections: [Sec("eraser", "Eraser", "eraser", "Catalogue eraser or current brush", ["Eraser"]), Sec("tip", "Tip", "shape", "Size, strength, flow, edge", ["Tip"]), Sec("feel", "Feel", "pressure", "Stabilizer, pressure, taper", ["Feel"]), Sec("channels", "Channels", "layers", "Protect channels · per-channel strength", ["Channels to erase", "Linked channel keys"]), About("erase")] },
   fill: { Title: "Fill Studio", Sub: "Flood regions and similar colour", Sections: [Sec("scope", "Scope", "grid", "Region, similar or everything", ["Scope"]), Sec("source", "Source", "fill", "Colour or grain, opacity, blend", ["Source"]), Material, About("fill")] },
   stamp: { Title: "Stamp Studio", Sub: "Decals · click, drag or grid", Sections: [Sec("decal", "Decal", "stamp", "Shape and placement", ["Stamp"]), Sec("transform", "Transform", "move", "Size, rotation, jitter, mirror", ["Transform"]), Sec("look", "Look", "eye", "Tint, opacity, hardness, blend", ["Look"]), Material, About("stamp")] },
-  gradient: { Title: "Gradient Studio", Sub: "Linear, radial and conic ramps", Sections: [Sec("shape", "Shape", "radial", "Type and spread", ["Shape"]), Sec("colours", "Colours", "gradient", "Preset and stops", ["Colours"]), Sec("blend", "Blend", "blend", "Opacity, mode, where it paints", ["Blend"]), Sec("line", "Line", "ray", "Apply or clear the line", ["Line"]), About("gradient")] },
+  gradient: { Title: "Gradient Studio", Sub: "Linear, radial and conic ramps", Sections: [Sec("shape", "Shape", "radial", "Type and spread", ["Shape"]), Sec("colours", "Colours", "gradient", "Preset and stops", ["Colours"]), Sec("blend", "Blend", "blend", "Opacity, mode, where it paints", ["Blend"]), Sec("material", "Material", "material", "Channels the ramp writes", ["Material channels"]), Sec("line", "Line", "ray", "Apply or clear the line", ["Line"]), About("gradient")] },
   text: { Title: "Text Studio", Sub: "Lettering painted into the texture", Sections: [Sec("text", "Text", "text", "What it says", ["Text"]), Sec("type", "Type", "pen", "Font, weight, italic, align", ["Type"]), Sec("layout", "Layout", "grid", "Size, spacing, arc, rotation", ["Layout"]), Sec("look", "Look", "eye", "Colour, opacity, outline", ["Look"]), Material, Sec("place", "Place", "move", "Apply or cancel", ["Place"]), About("text")] },
-  curve: { Title: "Curve Studio", Sub: "Point-to-point brush strokes", Sections: [Sec("brush", "Brush", "brush", "The brush the curve strokes with", ["Brush"]), Sec("path", "Path", "curve", "Smooth or polyline, closed loop", ["Path"]), Sec("pressure", "Pressure", "pressure", "Pressure along the path", ["Pressure along the path"]), Sec("points", "Points", "stroke", "Stroke, undo or clear points", ["Points"]), About("curve")] },
-  move: { Title: "Move Studio", Sub: "Offset, transform and wrap paint", Sections: [Sec("target", "Target", "layers", "Everything or the last item", ["Target"]), Sec("offset", "Offset", "move", "U / V offset and nudges", ["Offset"]), Sec("transform", "Transform", "warp", "Scale, rotation, flips, edges", ["Transform"]), Sec("commit", "Commit", "check", "Apply or reset", ["Commit"]), About("move")] },
+  curve: { Title: "Curve Studio", Sub: "Point-to-point brush strokes", Sections: [Sec("brush", "Brush", "brush", "The brush the curve strokes with", ["Brush", "Brush channels"]), Sec("path", "Path", "curve", "Smooth or polyline, closed loop", ["Path"]), Sec("pressure", "Pressure", "pressure", "Pressure along the path", ["Pressure along the path"]), Sec("points", "Points", "stroke", "Stroke, undo or clear points", ["Points"]), About("curve")] },
+  move: { Title: "Move Studio", Sub: "Offset, transform and wrap paint", Sections: [Sec("target", "Target", "layers", "Everything or the last item", ["Target"]), Sec("offset", "Offset", "move", "U / V offset and nudges", ["Offset"]), Sec("transform", "Transform", "warp", "Scale, rotation, flips, edges", ["Transform"]), Sec("channels", "Channels", "layers", "Which channels move", ["Channels to move"]), Sec("commit", "Commit", "check", "Apply or reset", ["Commit"]), About("move")] },
   eyedropper: { Title: "Eyedropper Studio", Sub: "Sample colour from the pad", Sections: [Sec("sample", "Sample", "pipette", "The last colour picked", ["Sample"]), Sec("sampling", "Sampling", "sliders", "Area, target, source", ["Sampling"]), Sec("recent", "Recent", "layers", "Colours you have sampled", ["Recent samples"]), About("eyedropper")] },
 });
 
