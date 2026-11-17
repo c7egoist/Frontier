@@ -1,0 +1,445 @@
+{
+  "schema": "frontier.level.v1",
+  "name": "Lobby",
+  "environment": {
+    "preset": "lobby",
+    "sky": {
+      "top": "#6fa6db",
+      "horizon": "#c6dbef",
+      "ground": "#c9d2dc",
+      "exposure": 1
+    },
+    "sun": {
+      "azimuth": 148,
+      "elevation": 30,
+      "intensity": 2.8,
+      "color": "#fff6ea",
+      "softness": 0.55
+    },
+    "studio": {
+      "wall": "#e6eaef",
+      "floor": "#cfd6df",
+      "gloss": 0.72,
+      "radius": 13,
+      "height": 5.2,
+      "wave": 1.6,
+      "cove": 2.2,
+      "fill": 0.8
+    },
+    "lights": [
+      {
+        "id": "L1",
+        "name": "Softbox",
+        "type": "area",
+        "transform": {
+          "location": [
+            0.2,
+            4.4,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            -90
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "color": "#ffffff",
+        "intensity": 2.2,
+        "range": 16,
+        "angle": 30,
+        "width": 5,
+        "height": 2.4,
+        "layer": "base",
+        "locked": true,
+        "visible": true
+      },
+      {
+        "id": "L2",
+        "name": "Rim Light",
+        "type": "spot",
+        "transform": {
+          "location": [
+            -6.5,
+            3.2,
+            -4.5
+          ],
+          "rotation": [
+            0,
+            -34.7,
+            -18.2
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "color": "#dfe9ff",
+        "intensity": 40,
+        "range": 22,
+        "angle": 30,
+        "width": 3,
+        "height": 1.5,
+        "layer": "base",
+        "locked": true,
+        "visible": true
+      }
+    ]
+  },
+  "entities": [
+    {
+      "id": "E1",
+      "name": "Turntable",
+      "type": "Turntable",
+      "transform": {
+        "location": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "props": {
+        "radius": 3.4,
+        "color": "#dfe3e8",
+        "spin": 0
+      },
+      "locked": true,
+      "visible": true,
+      "layer": "base"
+    },
+    {
+      "id": "E2",
+      "name": "ControlVehicle",
+      "type": "Vehicle",
+      "transform": {
+        "location": [
+          0,
+          0.012,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "props": {
+        "colours": {
+          "paint": "#9fb3c8",
+          "glass": "#1b2129",
+          "trim": "#24272c",
+          "tyre": "#1c1c1e",
+          "rim": "#c3c8cf",
+          "lights": "#f2f5ff"
+        },
+        "wing": true
+      },
+      "locked": true,
+      "visible": true,
+      "layer": "base"
+    }
+  ],
+  "hotspots": [
+    {
+      "id": "H1",
+      "name": "Paint",
+      "anchor": [
+        0.05,
+        0.98,
+        1.27
+      ],
+      "view": {
+        "target": [
+          0,
+          0.8,
+          0
+        ],
+        "yaw": 55,
+        "pitch": 10,
+        "distance": 14.5,
+        "focal": 35
+      },
+      "target": {
+        "entity": "E2",
+        "slot": "paint"
+      },
+      "options": [
+        {
+          "label": "Ice Blue",
+          "color": "#9fb3c8"
+        },
+        {
+          "label": "Arctic White",
+          "color": "#eef0f2"
+        },
+        {
+          "label": "Graphite",
+          "color": "#3c4148"
+        },
+        {
+          "label": "Racing Yellow",
+          "color": "#e9c13b"
+        },
+        {
+          "label": "Signal Red",
+          "color": "#b8262c"
+        },
+        {
+          "label": "Deep Teal",
+          "color": "#1f5f66"
+        }
+      ],
+      "choice": 0
+    },
+    {
+      "id": "H2",
+      "name": "Front wheel",
+      "anchor": [
+        1.727,
+        0.51,
+        1.3
+      ],
+      "view": {
+        "target": [
+          1.6,
+          0.55,
+          1.05
+        ],
+        "yaw": 30,
+        "pitch": 9,
+        "distance": 5.6,
+        "focal": 35
+      },
+      "target": {
+        "entity": "E2",
+        "slot": "rim"
+      },
+      "options": [
+        {
+          "label": "Satin Silver",
+          "color": "#c3c8cf"
+        },
+        {
+          "label": "Gloss Black",
+          "color": "#17181a"
+        },
+        {
+          "label": "Bronze",
+          "color": "#8c6a3f"
+        },
+        {
+          "label": "Gunmetal",
+          "color": "#4b5058"
+        },
+        {
+          "label": "Electric Blue",
+          "color": "#2f6fe0"
+        }
+      ],
+      "choice": 0
+    },
+    {
+      "id": "H3",
+      "name": "Rear wheel",
+      "anchor": [
+        -1.669,
+        0.51,
+        1.3
+      ],
+      "view": {
+        "target": [
+          -1.55,
+          0.55,
+          1.05
+        ],
+        "yaw": -30,
+        "pitch": 9,
+        "distance": 5.6,
+        "focal": 35
+      },
+      "target": {
+        "entity": "E2",
+        "slot": "tyre"
+      },
+      "options": [
+        {
+          "label": "Black",
+          "color": "#1c1c1e"
+        },
+        {
+          "label": "Charcoal",
+          "color": "#34363a"
+        },
+        {
+          "label": "Stone",
+          "color": "#9a958c"
+        },
+        {
+          "label": "Tan",
+          "color": "#8a6b4a"
+        }
+      ],
+      "choice": 0
+    },
+    {
+      "id": "H4",
+      "name": "Headlights",
+      "anchor": [
+        3.02,
+        0.88,
+        0.78
+      ],
+      "view": {
+        "target": [
+          2.85,
+          0.8,
+          0.5
+        ],
+        "yaw": 62,
+        "pitch": 7,
+        "distance": 4.6,
+        "focal": 35
+      },
+      "target": {
+        "entity": "E2",
+        "slot": "lights"
+      },
+      "options": [
+        {
+          "label": "Cool White",
+          "color": "#f2f5ff"
+        },
+        {
+          "label": "Warm White",
+          "color": "#ffe2b0"
+        },
+        {
+          "label": "Ice",
+          "color": "#c9e6ff"
+        },
+        {
+          "label": "Amber",
+          "color": "#ffb238"
+        }
+      ],
+      "choice": 0
+    },
+    {
+      "id": "H5",
+      "name": "Interior / glass",
+      "anchor": [
+        0.1,
+        1.48,
+        1
+      ],
+      "view": {
+        "target": [
+          0.2,
+          1.2,
+          0.3
+        ],
+        "yaw": 30,
+        "pitch": 20,
+        "distance": 7,
+        "focal": 35
+      },
+      "target": {
+        "entity": "E2",
+        "slot": "glass"
+      },
+      "options": [
+        {
+          "label": "Smoke",
+          "color": "#1b2129"
+        },
+        {
+          "label": "Clear",
+          "color": "#5b6a76"
+        },
+        {
+          "label": "Privacy",
+          "color": "#0c0e11"
+        },
+        {
+          "label": "Bronze tint",
+          "color": "#3a2d21"
+        }
+      ],
+      "choice": 0
+    },
+    {
+      "id": "H6",
+      "name": "Wing / trim",
+      "anchor": [
+        -2.98,
+        1.64,
+        0.9
+      ],
+      "view": {
+        "target": [
+          -2.7,
+          1.3,
+          0
+        ],
+        "yaw": -128,
+        "pitch": 18,
+        "distance": 6.4,
+        "focal": 35
+      },
+      "target": {
+        "entity": "E2",
+        "slot": "trim"
+      },
+      "options": [
+        {
+          "label": "Carbon",
+          "color": "#24272c"
+        },
+        {
+          "label": "Gloss Black",
+          "color": "#0f1012"
+        },
+        {
+          "label": "Satin White",
+          "color": "#e4e6e8"
+        },
+        {
+          "label": "Ice Blue",
+          "color": "#9fb3c8"
+        }
+      ],
+      "choice": 0
+    }
+  ],
+  "start": {
+    "target": [
+      0,
+      1.1,
+      0
+    ],
+    "yaw": 50,
+    "pitch": 8,
+    "distance": 16,
+    "focal": 35
+  }
+}

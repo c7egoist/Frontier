@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Level Designer · Frontier</title>
+<link rel="stylesheet" href="../Shared/Studio/Studio.css">
+<link rel="stylesheet" href="./LevelDesigner.css">
+</head>
+<body>
+<div id="Studio" class="workspace">
+
+  <!-- ============================================================ LEFT: Outliner / Content -->
+  <section class="dock left" aria-label="Outliner and content">
+    <div class="tab-strip">
+      <button type="button" class="document-tab active" data-left="outliner">Outliner</button>
+      <button type="button" class="document-tab" data-left="content">Content</button>
+    </div>
+
+    <div id="LeftOutliner" class="left-pane">
+      <div class="outliner-heading"><h1>Outliner</h1><small id="LevelCaption">—</small></div>
+      <div class="stats">
+        <div class="stat-tile"><span class="status-disc" data-icon="cube" data-icon-size="12"></span><small>Entities</small><strong id="StatEntities">0</strong></div>
+        <div class="stat-tile"><span class="muted-disc" data-icon="hotspot" data-icon-size="12"></span><small>Hotspots</small><strong id="StatHotspots">0</strong></div>
+      </div>
+      <div class="add-row">
+        <button type="button" id="AddBtn" class="primary add-btn" data-icon="plus" data-icon-size="14">Add</button>
+        <label class="search-wrap"><span data-icon="search" data-icon-size="14"></span><input id="OutlinerSearch" type="search" placeholder="Search level"></label>
+      </div>
+      <div id="AddMenu" class="add-menu" hidden>
+        <label class="search-wrap"><span data-icon="search" data-icon-size="14"></span><input id="AddSearch" type="search" placeholder="Search objects and lights"></label>
+        <div id="AddList" class="add-list"></div>
+      </div>
+      <div class="outliner-scroll" id="LevelTree" role="tree"></div>
+      <footer class="dock-footer"><div><i>DBL-CLICK</i>frame · fly</div><div><i>Q W E R</i>select · move · rotate · scale</div><div><i>P</i>preview</div></footer>
+    </div>
+
+    <div id="LeftContent" class="left-pane" hidden>
+      <div class="outliner-heading"><h1>Content</h1><small>premium objects · <span id="ContentCount">0</span></small></div>
+      <div class="drop-zone">
+        <button type="button" id="ImportBtn" class="primary wide" data-icon="upload" data-icon-size="14">Import object…</button>
+        <p>Premium users place their own objects in the Lobby. Imports compile headlessly (units, transform, UVs, LOD, collision, icon) and land on the <b>premium</b> layer.</p>
+        <div class="chips" id="TierChips"></div>
+      </div>
+      <div class="outliner-scroll" id="ContentScroll"></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ CENTRE: level viewport -->
+  <section class="dock centre" aria-label="Level viewport">
+    <div class="tab-strip" id="LevelTabs"><div class="document-tab active"><span data-icon="viewport" data-icon-size="12"></span><span id="LevelTabName">Lobby</span></div></div>
+    <div class="viewport-heading">
+      <span class="scene-icon" data-icon="viewport" data-icon-size="20"></span>
+      <div class="scene-title"><b id="LevelTitle">Lobby</b><small id="LevelSubtitle">Level · car configurator</small></div>
+      <span class="state-tag" id="RoleTag">—</span>
+      <span class="spacer"></span>
+      <div id="RoleBar" title="Player tier"></div>
+      <div id="CentreModes"></div>
+      <button type="button" id="SaveBtn" class="primary compile-btn" data-icon="download" data-icon-size="14" title="Save level JSON (Ctrl+S)">Save</button>
+    </div>
+    <div class="viewport-tools" id="ViewportTools">
+      <div id="GizmoBar"></div>
+      <span class="divider"></span>
+      <button type="button" id="SnapBtn" class="tool round" title="Snap 0.25 m · 15° · 0.1 (Ctrl inverts while dragging)" data-icon="magnet" data-icon-size="15"></button>
+      <button type="button" id="SpaceBtn" class="tool space-btn" title="Gizmo space: world / local (X)"><span class="ico" data-icon="globe" data-icon-size="14"></span><span class="label" id="SpaceLabel">World</span></button>
+      <span class="divider"></span>
+      <button type="button" id="UndoBtn" class="tool round" title="Undo (Ctrl+Z)" data-icon="undo" data-icon-size="15"></button>
+      <button type="button" id="RedoBtn" class="tool round" title="Redo (Ctrl+Shift+Z)" data-icon="redo" data-icon-size="15"></button>
+      <span class="divider"></span>
+      <button type="button" id="FrameBtn" class="tool round" title="Frame selection (F)" data-icon="frame" data-icon-size="15"></button>
+      <button type="button" id="GridBtn" class="tool round" title="Dot floor (G)" data-icon="grid" data-icon-size="15"></button>
+    </div>
+    <div class="canvas-well" id="ViewportWell">
+      <canvas id="Viewport" tabindex="0" aria-label="Level viewport"></canvas>
+      <div class="readout" id="Readout"></div>
+      <div class="preview-hint" id="PreviewHint" hidden><kbd>Esc</kbd> back to the Level Designer</div>
+      <div class="drawer" id="Drawer">
+        <header>
+          <b>Hotspots</b><small class="muted" id="DrawerNote">click a view to fly there · pick a swatch to try it</small>
+          <span class="spacer"></span>
+          <button type="button" id="AddHotspotBtn" class="tool" title="New hotspot from the current view"><span class="ico" data-icon="plus" data-icon-size="13"></span><span class="label">From current view</span></button>
+        </header>
+        <div id="DrawerBody" class="drawer-body hotspot-strip"></div>
+      </div>
+    </div>
+    <div class="strip" id="Strip">LEVEL DESIGNER</div>
+    <button id="DrawerHandle" class="drawer-handle" aria-expanded="false"><svg viewBox="0 0 200 36" preserveAspectRatio="none"><path d="M0 36 L22 0 L178 0 L200 36 Z"/></svg><span>Hotspots</span></button>
+  </section>
+
+  <!-- ============================================================ RIGHT: Details -->
+  <section class="dock right" aria-label="Details">
+    <div class="tab-strip"><div class="document-tab active">Details</div></div>
+    <div class="inspector-scroll" id="Details"></div>
+  </section>
+</div>
+
+<!-- ============================================================ NOTCH: shortcuts -->
+<div id="Notch" class="notch-shell">
+  <div class="shade">
+    <div class="control-sheet">
+      <header><span>Frontier · Level Designer</span><kbd>?</kbd></header>
+      <div class="keys">
+        <div>Orbit · pan · zoom<span>Drag · right-drag · wheel</span></div>
+        <div>Select<span>Click in viewport or Outliner · <kbd>Q</kbd></span></div>
+        <div>Move · rotate · scale<span><kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd></span></div>
+        <div>World / local · snap<span><kbd>X</kbd> · <kbd>Ctrl</kbd> while dragging</span></div>
+        <div>Fly to selection<span><kbd>F</kbd> · double-click</span></div>
+        <div>Hotspot views<span><kbd>1</kbd>–<kbd>9</kbd> · <kbd>H</kbd> start view</span></div>
+        <div>Preview (no UI)<span><kbd>P</kbd> · <kbd>Esc</kbd> returns</span></div>
+        <div>Drift<span>hold right · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> <kbd>Q</kbd><kbd>E</kbd></span></div>
+        <div>Dot floor · turntable<span><kbd>G</kbd> · <kbd>T</kbd></span></div>
+        <div>Delete · duplicate<span><kbd>Del</kbd> · <kbd>Ctrl D</kbd></span></div>
+        <div>Undo · redo<span><kbd>Ctrl Z</kbd> · <kbd>Ctrl Shift Z</kbd></span></div>
+        <div>Save level<span><kbd>Ctrl S</kbd></span></div>
+      </div>
+      <p>The Lobby is a car configurator with no in-game UI: tiny dots ride the car, and picking one flies the camera to that view and shows its swatches. Lobby items are authored and locked; Premium users add their own objects on a separate layer. The environment (sky, sun, studio, lights) starts neutral.</p>
+    </div>
+  </div>
+  <button id="NotchHandle" class="notch-handle" aria-expanded="false"><svg viewBox="0 0 200 36" preserveAspectRatio="none"><path d="M0 0 L22 36 L178 36 L200 0 Z"/></svg><span>Frontier · Level Designer</span></button>
+</div>
+
+<div class="boot" id="Boot"><div><b>Level Designer</b><small id="BootText">Loading…</small><div class="progress"><i id="BootBar"></i></div></div></div>
+<div class="toast" id="Toast" role="status"></div>
+<input type="file" id="FileInput" hidden accept=".obj,.gltf,.glb,.stl,.ply,.facet">
+<input type="file" id="LevelInput" hidden accept=".json">
+<script>
+  document.getElementById('NotchHandle').addEventListener('click', () => {
+    const n = document.getElementById('Notch'); const open = !n.classList.contains('open');
+    n.classList.toggle('open', open); document.getElementById('NotchHandle').setAttribute('aria-expanded', String(open));
+  });
+  document.querySelector('#Notch .shade').addEventListener('click', (e) => { if (e.target.classList.contains('shade')) document.getElementById('NotchHandle').click(); });
+  addEventListener('keydown', (e) => { if (e.key === '?' && !e.target.matches('input, textarea, select')) document.getElementById('NotchHandle').click(); });
+</script>
+<script type="module" src="./Main.js"></script>
+</body>
+</html>

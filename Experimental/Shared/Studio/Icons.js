@@ -57,6 +57,17 @@ const P = {
   sparkle: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/>',
   reset: '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 3.5V8h4.5"/>',
   dot: '<circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/>',
+  pointer: '<path d="M5.5 3.5 18 10.2l-5.6 1.7-2.4 5.6z"/><path d="m12.6 12.2 5 5"/>',
+  move: '<path d="M12 3v18M3 12h18"/><path d="m9 6 3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/>',
+  scale: '<rect x="3.5" y="10.5" width="10" height="10" rx="1.5"/><path d="M13 4h7v7M20 4l-8.5 8.5"/>',
+  undo: '<path d="M9 5 4.5 9.5 9 14"/><path d="M5 9.5h9.5a5 5 0 0 1 0 10H11"/>',
+  redo: '<path d="m15 5 4.5 4.5L15 14"/><path d="M19 9.5H9.5a5 5 0 0 0 0 10H13"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/>',
+  sky: '<path d="M7 18.5h10.5a4 4 0 0 0 .4-8 6 6 0 0 0-11.6 1.6A3.2 3.2 0 0 0 7 18.5z"/>',
+  magnet: '<path d="M6 4v8a6 6 0 0 0 12 0V4"/><path d="M6 8h3M15 8h3M9 4v8a3 3 0 0 0 6 0V4"/>',
+  globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.4 3.8 5.2 3.8 8.5s-1.2 6.1-3.8 8.5c-2.6-2.4-3.8-5.2-3.8-8.5S9.4 5.9 12 3.5z"/>',
+  hotspot: '<circle cx="12" cy="12" r="2.6" fill="currentColor"/><circle cx="12" cy="12" r="6.5" opacity=".6"/><circle cx="12" cy="12" r="9.5" opacity=".3"/>',
+  palette: '<path d="M12 3.5a8.5 8.5 0 0 0 0 17c1.2 0 1.8-.8 1.8-1.7 0-1.3-1.1-1.5-1.1-2.6 0-.9.7-1.6 1.7-1.6h2.1a4 4 0 0 0 4-4c0-4-3.8-7.1-8.5-7.1z"/><circle cx="7.8" cy="11" r="1"/><circle cx="10.5" cy="7.5" r="1"/><circle cx="15" cy="7.8" r="1"/>',
 };
 
 export function icon(name, size = 16) {

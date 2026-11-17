@@ -1,0 +1,65 @@
+/* Level Designer only: Preview (no UI), hotspot strip, tier states, option rows. Shared look: ../Shared/Studio/Studio.css */
+
+/* the viewport is bright (a white studio), so the readout reads dark-on-light with a soft plate */
+.level .readout { color: #2b3038; text-shadow: none; background: #ffffffa8; backdrop-filter: blur(4px); border-radius: 8px; padding: 6px 9px; }
+
+/* gizmo bar and the world / local chip */
+#GizmoBar .segmented button { gap: 6px; }
+.space-btn { gap: 6px; padding: 0 12px; }
+.tool.round.active, #SnapBtn.active { background: #e8e8e8; color: #111; }
+.tool[disabled] { opacity: 0.35; pointer-events: none; }
+#RoleBar .segmented button[data-value="premium"].active { background: var(--amber); color: #111; }
+.state-tag.premium { color: var(--amber); border-color: #6f5a1d; }
+
+/* Outliner rows (no caret column): icon, name, then lock / eye */
+.entity.comp-row.tree-row { grid-template-columns: 22px minmax(0, 1fr) auto auto; padding-left: 22px; }
+/* Outliner rows: lock beside the eye; locked rows are calm, premium rows carry an amber edge */
+.row-lock { width: 24px; height: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: #5a5a5a; border-radius: 50%; }
+.row-lock:hover { color: #eee; background: #262626; }
+.row-lock.on { color: #9a9a9a; }
+.entity.premium-row { border-left-color: #6f5a1d; }
+.entity.premium-row.active { border-left-color: var(--amber); }
+.entity.hidden-row b { color: #666; }
+.tier-note { margin: 6px 12px 12px; font-size: 10px; color: #7d7d7d; line-height: 1.5; }
+.tier-note .ico { color: var(--amber); vertical-align: -3px; margin-right: 4px; }
+
+/* Content cards */
+.content-row.locked { opacity: 0.5; }
+.content-row .tier-lock { color: var(--amber); }
+
+/* hotspot strip (drawer) */
+.drawer header small { font-size: 10px; margin-left: 8px; }
+.hotspot-strip { display: flex; gap: 10px; padding-bottom: 4px; overflow-x: auto; }
+.hotspot-card { flex: none; width: 168px; display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 8px; border-radius: 14px; background: #1b1b1b; border: 1px solid #262626; text-align: left; color: #ddd; height: auto; min-height: 0; }
+.hotspot-card:hover { border-color: #3a3a3a; background: #202020; }
+.hotspot-card.active { border-color: var(--amber); }
+.hotspot-thumb { height: 84px; border-radius: 9px; background: linear-gradient(180deg, #8fb6dc 0%, #dfe9f3 55%, #cfd6de 56%, #e7ebef 100%); overflow: hidden; display: flex; align-items: center; justify-content: center; color: #5a6470; }
+.hotspot-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hotspot-card b { font-size: 11px; font-weight: 500; display: flex; justify-content: space-between; }
+.hotspot-card b kbd { font-size: 9px; color: #777; }
+.swatch-row { display: flex; gap: 5px; flex-wrap: wrap; }
+.swatch { width: 16px; height: 16px; min-height: 16px; border-radius: 50%; padding: 0; border: 2px solid #2a2a2a; flex: none; }
+.swatch.on { border-color: #f2f2f2; box-shadow: 0 0 0 1px #000; }
+
+/* hotspot options in Details */
+.option-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 30px 22px; gap: 8px; align-items: center; }
+.option-row input[type="text"] { background: #000; border: 0; border-radius: 10px; padding: 6px 9px; color: #f0f0f0; font-size: 11px; min-width: 0; }
+.option-row input[type="color"] { width: 30px; height: 22px; padding: 0; border: 0; background: transparent; }
+.option-row .pick { width: 22px; height: 22px; min-height: 22px; padding: 0; border-radius: 50%; border: 2px solid #333; }
+.option-row .pick.on { border-color: #f2f2f2; }
+.button-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.button-row .tool { flex: 1; justify-content: center; }
+.field input:disabled, .vec3 input:disabled { opacity: 0.45; }
+.locked-note { font-size: 10px; color: #8a8a8a; display: flex; gap: 6px; align-items: center; }
+.locked-note .ico { color: var(--amber); }
+
+/* Preview: every dock hidden, the viewport fills the window; the configurator itself has no UI */
+.preview-hint { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 6; font-size: 10px; color: #3b4048; background: #ffffffb0; backdrop-filter: blur(4px); padding: 5px 12px; border-radius: 12px; pointer-events: none; opacity: 0; transition: opacity 0.6s; }
+.preview-hint.show { opacity: 1; }
+.preview-hint kbd { font-size: 9px; }
+body.preview .workspace { grid-template-columns: 1fr; gap: 0; }
+body.preview .dock.left, body.preview .dock.right { display: none; }
+body.preview .dock.centre > :not(.canvas-well) { display: none !important; }
+body.preview .canvas-well { margin: 0; border-radius: 0; }
+body.preview .readout, body.preview .cam-hud, body.preview .drawer, body.preview .notch-shell { display: none !important; }
+body.preview .canvas-well > canvas { cursor: default; }
