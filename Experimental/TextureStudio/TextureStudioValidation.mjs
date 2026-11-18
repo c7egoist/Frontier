@@ -2523,10 +2523,12 @@ await suite("21. Multi-Channel Colour/Emissive 3D Space Gradient, Scene-Space Po
     assert.equal(globalThis.document.querySelectorAll(".channel-tile").length, 0, `${ws} Studio must not display extra bottom .channel-tile previews`);
 
     const btnText = (b) => `${b.title || ""} ${b.textContent || ""}`;
-    const ptGradBtn = [...globalThis.document.querySelectorAll(".vp-tool-circle"), ...globalThis.document.querySelectorAll(".se-tool-btn")].find((b) => /Point Grad/i.test(btnText(b)));
-    assert(ptGradBtn, `${ws} Studio toolbar must provide 'Point Grad (F)' tool`);
+    const ptGradBtn = [...globalThis.document.querySelectorAll(".vp-tool-circle"), ...globalThis.document.querySelectorAll(".se-tool-btn")].find((b) => /Gradient/i.test(btnText(b)));
+    assert(ptGradBtn, `${ws} Studio toolbar must provide the 'Gradient (F)' tool`);
     ptGradBtn.click();
-    assert.equal(studio.getSnapshot().vectorTool, "gradient", `${ws} Studio must switch to 'gradient' tool on Point Grad click`);
+    assert.equal(studio.getSnapshot().vectorTool, "gradient", `${ws} Studio must switch to 'gradient' tool on Gradient click`);
+    // The Gradient tool lays linear / radial ramps or point fields; this check places a point field.
+    assert(studio.workspaceApi().useGradientMode("point"), `${ws} Studio must accept a point-field Gradient mode`);
 
     const seCanvas = globalThis.document.querySelector(".se-canvas");
     seCanvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 512, height: 512 });

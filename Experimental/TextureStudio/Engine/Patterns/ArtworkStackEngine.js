@@ -107,6 +107,92 @@ const linChToSrgb = (v) => {
   return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
 };
 
+// ---- gradient interpolation -------------------------------------------------------------------------------------------------------------
+// How colour travels between neighbouring stops (linear / radial ramps) or between placed colour points (point fields).
+export const GRADIENT_INTERPOLATIONS = Object.freeze([
+  { id: "linear", label: "Linear", hint: "Straight blend between stops" },
+  { id: "hermite", label: "Hermite", hint: "Cubic Hermite ease: colours settle at each stop" },
+  { id: "cubic", label: "Cubic", hint: "Catmull-Rom cubic spline through every stop" },
+  { id: "bezier", label: "Bezier", hint: "One Bezier curve with the stops as control points" },
+  { id: "step", label: "Step", hint: "Hard bands, no blending" },
+]);
+// Point fields add the original Gaussian falloff (their default); the rest reshape each point's falloff kernel.
+export const POINT_GRADIENT_INTERPOLATIONS = Object.freeze([
+  { id: "gaussian", label: "Gaussian", hint: "Soft Gaussian falloff around each point" },
+  ...GRADIENT_INTERPOLATIONS.map((E) => (E.id === "step" ? { ...E, hint: "Nearest point wins: hard cells" } : E.id === "cubic" ? { ...E, hint: "Cubic B-spline falloff" } : E.id === "bezier" ? { ...E, hint: "Bezier ease falloff" } : E.id === "hermite" ? { ...E, hint: "Hermite (smoothstep) falloff" } : { ...E, hint: "Straight cone falloff" })),
+]);
+const STOP_INTERPOLATIONS = new Set(GRADIENT_INTERPOLATIONS.map((E) => E.id));
+const POINT_INTERPOLATIONS = new Set(POINT_GRADIENT_INTERPOLATIONS.map((E) => E.id));
+export const normalizeGradientInterp = (v, point = false) => ((point ? POINT_INTERPOLATIONS : STOP_INTERPOLATIONS).has(v) ? v : point ? "gaussian" : "linear");
+
+// CSS-style cubic Bezier ease (x1, y1, x2, y2); solved for x by Newton steps.
+function bezierEase(t, x1 = 0.25, y1 = 0.1, x2 = 0.25, y2 = 1) {
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+  const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  let u = t;
+  for (let i = 0; i < 6; i++) {
+    const x = ((ax * u + bx) * u + cx) * u - t;
+    const d = (3 * ax * u + 2 * bx) * u + cx;
+    if (Math.abs(d) < 1e-6) break;
+    u = clamp(u - x / d, 0, 1);
+  }
+  return ((ay * u + by) * u + cy) * u;
+}
+
+// Point-field falloff: weight of a point at distance d (r = radius × falloff). Gaussian keeps the original field.
+function pointKernel(interp, d, r) {
+  if (interp === "gaussian" || !interp) return Math.exp(-(d * d) / (r * r));
+  const u = d / (r * 2);
+  if (u >= 1) return 0;
+  if (interp === "linear") return 1 - u;
+  if (interp === "hermite") return 1 - u * u * (3 - 2 * u);
+  if (interp === "cubic") { const s = u * 2; return s < 1 ? (4 - 6 * s * s + 3 * s * s * s) / 4 : ((2 - s) ** 3) / 4; }
+  if (interp === "bezier") return 1 - bezierEase(u);
+  return 1;   // step: the nearest point is chosen by the caller
+}
+
+function pointFieldColour(x, y, g, pre, bg, seamless, size) {
+  const interp = g.interp || "gaussian";
+  const half = size * 0.5;
+  let sr = 0, sg = 0, sb = 0, tw = 0, pw = 0, near = -1, nearD = Infinity;
+  for (let k = 0; k < pre.length; k++) {
+    const pt = pre[k];
+    let dx = x - pt.x;
+    let dy = y - pt.y;
+    if (seamless) {
+      dx = ((((dx + half) % size) + size) % size) - half;
+      dy = ((((dy + half) % size) + size) % size) - half;
+    }
+    const d = Math.hypot(dx, dy);
+    if (interp === "step") {
+      if (d < pt.rad * 2 && d / pt.weight < nearD) { nearD = d / pt.weight; near = k; }
+      continue;
+    }
+    const w = pt.weight * pointKernel(interp, d, pt.rad);
+    if (w <= 1e-4) continue;
+    sr += pt.r * w; sg += pt.g * w; sb += pt.b * w;
+    tw += w;
+    if (w > pw) pw = w;
+  }
+  if (interp === "step") {
+    if (near < 0) return bg;
+    return [pre[near].r, pre[near].g, pre[near].b];
+  }
+  if (tw <= 1e-5) return bg;
+  const blend = clamp(pw, 0, 1);
+  return [bg[0] * (1 - blend) + (sr / tw) * blend, bg[1] * (1 - blend) + (sg / tw) * blend, bg[2] * (1 - blend) + (sb / tw) * blend];
+}
+
+function pointFieldPrep(g) {
+  const falloff = clamp(g.falloff ?? 1.0, 0.2, 3.0);
+  return g.points
+    .filter((pt) => pt.weight > 0 && pt.radius > 0)
+    .map((pt) => {
+      const rgb = hexToRgb(pt.color).map((v) => srgbChToLin(v / 255));
+      return { x: pt.x, y: pt.y, r: rgb[0], g: rgb[1], b: rgb[2], rad: Math.max(8, pt.radius * falloff), weight: pt.weight };
+    });
+}
+
 export function createDefaultPointGradient2D(colorA = "#eff4cf", colorB = "#0b0b0b", size = ARTWORK_SIZE) {
   return {
     schema: "alloy.point-gradient.v1",
@@ -137,6 +223,7 @@ export function normalizePointGradient2D(raw, fallbackA = "#eff4cf", fallbackB =
     schema: "alloy.point-gradient.v1",
     space: "scene-2d",
     falloff: clamp(Number(src?.falloff ?? 1.0), 0.2, 3.0),
+    ...(POINT_INTERPOLATIONS.has(src?.interp) && src.interp !== "gaussian" ? { interp: src.interp } : {}),
     background: typeof src?.background === "string" && /^#[0-9a-f]{6}$/i.test(src.background) ? src.background.toLowerCase() : (fallbackB || "#0b0b0b"),
     points,
   };
@@ -145,37 +232,7 @@ export function normalizePointGradient2D(raw, fallbackA = "#eff4cf", fallbackB =
 export function evaluatePointGradient2DAt(x, y, rawGrad, { size = ARTWORK_SIZE, seamless = false } = {}) {
   const g = rawGrad?.schema === "alloy.point-gradient.v1" ? rawGrad : normalizePointGradient2D(rawGrad, "#eff4cf", "#0b0b0b", size);
   const bg = hexToRgb(g.background).map((v) => srgbChToLin(v / 255));
-  const falloff = clamp(g.falloff ?? 1.0, 0.2, 3.0);
-  const half = size * 0.5;
-
-  let sr = 0, sg = 0, sb = 0, tw = 0, pw = 0;
-  for (let i = 0; i < g.points.length; i++) {
-    const pt = g.points[i];
-    if (pt.weight <= 0 || pt.radius <= 0) continue;
-    let dx = x - pt.x;
-    let dy = y - pt.y;
-    if (seamless) {
-      dx = ((((dx + half) % size) + size) % size) - half;
-      dy = ((((dy + half) % size) + size) % size) - half;
-    }
-    const r = Math.max(8, pt.radius * falloff);
-    const w = pt.weight * Math.exp(-(dx * dx + dy * dy) / (r * r));
-    if (w <= 1e-4) continue;
-    const [pr, pg, pb] = hexToRgb(pt.color).map((v) => srgbChToLin(v / 255));
-    sr += pr * w;
-    sg += pg * w;
-    sb += pb * w;
-    tw += w;
-    if (w > pw) pw = w;
-  }
-
-  let lr = bg[0], lg = bg[1], lb = bg[2];
-  if (tw > 1e-5) {
-    const blend = clamp(pw, 0, 1);
-    lr = bg[0] * (1 - blend) + (sr / tw) * blend;
-    lg = bg[1] * (1 - blend) + (sg / tw) * blend;
-    lb = bg[2] * (1 - blend) + (sb / tw) * blend;
-  }
+  const [lr, lg, lb] = pointFieldColour(x, y, g, pointFieldPrep(g), bg, seamless, size);
   return [
     Math.round(linChToSrgb(lr) * 255),
     Math.round(linChToSrgb(lg) * 255),
@@ -187,40 +244,12 @@ export function rasterizePointGradient2D(rawGrad, { res = 128, size = ARTWORK_SI
   const g = normalizePointGradient2D(rawGrad, rawGrad?.background || "#eff4cf", "#5a7692", size);
   const out = new Uint8ClampedArray(res * res * 4);
   const bg = hexToRgb(g.background).map((v) => srgbChToLin(v / 255));
-  const falloff = clamp(g.falloff ?? 1.0, 0.2, 3.0);
-  const half = size * 0.5;
-  const pre = g.points.map((pt) => {
-    const rgb = hexToRgb(pt.color).map((v) => srgbChToLin(v / 255));
-    const r = Math.max(8, pt.radius * falloff);
-    return { x: pt.x, y: pt.y, r: rgb[0], g: rgb[1], b: rgb[2], invR2: 1 / (r * r), weight: pt.weight };
-  });
-
+  const pre = pointFieldPrep(g);
   for (let py = 0; py < res; py++) {
     const sy = ((py + 0.5) / res) * size;
     for (let px = 0; px < res; px++) {
       const sx = ((px + 0.5) / res) * size;
-      let sr = 0, sg = 0, sb = 0, tw = 0, pw = 0;
-      for (let k = 0; k < pre.length; k++) {
-        const pt = pre[k];
-        let dx = sx - pt.x;
-        let dy = sy - pt.y;
-        if (seamless) {
-          dx = ((((dx + half) % size) + size) % size) - half;
-          dy = ((((dy + half) % size) + size) % size) - half;
-        }
-        const w = pt.weight * Math.exp(-(dx * dx + dy * dy) * pt.invR2);
-        if (w <= 1e-4) continue;
-        sr += pt.r * w; sg += pt.g * w; sb += pt.b * w;
-        tw += w;
-        if (w > pw) pw = w;
-      }
-      let lr = bg[0], lg = bg[1], lb = bg[2];
-      if (tw > 1e-5) {
-        const blend = clamp(pw, 0, 1);
-        lr = bg[0] * (1 - blend) + (sr / tw) * blend;
-        lg = bg[1] * (1 - blend) + (sg / tw) * blend;
-        lb = bg[2] * (1 - blend) + (sb / tw) * blend;
-      }
+      const [lr, lg, lb] = pointFieldColour(sx, sy, g, pre, bg, seamless, size);
       const o = (py * res + px) * 4;
       out[o] = Math.round(linChToSrgb(lr) * 255);
       out[o + 1] = Math.round(linChToSrgb(lg) * 255);
@@ -779,6 +808,70 @@ export function normalizeGradientStops(stops, colorA = "#e8c27a", colorB = "#5a7
     .sort((a, b) => a.offset - b.offset);
 }
 
+const hexOf = (rgb) => `#${rgb.map((v) => Math.round(clamp(v, 0, 255)).toString(16).padStart(2, "0")).join("")}`;
+
+// Colour of a stop ramp at t (0–1) under an interpolation (sRGB, like Canvas2D / SVG ramps).
+export function sampleGradientStops(stops, t, interp = "linear") {
+  const S = normalizeGradientStops(stops);
+  const C = S.map((E) => hexToRgb(E.color));
+  const n = S.length;
+  const x = clamp(t, 0, 1);
+  if (x <= S[0].offset) return S[0].color;
+  if (x >= S[n - 1].offset) return S[n - 1].color;
+  let i = 0;
+  while (i < n - 2 && x > S[i + 1].offset) i++;
+  const span = Math.max(1e-6, S[i + 1].offset - S[i].offset);
+  const u = clamp((x - S[i].offset) / span, 0, 1);
+  if (interp === "step") return S[u >= 1 ? i + 1 : i].color;
+  if (interp === "bezier") {
+    // De Casteljau over every stop colour; the offsets map t onto the curve parameter piecewise.
+    const s = (i + u) / (n - 1);
+    let P = C.map((E) => [...E]);
+    for (let k = n - 1; k > 0; k--) P = P.slice(0, k).map((E, j) => E.map((v, c) => v + (P[j + 1][c] - v) * s));
+    return hexOf(P[0]);
+  }
+  if (interp === "cubic") {
+    const p0 = C[Math.max(0, i - 1)], p1 = C[i], p2 = C[i + 1], p3 = C[Math.min(n - 1, i + 2)];
+    const u2 = u * u, u3 = u2 * u;
+    return hexOf(p1.map((_, c) => 0.5 * ((2 * p1[c]) + (-p0[c] + p2[c]) * u + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * u2 + (-p0[c] + 3 * p1[c] - 3 * p2[c] + p3[c]) * u3)));
+  }
+  const e = interp === "hermite" ? u * u * (3 - 2 * u) : u;
+  return hexOf(C[i].map((v, c) => v + (C[i + 1][c] - v) * e));
+}
+
+// Dense stop list that reproduces a non-linear interpolation with the linear ramps Canvas2D and SVG draw.
+export function expandGradientStops(stops, interp = "linear", count = 40) {
+  const S = normalizeGradientStops(stops);
+  if (!interp || interp === "linear") return S;
+  if (interp === "step") {
+    const out = [];
+    S.forEach((E, i) => {
+      if (i > 0) out.push({ color: S[i - 1].color, offset: E.offset });
+      out.push({ color: E.color, offset: E.offset });
+    });
+    return out;
+  }
+  const lo = S[0].offset, hi = S[S.length - 1].offset;
+  const out = [];
+  for (let k = 0; k <= count; k++) {
+    const t = lo + ((hi - lo) * k) / count;
+    out.push({ color: sampleGradientStops(S, t, interp), offset: t });
+  }
+  return out;
+}
+
+// Where a linear / radial ramp sits inside its frame, in frame-normalised units (0,0 = centre, ±0.5 = edges).
+// Linear runs a → b; radial is centred on a with b on its rim. Without a placement the angle gives the old layout.
+// A placement with space "scene" is framed by the whole document instead of each shape, so one ramp spans every
+// instance of an arrayed / scattered layer (see sceneRampAnchors).
+export function gradientPlacement(mode, place, angle = 45, w = 1, h = 1) {
+  const ok = (p) => Array.isArray(p) && p.length === 2 && p.every((v) => Number.isFinite(+v));
+  if (place && ok(place.a) && ok(place.b)) return { a: [+place.a[0], +place.a[1]], b: [+place.b[0], +place.b[1]] };
+  if (mode === "radial") return { a: [0, 0], b: w >= h ? [0.5, 0] : [0, 0.5] };
+  const r = ((angle ?? 45) * Math.PI) / 180;
+  return { a: [-Math.cos(r) * 0.5, -Math.sin(r) * 0.5], b: [Math.cos(r) * 0.5, Math.sin(r) * 0.5] };
+}
+
 /**
  * Centripetal Catmull-Rom cubic Bezier tangent fitting (matching AlloyStudio pathEditorGeometry).
  * Fits smooth `in`/`out` tangent handles on `"auto"` nodes while respecting manually sculpted handles.
@@ -941,6 +1034,11 @@ export function evaluateLayerInstances(layer, docSize = ARTWORK_SIZE, mode = "pa
     fillStops,
     fillPointGradient: layer.shape.fillPointGradient || null,
     gradientAngle: layer.shape.gradientAngle ?? 45,
+    sceneSize: docSize,
+    fillPlace: layer.shape.fillPlace || null,
+    fillInterp: layer.shape.fillInterp || "linear",
+    strokePlace: layer.shape.strokePlace || null,
+    strokeInterp: layer.shape.strokeInterp || "linear",
     opacity: 1,
     heightValue: layer.surface.height ?? 0.2,
     roughness: layer.surface.roughness ?? 0.5,
@@ -1337,22 +1435,44 @@ function drawMotifPath(ctx, inst) {
   }
 }
 
-function resolveCanvasGradient(ctx, mode, stops, angle, w, h, fallbackColor, fallbackColorB, cx = 0, cy = 0) {
-  const norm = normalizeGradientStops(stops, fallbackColor, fallbackColorB);
-  if (mode === "radial") {
-    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.5);
-    for (const s of norm) grad.addColorStop(s.offset, s.color);
-    return grad;
+// Scene-space ramp anchors mapped into an instance's local drawing space. `scene` = { x, y, rot, fx, fy, size } of the
+// instance (its un-wrapped position, so wrapped copies match the seam) plus an optional post-map (sx, sy, ox, oy) for
+// motifs drawn in their own path space (svg-path: 0–100).
+export function sceneRampAnchors(mode, place, scene) {
+  const size = scene.size || ARTWORK_SIZE;
+  const { a, b } = gradientPlacement(mode, place, 45, size, size);
+  const r = (-(scene.rot || 0) * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
+  const map = (p) => {
+    const dx = size * (0.5 + p[0]) - scene.x, dy = size * (0.5 + p[1]) - scene.y;
+    const lx = (dx * c - dy * s) * (scene.fx || 1), ly = (dx * s + dy * c) * (scene.fy || 1);
+    return [lx / (scene.sx || 1) + (scene.ox || 0), ly / (scene.sy || 1) + (scene.oy || 0)];
+  };
+  return { a: map(a), b: map(b) };
+}
+
+function resolveCanvasGradient(ctx, mode, stops, angle, w, h, fallbackColor, fallbackColorB, cx = 0, cy = 0, { place = null, interp = "linear", scene = null } = {}) {
+  if (mode !== "radial" && mode !== "linear") return fallbackColor;
+  const norm = expandGradientStops(normalizeGradientStops(stops, fallbackColor, fallbackColorB), interp);
+  let ax, ay, bx, by;
+  if (place?.space === "scene" && scene) {
+    const S = sceneRampAnchors(mode, place, scene);
+    [ax, ay] = S.a; [bx, by] = S.b;
+  } else {
+    const { a, b } = gradientPlacement(mode, place, angle, w, h);
+    ax = cx + a[0] * w; ay = cy + a[1] * h; bx = cx + b[0] * w; by = cy + b[1] * h;
   }
-  if (mode === "linear") {
-    const rad = ((angle ?? 45) * Math.PI) / 180;
-    const dx = Math.cos(rad) * w * 0.5;
-    const dy = Math.sin(rad) * h * 0.5;
-    const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
-    for (const s of norm) grad.addColorStop(s.offset, s.color);
-    return grad;
-  }
-  return fallbackColor;
+  const grad = mode === "radial"
+    ? ctx.createRadialGradient(ax, ay, 0, ax, ay, Math.max(0.5, Math.hypot(bx - ax, by - ay)))
+    : ctx.createLinearGradient(ax, ay, bx, by);
+  for (const s of norm) grad.addColorStop(s.offset, s.color);
+  return grad;
+}
+
+// The instance frame scene-space ramps are mapped into (svg-path motifs draw in a 0–100 path space).
+function instanceScene(inst, pathSpace = false) {
+  const scene = { x: inst.x, y: inst.y, rot: inst.rotation || 0, fx: inst.flipX ? -1 : 1, fy: inst.flipY ? -1 : 1, size: inst.sceneSize || ARTWORK_SIZE };
+  if (pathSpace) Object.assign(scene, { sx: Math.max(0.01, inst.width / 100), sy: Math.max(0.01, inst.height / 100), ox: 50, oy: 50 });
+  return scene;
 }
 
 function resolveFillStyle(ctx, inst, overrideColor) {
@@ -1367,6 +1487,8 @@ function resolveFillStyle(ctx, inst, overrideColor) {
       inst.height,
       inst.color,
       inst.colorB || "#1a1e24",
+      0, 0,
+      { place: inst.fillPlace, interp: inst.fillInterp, scene: instanceScene(inst) },
     );
   }
   return inst.color;
@@ -1384,6 +1506,8 @@ function resolveStrokeStyle(ctx, inst, isAlbedo) {
       inst.height,
       inst.outlineColor || "#141619",
       inst.strokeStops?.[inst.strokeStops.length - 1]?.color || "#eff4cf",
+      0, 0,
+      { place: inst.strokePlace, interp: inst.strokeInterp, scene: instanceScene(inst) },
     );
   }
   return inst.outlineColor || "#141619";
@@ -1467,6 +1591,8 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
         targetSize,
         bg.color || "#171a1f",
         bg.colorB || "#2b3340",
+        0, 0,
+        { place: bg.fillPlace, interp: bg.fillInterp },
       );
       aCtx.fillRect(-targetSize * 0.5, -targetSize * 0.5, targetSize, targetSize);
     } else {
@@ -1563,6 +1689,9 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
           color: layer.shape.color,
           colorB: layer.shape.colorB,
           gradientAngle: layer.shape.gradientAngle ?? 45,
+          sceneSize: size,
+          fillPlace: layer.shape.fillPlace || null,
+          fillInterp: layer.shape.fillInterp || "linear",
           opacity: 1,
           heightValue: layer.surface.height ?? 0.05,
           roughness: layer.surface.roughness ?? 0.6,
@@ -1644,7 +1773,7 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
               ctx.fillStyle = isAlbedo && inst.fillMode === "point"
                 ? resolveScenePointPattern(ctx, inst.fillPointGradient, inst.color)
                 : isAlbedo && (inst.fillMode === "linear" || inst.fillMode === "radial")
-                  ? resolveCanvasGradient(ctx, inst.fillMode, inst.fillStops, inst.gradientAngle, 100, 100, inst.color, inst.colorB, 50, 50)
+                  ? resolveCanvasGradient(ctx, inst.fillMode, inst.fillStops, inst.gradientAngle, 100, 100, inst.color, inst.colorB, 50, 50, { place: inst.fillPlace, interp: inst.fillInterp, scene: instanceScene(inst, true) })
                   : fillStyle;
               ctx.fill(p2d, inst.fillRule === "nonzero" ? "nonzero" : "evenodd");
             }
@@ -1656,7 +1785,7 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
                 ? (inst.strokeMode === "point"
                     ? resolveScenePointPattern(ctx, inst.strokePointGradient, inst.outlineColor)
                     : inst.strokeMode === "linear" || inst.strokeMode === "radial"
-                      ? resolveCanvasGradient(ctx, inst.strokeMode, inst.strokeStops, inst.strokeGradientAngle, 100, 100, inst.outlineColor, inst.colorB, 50, 50)
+                      ? resolveCanvasGradient(ctx, inst.strokeMode, inst.strokeStops, inst.strokeGradientAngle, 100, 100, inst.outlineColor, inst.colorB, 50, 50, { place: inst.strokePlace, interp: inst.strokeInterp, scene: instanceScene(inst, true) })
                       : (inst.outlineColor || inst.color || "#141619"))
                 : fillStyle;
               ctx.stroke(p2d);
@@ -2147,11 +2276,28 @@ function escapeXml(s) {
   return String(s || "").replace(/[&<>'"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;" }[c]));
 }
 
-function pushSvgGradientDef(gradDefs, id, mode, stops, angle = 45, fallbackA = "#e8c27a", fallbackB = "#1a1e24") {
-  const norm = normalizeGradientStops(stops, fallbackA, fallbackB);
+function pushSvgGradientDef(gradDefs, id, mode, stops, angle = 45, fallbackA = "#e8c27a", fallbackB = "#1a1e24", { place = null, interp = "linear", frame = null } = {}) {
+  const norm = expandGradientStops(normalizeGradientStops(stops, fallbackA, fallbackB), interp);
   const stopTags = norm
     .map((s) => `<stop offset="${(s.offset * 100).toFixed(1)}%" stop-color="${escapeXml(s.color)}"/>`)
     .join("");
+  if (frame) {
+    // Frame-space ramp (the element's own user space) so placements match the Canvas2D renderer exactly.
+    let ax, ay, bx, by;
+    if (place?.space === "scene" && frame.scene) {
+      const S = sceneRampAnchors(mode, place, frame.scene);
+      [ax, ay] = S.a; [bx, by] = S.b;
+    } else {
+      const { cx = 0, cy = 0, w = 1, h = 1 } = frame;
+      const { a, b } = gradientPlacement(mode, place, angle, w, h);
+      ax = cx + a[0] * w; ay = cy + a[1] * h; bx = cx + b[0] * w; by = cy + b[1] * h;
+    }
+    const f = (v) => v.toFixed(2);
+    gradDefs.push(mode === "radial"
+      ? `<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${f(ax)}" cy="${f(ay)}" fx="${f(ax)}" fy="${f(ay)}" r="${f(Math.max(0.5, Math.hypot(bx - ax, by - ay)))}">${stopTags}</radialGradient>`
+      : `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${f(ax)}" y1="${f(ay)}" x2="${f(bx)}" y2="${f(by)}">${stopTags}</linearGradient>`);
+    return;
+  }
   if (mode === "radial") {
     gradDefs.push(`<radialGradient id="${id}">${stopTags}</radialGradient>`);
   } else {
@@ -2216,6 +2362,10 @@ function buildSvgMotifMarkup(inst, fillAttr, strokeAttr, strokeW, gradDefs, gid,
     return base;
   };
 
+  // svg-path motifs draw in a 0–100 path space; every other motif is centred on its own origin.
+  const pathSpace = t === "svg-path" && !!inst.svgPath;
+  const svgFrame = pathSpace ? { cx: 50, cy: 50, w: 100, h: 100 } : { cx: 0, cy: 0, w, h };
+  svgFrame.scene = { ...instanceScene(inst, pathSpace), size: sceneSize };
   let effectiveFill = inst.fillEnabled === false || t === "line" ? "none" : fillAttr;
   if (effectiveFill !== "none") {
     if (inst.fillMode === "point") {
@@ -2229,7 +2379,7 @@ function buildSvgMotifMarkup(inst, fillAttr, strokeAttr, strokeW, gradDefs, gid,
       effectiveFill = `url(#${id})`;
     } else if (inst.fillMode === "linear" || inst.fillMode === "radial") {
       const id = `${gid}-g`;
-      pushSvgGradientDef(gradDefs, id, inst.fillMode, inst.fillStops, inst.gradientAngle, inst.color, inst.colorB || "#1a1e24");
+      pushSvgGradientDef(gradDefs, id, inst.fillMode, inst.fillStops, inst.gradientAngle, inst.color, inst.colorB || "#1a1e24", { place: inst.fillPlace, interp: inst.fillInterp, frame: svgFrame });
       effectiveFill = `url(#${id})`;
     }
   }
@@ -2246,7 +2396,7 @@ function buildSvgMotifMarkup(inst, fillAttr, strokeAttr, strokeW, gradDefs, gid,
       effectiveStroke = `url(#${sid})`;
     } else if (inst.strokeMode === "linear" || inst.strokeMode === "radial") {
       const sid = `${gid}-sg`;
-      pushSvgGradientDef(gradDefs, sid, inst.strokeMode, inst.strokeStops, inst.strokeGradientAngle, strokeAttr, inst.strokeStops?.[inst.strokeStops.length - 1]?.color || "#eff4cf");
+      pushSvgGradientDef(gradDefs, sid, inst.strokeMode, inst.strokeStops, inst.strokeGradientAngle, strokeAttr, inst.strokeStops?.[inst.strokeStops.length - 1]?.color || "#eff4cf", { place: inst.strokePlace, interp: inst.strokeInterp, frame: svgFrame });
       effectiveStroke = `url(#${sid})`;
     }
   }
@@ -2357,6 +2507,7 @@ export function artworkDocumentLayersSvg(doc, { idPrefix = "art", pointRes = 128
           fillStops: normalizeGradientStops(layer.shape.fillStops, layer.shape.color, layer.shape.colorB),
           fillPointGradient: layer.shape.fillPointGradient || null,
           color: layer.shape.color, colorB: layer.shape.colorB, gradientAngle: layer.shape.gradientAngle ?? 45,
+          fillPlace: layer.shape.fillPlace || null, fillInterp: layer.shape.fillInterp || "linear",
           opacity: 1, fillEnabled: true, outlineWidth: 0,
         }]
       : evaluateLayerInstances(layer, size, doc.mode);
@@ -2384,7 +2535,7 @@ export function artworkDocumentLayersSvg(doc, { idPrefix = "art", pointRes = 128
             textFill = `url(#${tid})`;
           } else if (inst.fillMode === "linear" || inst.fillMode === "radial") {
             const tid = `${idPrefix}-${instSeq++}-tg`;
-            pushSvgGradientDef(gradDefs, tid, inst.fillMode, inst.fillStops, inst.gradientAngle, inst.color, inst.colorB);
+            pushSvgGradientDef(gradDefs, tid, inst.fillMode, inst.fillStops, inst.gradientAngle, inst.color, inst.colorB, { place: inst.fillPlace, interp: inst.fillInterp, frame: { cx: 0, cy: 0, w: Math.max(1, inst.width), h: Math.max(1, inst.height), scene: { ...instanceScene(inst), size } } });
             textFill = `url(#${tid})`;
           }
           parts.push(`<text transform="${xf}" opacity="${clamp(inst.opacity, 0, 1)}" text-anchor="${anchor}" dominant-baseline="central" font-family="${escapeXml(t.fontFamily || "DM Sans")}, sans-serif" font-weight="${t.fontWeight || 600}" font-size="${t.fontSize || 48}" letter-spacing="${t.letterSpacing || 0}" fill="${textFill}" ${inst.outlineWidth > 0 ? `stroke="${inst.outlineColor || "#141619"}" stroke-width="${inst.outlineWidth}"` : ""}>${escapeXml(t.value || "")}</text>`);
@@ -2421,7 +2572,7 @@ export function artworkDocumentBackgroundSvg(doc, { id = "doc-bg-grad", pointRes
     });
     bgFill = `url(#${id})`;
   } else if (bg.fillMode === "linear" || bg.fillMode === "radial") {
-    pushSvgGradientDef(extraDefs, id, bg.fillMode, bg.fillStops, bg.gradientAngle ?? 45, bg.color || "#171a1f", bg.colorB || "#2b3340");
+    pushSvgGradientDef(extraDefs, id, bg.fillMode, bg.fillStops, bg.gradientAngle ?? 45, bg.color || "#171a1f", bg.colorB || "#2b3340", { place: bg.fillPlace, interp: bg.fillInterp, frame: { cx: size / 2, cy: size / 2, w: size, h: size } });
     bgFill = `url(#${id})`;
   }
   const rect = `<rect x="0" y="0" width="${size}" height="${size}" fill="${bgFill}" opacity="${clamp(bg.opacity ?? 1, 0, 1)}"/>`;

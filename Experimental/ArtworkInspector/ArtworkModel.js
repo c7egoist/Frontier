@@ -8,11 +8,11 @@ import {
   ARTWORK_SIZE, ARTWORK_FINISHES, MOTIF_TYPES, MODIFIER_DEFINITIONS, ARTWORK_PBR_CHANNELS, ARTWORK_PBR_CHANNEL_MAP,
   createArtworkLayer, createDefaultModifier, ensureArtworkLayerSurface, setArtworkLayerPbrMask, getArtworkChannelValue,
   setArtworkChannelValue, normalizeGradientStops, evaluateLayerInstances, evaluateArtworkDocument, artworkDocumentToSvgString,
-  artworkDocumentLayersSvg,
+  artworkDocumentLayersSvg, normalizePointGradient2D, gradientPlacement, GRADIENT_INTERPOLATIONS, POINT_GRADIENT_INTERPOLATIONS, normalizeGradientInterp,
 } from "./Engine/Patterns/ArtworkStackEngine.js";
 import { NOISE_SCALED_STARTERS, STAMP_STARTERS } from "./Engine/Patterns/ArtworkStarters.js";
 
-export { ARTWORK_SIZE, ARTWORK_FINISHES, MOTIF_TYPES, MODIFIER_DEFINITIONS, ARTWORK_PBR_CHANNELS, ARTWORK_PBR_CHANNEL_MAP };
+export { ARTWORK_SIZE, ARTWORK_FINISHES, MOTIF_TYPES, MODIFIER_DEFINITIONS, ARTWORK_PBR_CHANNELS, ARTWORK_PBR_CHANNEL_MAP, GRADIENT_INTERPOLATIONS, POINT_GRADIENT_INTERPOLATIONS };
 
 const Clamp = (V, Lo, Hi) => Math.max(Lo, Math.min(Hi, V));
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -249,10 +249,11 @@ export function PatchModifier(Doc, LayerId, ModId, Key, Value) {
 
 // ---- colour slots: fill / stroke on a layer, ground on the document
 const SLOT = {
-  fill: { Mode: "fillMode", Stops: "fillStops", A: "color", B: "colorB", Angle: "gradientAngle", Point: "fillPointGradient" },
-  stroke: { Mode: "strokeMode", Stops: "strokeStops", A: "strokeColor", B: "strokeColorB", Angle: "strokeGradientAngle", Point: "strokePointGradient" },
-  ground: { Mode: "fillMode", Stops: "fillStops", A: "color", B: "colorB", Angle: "gradientAngle", Point: "fillPointGradient" },
+  fill: { Mode: "fillMode", Stops: "fillStops", A: "color", B: "colorB", Angle: "gradientAngle", Point: "fillPointGradient", Place: "fillPlace", Interp: "fillInterp" },
+  stroke: { Mode: "strokeMode", Stops: "strokeStops", A: "strokeColor", B: "strokeColorB", Angle: "strokeGradientAngle", Point: "strokePointGradient", Place: "strokePlace", Interp: "strokeInterp" },
+  ground: { Mode: "fillMode", Stops: "fillStops", A: "color", B: "colorB", Angle: "gradientAngle", Point: "fillPointGradient", Place: "fillPlace", Interp: "fillInterp" },
 };
+export const SLOT_KEYS = SLOT;
 const SlotHost = (D, LayerId, Slot) => (Slot === "ground" ? D.background : FindLayer(D, LayerId)?.shape);
 
 export function SlotState(Doc, LayerId, Slot) {
@@ -261,7 +262,90 @@ export function SlotState(Doc, LayerId, Slot) {
   const Kind = Slot === "fill" && FindLayer(Doc, LayerId)?.kind === "gradient";
   const Mode = H[K.Mode] || (Kind ? "linear" : "solid");
   const Stops = normalizeGradientStops(H[K.Stops], H[K.A], H[K.B]);
-  return { Mode, Stops, Colour: Mode === "solid" ? (HEX.test(H[K.A]) ? H[K.A] : Stops[0].color) : Stops[0].color, Angle: H[K.Angle] ?? 45, AllowSolid: !Kind };
+  const Point = Mode === "point" ? normalizePointGradient2D(H[K.Point], H[K.A], H[K.B], Doc.size || ARTWORK_SIZE) : null;
+  return {
+    Mode, Stops, Colour: Mode === "solid" ? (HEX.test(H[K.A]) ? H[K.A] : Stops[0].color) : Stops[0].color, Angle: H[K.Angle] ?? 45, AllowSolid: !Kind,
+    Interp: Point ? normalizeGradientInterp(Point.interp, true) : normalizeGradientInterp(H[K.Interp]),
+    Placed: Point ? true : !!H[K.Place], Point,
+    Space: H[K.Place]?.space === "scene" ? "scene" : "shape", Spans: Slot !== "ground" && FindLayer(Doc, LayerId)?.kind !== "gradient",
+  };
+}
+
+// Interpolation: stop ramps keep it on the slot; point fields keep it inside their own point-gradient record.
+export function AssignSlotInterp(Doc, LayerId, Slot, Interp) {
+  return Edit(Doc, (D) => {
+    const H = SlotHost(D, LayerId, Slot), K = SLOT[Slot];
+    if (!H) return;
+    if ((H[K.Mode] || "solid") === "point") {
+      const G = normalizePointGradient2D(H[K.Point], H[K.A], H[K.B], D.size || ARTWORK_SIZE);
+      const V = normalizeGradientInterp(Interp, true);
+      if (V === "gaussian") delete G.interp; else G.interp = V;
+      H[K.Point] = G;
+    } else H[K.Interp] = normalizeGradientInterp(Interp);
+  });
+}
+
+// Each shape carries the ramp ("shape") or one ramp crosses the whole canvas ("scene"); anchors stay put on the canvas.
+export function AssignSlotSpace(Doc, LayerId, Slot, Space) {
+  return Edit(Doc, (D) => {
+    const L = FindLayer(D, LayerId), K = SLOT[Slot];
+    if (Slot === "ground" || !L || L.kind === "gradient" || !K) return;
+    const H = L.shape, Mode = H[K.Mode] || "solid", Size = D.size || ARTWORK_SIZE;
+    if (Mode !== "linear" && Mode !== "radial") return;
+    const From = H[K.Place]?.space === "scene" ? "scene" : "shape";
+    if (From === Space) return;
+    const T = L.transform, W = Math.max(1, T.width), Hh = Math.max(1, T.height), R = ((T.rotation || 0) * Math.PI) / 180;
+    const P = gradientPlacement(Mode, H[K.Place], H[K.Angle] ?? 45, From === "scene" ? Size : W, From === "scene" ? Size : Hh);
+    const ToDoc = (Q) => (From === "scene" ? [Size * (0.5 + Q[0]), Size * (0.5 + Q[1])] : [T.x + Q[0] * W * Math.cos(R) - Q[1] * Hh * Math.sin(R), T.y + Q[0] * W * Math.sin(R) + Q[1] * Hh * Math.cos(R)]);
+    const FromDoc = (X) => {
+      if (Space === "scene") return [X[0] / Size - 0.5, X[1] / Size - 0.5];
+      const Dx = X[0] - T.x, Dy = X[1] - T.y;
+      return [(Dx * Math.cos(-R) - Dy * Math.sin(-R)) / W, (Dx * Math.sin(-R) + Dy * Math.cos(-R)) / Hh];
+    };
+    const Round = (Q) => Q.map((V) => Math.round(V * 10000) / 10000);
+    H[K.Place] = { a: Round(FromDoc(ToDoc(P.a))), b: Round(FromDoc(ToDoc(P.b))), ...(Space === "scene" ? { space: "scene" } : {}) };
+  });
+}
+
+// Back to the angle-driven layout (linear / radial) — drops the viewport placement.
+export function ResetSlotPlace(Doc, LayerId, Slot) {
+  return Edit(Doc, (D) => { const H = SlotHost(D, LayerId, Slot); if (H) delete H[SLOT[Slot].Place]; });
+}
+
+// Point-field colours, base colour and spread (the points themselves are placed on the TextureStudio canvas).
+export function AssignPointColour(Doc, LayerId, Slot, Index, Hex) {
+  if (!HEX.test(Hex)) return Doc;
+  return Edit(Doc, (D) => {
+    const H = SlotHost(D, LayerId, Slot), K = SLOT[Slot];
+    if (!H) return;
+    const G = normalizePointGradient2D(H[K.Point], H[K.A], H[K.B], D.size || ARTWORK_SIZE);
+    if (G.points[Index]) G.points[Index].color = Hex.toLowerCase();
+    H[K.Point] = G;
+  });
+}
+export function AssignPointField(Doc, LayerId, Slot, Key, Value) {
+  return Edit(Doc, (D) => {
+    const H = SlotHost(D, LayerId, Slot), K = SLOT[Slot];
+    if (!H) return;
+    const G = normalizePointGradient2D(H[K.Point], H[K.A], H[K.B], D.size || ARTWORK_SIZE);
+    if (Key === "falloff" && Number.isFinite(+Value)) G.falloff = Clamp(+Value, 0.2, 3);
+    if (Key === "background" && HEX.test(Value)) G.background = Value.toLowerCase();
+    H[K.Point] = G;
+  });
+}
+const POINT_PALETTE = ["#eff4cf", "#e8c27a", "#5a7692", "#c87849", "#699c8c", "#d890a8", "#8fb8de"];
+export function PointCount(Doc, LayerId, Slot, Add) {
+  return Edit(Doc, (D) => {
+    const H = SlotHost(D, LayerId, Slot), K = SLOT[Slot];
+    if (!H) return;
+    const Size = D.size || ARTWORK_SIZE;
+    const G = normalizePointGradient2D(H[K.Point], H[K.A], H[K.B], Size);
+    if (Add && G.points.length < 12) {
+      const N = G.points.length, A = (N * 2.399963) % (Math.PI * 2);
+      G.points.push({ id: `pg_${Date.now().toString(36)}_${N}`, x: Size * (0.5 + Math.cos(A) * 0.28), y: Size * (0.5 + Math.sin(A) * 0.28), color: POINT_PALETTE[N % POINT_PALETTE.length], radius: Math.round(Size * 0.42), weight: 1 });
+    } else if (!Add && G.points.length > 1) G.points.pop();
+    H[K.Point] = G;
+  });
 }
 
 function WriteStops(H, K, Stops) {
@@ -277,6 +361,7 @@ export function SetSlotMode(Doc, LayerId, Slot, Mode) {
     if (!H) return;
     H[K.Mode] = Mode;
     if (Mode !== "solid" && (!Array.isArray(H[K.Stops]) || H[K.Stops].length < 2)) WriteStops(H, K, null);
+    if (Mode === "point") H[K.Point] = normalizePointGradient2D(H[K.Point], H[K.A], H[K.B], D.size || ARTWORK_SIZE);
   });
 }
 
@@ -293,7 +378,18 @@ export function SetSlotColour(Doc, LayerId, Slot, Index, Hex) {
 }
 
 export function SetSlotAngle(Doc, LayerId, Slot, Angle) {
-  return Edit(Doc, (D) => { const H = SlotHost(D, LayerId, Slot); if (H) H[SLOT[Slot].Angle] = Clamp(+Angle, -180, 360); });
+  return Edit(Doc, (D) => {
+    const H = SlotHost(D, LayerId, Slot), K = SLOT[Slot];
+    if (!H) return;
+    H[K.Angle] = Clamp(+Angle, -180, 360);
+    // A placed linear ramp turns about its midpoint and keeps its length.
+    const P = H[K.Place];
+    if (P?.a && P?.b && (H[K.Mode] || "solid") === "linear") {
+      const Mx = (P.a[0] + P.b[0]) / 2, My = (P.a[1] + P.b[1]) / 2, Len = Math.hypot(P.b[0] - P.a[0], P.b[1] - P.a[1]) / 2;
+      const R = (H[K.Angle] * Math.PI) / 180, Cx = Math.cos(R) * Len, Cy = Math.sin(R) * Len;
+      H[K.Place] = { ...P, a: [Mx - Cx, My - Cy], b: [Mx + Cx, My + Cy] };
+    }
+  });
 }
 
 // Adds a stop between the last two (keeps both ends), or removes the stop before the last.

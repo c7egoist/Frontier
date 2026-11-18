@@ -110,11 +110,14 @@ function DockArtwork(Api, AppBridge, Mode) {
   if (!Seat) {
     const Right = Host("mi-host cd-artwork");
     const Left = Host("ol-host cd-artwork-outliner");
-    const Card = MountArtworkCard(Right, { mode: Mode, docked: true, scoped: true });
+    // "Place in viewport" on a fill / outline / ground ramp hands the slot to the workspace's Gradient tool.
+    const Card = MountArtworkCard(Right, { mode: Mode, docked: true, scoped: true, placeGradient: (Slot) => Seat?.Api?.editGradient?.(Slot) });
     MountArtworkOutliner(Left, Card);
-    Seat = { Left, Right, Card, Adopting: false, Last: null };
+    Seat = { Left, Right, Card, Adopting: false, Last: null, Api: null };
     Seats.set("artwork", Seat);
   }
+  Seat.Api = Api;
+  Undock.push(() => { if (Seat.Api === Api) Seat.Api = null; });
   SeatGrid(Api.dock);
   SeatLeft(Api.dock, Seat.Left);
   SeatRight(Api.dock, Seat.Right);
@@ -133,6 +136,57 @@ function DockArtwork(Api, AppBridge, Mode) {
   });
   Undock.push(Off, Api.watchDocument(Adopt));
   Adopt(Api.currentDocument());
+  DockArtworkText(Api);
+}
+
+// Stamp / Pattern Text tool → the Brush Studio Text menu Texture Paint uses; its values style text layers.
+const TEXT_FAMILY = { sans: "DM Sans", serif: "Georgia", mono: "Courier New", condensed: "Arial Narrow", display: "Impact", script: "Brush Script MT" };
+const TEXT_ALIGN = { Left: "left", Centre: "center", Right: "right" };
+const Finite = (V) => (Number.isFinite(+V) ? +V : undefined);
+export function TextStyle(V = {}) {
+  return {
+    value: typeof V.content === "string" ? V.content : undefined,
+    fontFamily: TEXT_FAMILY[V.font] || undefined,
+    fontWeight: Finite(V.weight),
+    fontSize: Finite(V.size),
+    letterSpacing: Finite(V.spacing),
+    align: TEXT_ALIGN[V.align],
+    color: /^#[0-9a-f]{6}$/i.test(V.colour) ? V.colour : undefined,
+    opacity: Number.isFinite(+V.opacity) ? Math.max(0.01, Math.min(1, +V.opacity / 100)) : undefined,
+    strokeWidth: Finite(V.outline),
+    strokeColor: /^#[0-9a-f]{6}$/i.test(V.outlineColour) ? V.outlineColour : undefined,
+    rotation: Finite(V.rotation),
+  };
+}
+export function TextValues(T = {}) {
+  const Out = {};
+  const Font = Object.entries(TEXT_FAMILY).find(([, F]) => F === T.fontFamily)?.[0];
+  if (typeof T.value === "string") Out.content = T.value;
+  if (Font) Out.font = Font;
+  if (Number.isFinite(T.fontWeight)) Out.weight = String([300, 400, 600, 800].reduce((B, W) => (Math.abs(W - T.fontWeight) < Math.abs(B - T.fontWeight) ? W : B), 600));
+  if (Number.isFinite(T.fontSize)) Out.size = Math.max(18, Math.min(160, Math.round(T.fontSize)));
+  if (Number.isFinite(T.letterSpacing)) Out.spacing = Math.max(-10, Math.min(40, T.letterSpacing));
+  const Align = Object.entries(TEXT_ALIGN).find(([, A]) => A === T.align)?.[0];
+  if (Align) Out.align = Align;
+  if (/^#[0-9a-f]{6}$/i.test(T.color)) Out.colour = T.color.toLowerCase();
+  if (Number.isFinite(T.opacity)) Out.opacity = Math.round(T.opacity * 100);
+  if (Number.isFinite(T.strokeWidth)) Out.outline = Math.max(0, Math.min(12, T.strokeWidth));
+  if (/^#[0-9a-f]{6}$/i.test(T.strokeColor)) Out.outlineColour = T.strokeColor.toLowerCase();
+  if (Number.isFinite(T.rotation)) Out.rotation = Math.max(-180, Math.min(180, T.rotation));
+  return Out;
+}
+function DockArtworkText(Api) {
+  if (!Api.useBrushMenu || !Api.assignTextStyle) return;
+  const Seat = BrushSeat();
+  const Adapter = {
+    currentBrush: () => ({ tool: "text" }),
+    assignBrush: () => {},
+    assignTool: (Tool, Values) => { if (Tool === "text") Api.assignTextStyle(Object.fromEntries(Object.entries(TextStyle(Values)).filter(([, V]) => V !== undefined))); },
+    studioView: () => { const Cur = Api.currentTextStyle?.(); return { tool: "text", values: Cur ? TextValues(Cur) : null }; },
+  };
+  Seat.Api = Adapter;
+  Api.useBrushMenu((X, Y) => OpenBrushMenu(Seat, X, Y));
+  Undock.push(() => { Api.useBrushMenu(null); Seat.Close(); if (Seat.Api === Adapter) Seat.Api = null; });
 }
 
 // ------------------------------------------------------------------------------------------------ Baking
@@ -310,7 +364,10 @@ function BrushSeat() {
   const Push = Coalesce(([Brush, Tool, Tools]) => {
     if (!Seat.Api) return;
     Seat.Pushing = true;
-    try { Seat.Api.assignBrush(BrushPatch(Brush, Tool, Tools, Seat.Api.currentBrush?.() || {})); } finally { Seat.Pushing = false; }
+    try {
+      if (Seat.Api.assignTool) Seat.Api.assignTool(Tool, Tools?.[Tool] || {}, Brush);   // a host that takes tool values (Stamp / Pattern text)
+      else Seat.Api.assignBrush(BrushPatch(Brush, Tool, Tools, Seat.Api.currentBrush?.() || {}));
+    } finally { Seat.Pushing = false; }
   });
   Card.Subscribe((Brush, Tool, Tools) => {
     Menu.querySelector(".cd-brush-tool").textContent = Card.State.Tool;
@@ -321,7 +378,9 @@ function BrushSeat() {
 
 function OpenBrushMenu(Seat, X, Y) {
   const { Menu, Card, Api } = Seat;
-  Card.Adopt(StudioView(Api.currentBrush()));
+  const View = Api.studioView ? Api.studioView() : StudioView(Api.currentBrush());
+  Card.Adopt(View);
+  if (View.values && Card.State.Tools?.[View.tool]) { Object.assign(Card.State.Tools[View.tool], View.values); Card.Render(); }
   Menu.querySelector(".cd-brush-tool").textContent = Card.State.Tool;
   Menu.hidden = false;
   const W = Menu.offsetWidth || 760, H = Menu.offsetHeight || 560;

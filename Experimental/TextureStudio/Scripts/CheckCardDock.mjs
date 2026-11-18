@@ -129,6 +129,89 @@ try {
   });
   Check("stamp · same card follows in stamp mode", R.Mode === "stamp" && R.Seated && R.Layers, JSON.stringify(R));
 
+  // ------------------------------------------------------------------------------------------ Fill placement + tool menus
+  R = await Run(async () => {
+    const Engine = await import(new URL("./Engine/Patterns/ArtworkStackEngine.js", location.href).href);
+    const Api = window.__frontierTextureStudio.workspaceApi(), Doc = structuredClone(Api.currentDocument());
+    const Layer = Doc.layers.find((L) => L.id === Doc.selectedLayerId) || Doc.layers.find((L) => L.shape);
+    Doc.layers = [Layer];
+    Object.assign(Layer.shape, { fillMode: "linear", fillStops: [{ offset: 0, color: "#ff0000" }, { offset: 0.5, color: "#00ff00" }, { offset: 1, color: "#0000ff" }], fillPlace: { a: [-0.5, 0], b: [0.5, 0] } });
+    const Sum = (Interp) => {
+      Layer.shape.fillInterp = Interp;
+      const C = Engine.renderArtworkDocument(Doc, 96), Px = (C.albedo || C.canvas || C).getContext("2d").getImageData(0, 0, 96, 96).data;
+      let H = 0; for (let I = 0; I < Px.length; I += 4) H = (H * 31 + Px[I] * 3 + Px[I + 1] * 5 + Px[I + 2] * 7) >>> 0;
+      return H;
+    };
+    const Out = { linear: Sum("linear"), cubic: Sum("cubic"), step: Sum("step"), bezier: Sum("bezier") };
+    return { ...Out, Distinct: new Set(Object.values(Out)).size };
+  });
+  Check("fill · interpolation modes render differently", R.Distinct === 4, JSON.stringify(R));
+
+  R = await Run(async () => {
+    const Wait = (Ms) => new Promise((Ok) => setTimeout(Ok, Ms));
+    const Api = window.__frontierTextureStudio.workspaceApi();
+    Api.useGradientMode("radial");
+    Api.editGradient("fill");
+    await Wait(200);
+    const Canvas = document.querySelector(".se-canvas"), Box = Canvas.getBoundingClientRect();
+    const Fire = (El, Type, X, Y) => El.dispatchEvent(new PointerEvent(Type, { bubbles: true, cancelable: true, clientX: X, clientY: Y, button: 0, buttons: Type === "pointerup" ? 0 : 1, pointerId: 1, isPrimary: true }));
+    const Cx = Box.left + Box.width / 2, Cy = Box.top + Box.height / 2;
+    Fire(Canvas, "pointerdown", Cx - 60, Cy - 40);
+    for (let I = 1; I <= 5; I++) Fire(Canvas, "pointermove", Cx - 60 + I * 20, Cy - 40 + I * 14);
+    Fire(Canvas, "pointerup", Cx + 40, Cy + 30);
+    await Wait(300);
+    const Layer = () => { const D = Api.currentDocument(); return D.layers.find((L) => L.id === D.selectedLayerId); };
+    const Made = structuredClone(Layer()?.shape?.fillPlace || null), Mode = Layer()?.shape?.fillMode;
+    const Handle = document.querySelector("[data-ramp-end='a'] rect"), H = Handle?.getBoundingClientRect();
+    if (H) {
+      const Hx = H.left + H.width / 2, Hy = H.top + H.height / 2;
+      Fire(Handle, "pointerdown", Hx, Hy);
+      for (let I = 1; I <= 4; I++) Fire(Canvas, "pointermove", Hx + I * 12, Hy + I * 5);
+      Fire(Canvas, "pointerup", Hx + 48, Hy + 20);
+      await Wait(300);
+    }
+    const Moved = Layer()?.shape?.fillPlace;
+    return { Mode, Made, Moved, Overlay: document.querySelector(".se-ramp-overlay")?.getAttribute("data-ramp-mode"), Tool: Api.getSnapshot().vectorTool };
+  });
+  const Shift = R.Made && R.Moved && Math.abs(R.Moved.a[0] - R.Made.a[0]) > 0.01;
+  const RimKept = Shift && Math.abs((R.Moved.b[0] - R.Moved.a[0]) - (R.Made.b[0] - R.Made.a[0])) < 0.01;
+  Check("fill · viewport drag places a radial ramp; centre handle moves it with the rim", R.Mode === "radial" && R.Overlay === "radial" && R.Tool === "gradient" && Shift && RimKept, JSON.stringify(R));
+
+  R = await Run(async () => {
+    const Wait = (Ms) => new Promise((Ok) => setTimeout(Ok, Ms));
+    const Api = window.__frontierTextureStudio.workspaceApi(), Out = {};
+    for (const [Tool, View] of [["gradient", "gradient"], ["circle", "shapes"], ["pen", "path"]]) {
+      const B = document.querySelector(`[data-tool-id='${Tool}']`);
+      if (!B) { Out[Tool] = "no button"; continue; }
+      const Box = B.getBoundingClientRect();
+      B.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: Box.left, clientY: Box.bottom }));
+      await Wait(120);
+      const Menu = document.querySelector(".atm-menu:not([hidden])");
+      Out[Tool] = Menu?.getAttribute("data-view") === View ? (Menu.querySelectorAll("[data-act], [data-bind]").length > 3 ? "ok" : "empty") : Menu?.getAttribute("data-view") || "closed";
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await Wait(60);
+    }
+    const B = document.querySelector("[data-tool-id='text']"), Box = B.getBoundingClientRect();
+    B.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: Box.left, clientY: Box.bottom }));
+    await Wait(250);
+    const Menu = document.querySelector(".cd-brush-menu");
+    Out.text = Menu && !Menu.hidden ? Menu.querySelectorAll(".bs-ltile[data-kind='font']").length : 0;
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await Wait(60);
+    Api.selectTool?.("select");
+    return Out;
+  });
+  Check("menus · right-click gradient / shape / pen tools opens their context menus", R.gradient === "ok" && R.circle === "ok" && (R.pen === "ok" || R.pen === "no button"), JSON.stringify(R));
+  Check("menus · right-click the Text tool opens the Brush Studio text library (fonts)", R.text === 6, JSON.stringify(R));
+
+  R = await Run(async () => {
+    const T = window.__frontierTextureStudio, Card = T.card("artwork"), Api = T.workspaceApi();
+    Card.State.Placer?.("fill", "linear");
+    await new Promise((Ok) => setTimeout(Ok, 200));
+    return { Tool: Api.getSnapshot().vectorTool, Slot: Api.getSnapshot().gradientSlot, Mode: Api.getSnapshot().gradientToolMode, Placer: typeof Card.State.Placer };
+  });
+  Check("fill · card 'Place in viewport' hands the gradient tool to the stage", R.Tool === "gradient" && R.Slot === "fill", JSON.stringify(R));
+
   // ------------------------------------------------------------------------------------------ Baking
   await Switch("bake");
   R = await Run(async () => {

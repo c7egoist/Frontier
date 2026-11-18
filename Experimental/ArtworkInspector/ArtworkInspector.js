@@ -137,12 +137,32 @@ const Note = (Text) => `<p class="mi-note">${Esc(Text)}</p>`;
 function SlotEditor(L, Slot, Label) {
   const St = A.SlotState(S.Doc, L?.id, Slot);
   if (!St) return "";
-  const Options = [...(St.AllowSolid ? [["Solid", "solid"]] : []), ["Linear", "linear"], ["Radial", "radial"], ...(St.Mode === "point" ? [["Point", "point"]] : [])];
+  const Options = [...(St.AllowSolid ? [["Solid", "solid"]] : []), ["Linear", "linear"], ["Radial", "radial"], ["Point", "point"]];
   let Body;
   if (St.Mode === "solid") Body = ColourField(`slot:${Slot}:solid`, `${Label} colour`, St.Colour);
-  else if (St.Mode === "point") Body = Note("Point-field colours are placed on the canvas in TextureStudio; switch to Linear or Radial to edit stops here.");
-  else Body = Stops(`slot:${Slot}`, St.Stops.map((E) => E.color), 12) + (St.Mode === "linear" ? Knob({ Bind: `angle:${Slot}`, Label: "Angle", Value: St.Angle, Min: -180, Max: 180, Step: 1, Unit: "°" }) : "");
-  return Segments("slot-mode", Options, St.Mode, { Label: `${Label} source`, Extra: `data-slot="${Slot}"` }) + Body;
+  else if (St.Mode === "point") {
+    Body = Stops(`pt:${Slot}`, St.Point.points.map((P) => P.color), 12, 1)
+      + Grid(Knob({ Bind: `pf:${Slot}:falloff`, Label: "Spread", Value: St.Point.falloff, Min: 0.2, Max: 3, Step: 0.01, Unit: "×" }))
+      + `<div class="ai-chan-colour"><span class="mi-knob-label"><span>Field base</span></span>${ColourField(`pf:${Slot}:background`, "Field base colour", St.Point.background)}</div>`;
+  } else Body = Stops(`slot:${Slot}`, St.Stops.map((E) => E.color), 12) + (St.Mode === "linear" ? Knob({ Bind: `angle:${Slot}`, Label: "Angle", Value: St.Angle, Min: -180, Max: 180, Step: 1, Unit: "°" }) : "");
+  return Segments("slot-mode", Options, St.Mode, { Label: `${Label} source`, Extra: `data-slot="${Slot}"` }) + Body
+    + (St.Mode === "solid" ? "" : InterpEditor(Slot, St) + PlaceTools(Slot, St));
+}
+
+// How colour travels between stops (or between placed points) — every source except Solid.
+function InterpEditor(Slot, St) {
+  const List = St.Mode === "point" ? A.POINT_GRADIENT_INTERPOLATIONS : A.GRADIENT_INTERPOLATIONS;
+  return `<div class="ai-interp"><span class="mi-knob-label"><span>Interpolation</span></span>${Dropdown("slot-interp", List.map((E) => [E.label, E.id, "gradient", E.hint]), St.Interp, { Label: "Interpolation", Extra: `data-slot="${Slot}"`, Search: false, Class: "compact" })}</div>`;
+}
+
+// Hand the ramp to the TextureStudio canvas: drag the line / centre / stops, or place colour points.
+function PlaceTools(Slot, St) {
+  if (!S.Placer) return Note(St.Mode === "point" ? "Colour points are placed on the TextureStudio canvas." : "Open this in TextureStudio to place the ramp on the canvas.");
+  const Verb = St.Mode === "point" ? "Place points" : St.Mode === "radial" ? "Place centre" : "Place line";
+  const Spans = St.Mode !== "point" && St.Spans ? Segments("slot-space", [["Each shape", "shape"], ["Whole canvas", "scene"]], St.Space, { Label: "Ramp spans", Extra: `data-slot="${Slot}"` }) : "";
+  return Spans + `<div class="ai-inline-tools ai-place-tools"><button type="button" class="mi-text-btn" data-act="slot-place" data-slot="${Slot}">${icon("move", 11)}${Verb} in viewport</button>`
+    + (St.Mode !== "point" && St.Placed ? `<button type="button" class="mi-text-btn" data-act="slot-unplace" data-slot="${Slot}">${icon("reset", 11)}Reset placement</button>` : "")
+    + `</div>`;
 }
 
 function ShapeEditor(L) {
@@ -441,6 +461,8 @@ function Write(Bind, Raw) {
     return A.SetSlotColour(D, L.id, Slot, Index === "solid" ? "solid" : +Index, String(Raw).toLowerCase());
   }
   if (Head === "angle") return A.SetSlotAngle(D, L.id, Rest[0], +Raw);
+  if (Head === "pt") return A.AssignPointColour(D, L?.id, Rest[0], +Rest[1], String(Raw).toLowerCase());
+  if (Head === "pf") return A.AssignPointField(D, L?.id, Rest[0], Rest[1], Rest[1] === "background" ? String(Raw).toLowerCase() : +Raw);
   if (Head === "surf") {
     const Spec = A.ARTWORK_PBR_CHANNEL_MAP[Rest[0]];
     return A.SetChannelValue(D, L.id, Rest[0], Spec?.isColor ? (HEX.test(Raw) ? Raw.toLowerCase() : null) ?? A.ChannelValue(L, Rest[0]) : +Raw);
@@ -493,7 +515,15 @@ function OnClick(Event) {
     case "shape": Apply(A.EditLayer(D, L.id, (E) => { E.shape.motifType = V; })); break;
     case "fill-on": Apply(A.EditLayer(D, L.id, (E) => { E.shape.fillEnabled = E.shape.fillEnabled === false; })); break;
     case "slot-mode": Apply(A.SetSlotMode(D, L.id, El.dataset.slot, V)); break;
-    case "stop-add": case "stop-remove": Apply(A.SlotStops(D, L.id, El.dataset.target.split(":")[1], Act === "stop-add")); break;
+    case "stop-add": case "stop-remove": {
+      const [Head, Slot] = El.dataset.target.split(":");
+      Apply(Head === "pt" ? A.PointCount(D, L?.id, Slot, Act === "stop-add") : A.SlotStops(D, L?.id, Slot, Act === "stop-add"));
+      break;
+    }
+    case "slot-interp": Apply(A.AssignSlotInterp(D, L?.id, El.dataset.slot, V)); break;
+    case "slot-space": Apply(A.AssignSlotSpace(D, L?.id, El.dataset.slot, V)); Flash(V === "scene" ? "Ramp spans the canvas" : "Ramp on each shape"); break;
+    case "slot-unplace": Apply(A.ResetSlotPlace(D, L?.id, El.dataset.slot)); Flash("Placement reset to the angle"); break;
+    case "slot-place": Settle(); S.Placer?.(El.dataset.slot); return;
     case "text-weight": Apply(A.EditLayer(D, L.id, (E) => { E.text.fontWeight = +V; })); break;
     case "centre": Apply(A.EditLayer(D, L.id, (E) => { E.transform.x = E.transform.y = (D.size || A.ARTWORK_SIZE) / 2; })); break;
     case "square": Apply(A.EditLayer(D, L.id, (E) => { E.transform.height = E.transform.width; })); break;
@@ -614,6 +644,7 @@ export function Mount(Host, Options = {}) {
   Root = Host;
   S.Docked = !!Options.docked;
   S.Scoped = !!Options.scoped;
+  S.Placer = typeof Options.placeGradient === "function" ? Options.placeGradient : null;   // host canvas hand-off
   const Params = new URLSearchParams(globalThis.location?.search || "");
   S.Mode = Options.mode || (Params.get("mode") === "stamp" ? "stamp" : "pattern");
   const Cat = A.Catalog(S.Mode);

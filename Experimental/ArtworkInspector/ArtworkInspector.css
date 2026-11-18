@@ -52,3 +52,7 @@
               linear-gradient(140deg, color-mix(in srgb, #e0b86a calc(var(--m) * 100%), #9a9a9a), #262626); }
 .ai-add-dd { margin-top: 4px; }
 .mi-library-dd { max-width: 190px; flex: 0 1 190px; }
+
+/* gradient interpolation + viewport placement under a fill / outline / ground ramp */
+.ai-interp { display: flex; flex-direction: column; gap: 6px; }
+.ai-place-tools { flex-wrap: wrap; }

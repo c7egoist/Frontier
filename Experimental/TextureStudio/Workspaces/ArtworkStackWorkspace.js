@@ -33,7 +33,23 @@ import {
   pathNodesToSvgD,
   setArtworkChannelValue,
   setArtworkLayerPbrMask,
+  sampleGradientStops,
+  evaluateLayerInstances,
+  GRADIENT_INTERPOLATIONS,
+  POINT_GRADIENT_INTERPOLATIONS,
 } from "../Engine/Patterns/ArtworkStackEngine.js";
+import {
+  resolveRampSlot,
+  rampMode,
+  rampAnchors,
+  rampStops,
+  writeRampStops,
+  writeRampAnchors,
+  projectOnRamp,
+  rampOverlayMarkup,
+  setRampSpace,
+} from "./ArtworkGradientPlacement.js";
+import { createArtworkToolMenus, toolMenuView, SHAPE_TOOLS } from "./ArtworkToolMenu.js";
 import {
   listPatternStarterCatalog,
   listStampStarterCatalog,
@@ -69,7 +85,7 @@ const VECTOR_TOOLS = [
   { id: "curve", label: "Curve", glyph: "Curve", key: "U" },
   { id: "pen", label: "Pen", glyph: "Pen", key: "P" },
   { id: "node", label: "Edit Points", glyph: "Focus", key: "A" },
-  { id: "gradient", label: "Point Grad", glyph: "Gradient", key: "F" },
+  { id: "gradient", label: "Gradient", glyph: "Gradient", key: "F" },
   { id: "square", label: "Rect", glyph: "Square", key: "R" },
   { id: "circle", label: "Circle", glyph: "Circle", key: "O" },
   { id: "diamond", label: "Diamond", glyph: "Diamond", key: "D" },
@@ -208,8 +224,14 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     zoom: 1,
     panX: 0,
     panY: 0,
-    activePointGradSlot: "fill",
+    activePointGradSlot: "fill",   // the colour slot the Gradient tool edits: fill | stroke | ground
     selectedPointGradIdx: 0,
+    selectedRampStop: -1,
+    gradientToolMode: "linear",    // what the Gradient tool turns a Solid slot into: linear | radial | point
+    // Context-menu tool styles: new shapes, text and paths pick these up when they are placed.
+    shapeStyle: { motif: "", fillMode: "solid", color: "", colorB: "#5a7692", interp: "linear", strokeWidth: 0, strokeColor: "#16181c", place: "drag", size: 96, keep: false },
+    textStyle: null,
+    pathStyle: { tension: 0.5, strokeWidth: 6, strokeColor: "", fillClosed: true },
     lastStats: { instances: 1, coveragePct: 0, minScale: 1, maxScale: 1 },
     lastEval: null,
   };
@@ -649,6 +671,40 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     return null;
   }
 
+  // The linear / radial ramp the Gradient tool edits (selected layer fill / outline, or the document ground).
+  function getRampTarget() {
+    const slot = state.activePointGradSlot || "fill";
+    return resolveRampSlot(state.doc, getSelectedLayer(), slot) || (slot !== "ground" && state.doc.background?.enabled && state.doc.background.fillMode && state.doc.background.fillMode !== "solid" && state.doc.background.fillMode !== "point" ? resolveRampSlot(state.doc, null, "ground") : null);
+  }
+
+  // Turn the target slot into a linear / radial ramp (Gradient tool drag on a Solid fill), creating a wash layer when nothing is selectable.
+  function ensureRampTarget(mode) {
+    let ramp = getRampTarget();
+    if (!ramp) {
+      const size = state.doc.size || ARTWORK_SIZE;
+      const wash = createArtworkLayer("gradient", {
+        name: `${mode === "radial" ? "Radial" : "Linear"} Gradient`,
+        shape: { fillMode: mode, color: isPattern ? "#eff4cf" : "#e8c27a", colorB: "#5a7692" },
+      });
+      state.doc.layers.push(wash);
+      state.doc.selectedLayerId = wash.id;
+      state.activePointGradSlot = "fill";
+      renderLeftColumn();
+      ramp = resolveRampSlot(state.doc, wash, "fill");
+      if (!ramp) return null;
+      ramp.frame = { x: size / 2, y: size / 2, w: size, h: size, rot: 0 };
+    }
+    const cur = rampMode(ramp);
+    if (cur !== "linear" && cur !== "radial") {
+      ramp.host[ramp.keys.mode] = mode;
+      if (ramp.slot === "fill" && ramp.layer?.kind === "motif") ramp.host.fillEnabled = true;
+      const first = ramp.host[ramp.keys.a] || "#eff4cf";
+      const stops = ramp.host[ramp.keys.stops];
+      if (!Array.isArray(stops) || stops.length < 2) writeRampStops(ramp, [{ color: first, offset: 0 }, { color: ramp.host[ramp.keys.b] || "#5a7692", offset: 1 }]);
+    }
+    return ramp;
+  }
+
   function syncPathSessionHints() {
     if (activePathSession) {
       const n = activePathSession.nodes.length;
@@ -656,9 +712,19 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         ? "Editing curve nodes · Drag points or handles · Dbl-click node to toggle smooth/corner · Enter finish"
         : `Curve path (${n} pt${n === 1 ? "" : "s"}) · Click add point · Click start or Dbl-click / Enter finish · Backspace undo pt`;
     } else if (state.vectorTool === "gradient") {
-      const tgt = getPointGradientTarget(false);
-      const count = tgt ? tgt.getGrad().points.length : 0;
-      hintText.textContent = `Point Gradient (${count}/12 pts${tgt ? ` · ${tgt.label}` : ""}) · Click canvas to add colour points · Drag handles to move gradient in scene · Del removes`;
+      const ramp = getRampTarget();
+      const rm = ramp ? rampMode(ramp) : "solid";
+      if (rm === "linear") {
+        hintText.textContent = `Linear gradient · ${ramp.label} · Drag on canvas to lay the line · Drag ends to move · Click the line to add a stop · Drag stops along it · Dbl-click a stop removes it`;
+      } else if (rm === "radial") {
+        hintText.textContent = `Radial gradient · ${ramp.label} · Drag the centre to move it · Drag the rim handle to size · Click the radius to add a stop · Click canvas to recentre`;
+      } else {
+        const tgt = getPointGradientTarget(false);
+        const count = tgt ? tgt.getGrad().points.length : 0;
+        hintText.textContent = tgt
+          ? `Point field (${count}/12 pts · ${tgt.label}) · Click canvas to add colour points · Drag points to move them · Del removes`
+          : `Gradient · Drag on canvas to place a ${state.gradientToolMode === "point" ? "point field" : `${state.gradientToolMode} gradient`} · Right-click the tool for mode and interpolation`;
+      }
     } else if (state.vectorTool === "curve" || state.vectorTool === "pen") {
       hintText.textContent = `${state.vectorTool === "curve" ? "Curve Tool (U)" : "Pen Tool (P)"} · Click canvas to trace smooth Bézier curve · Enter or Dbl-click to commit`;
     } else if (state.vectorTool === "node") {
@@ -733,9 +799,9 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         colorB: "#5a7692",
         fillMode: "solid",
         fillStops: [{ color: baseCol, offset: 0 }, { color: "#5a7692", offset: 1 }],
-        fillEnabled: isClosed,
-        strokeWidth: isClosed ? 0 : 6,
-        strokeColor: baseCol,
+        fillEnabled: isClosed && state.pathStyle.fillClosed !== false,
+        strokeWidth: isClosed && state.pathStyle.fillClosed !== false ? 0 : (state.pathStyle.strokeWidth ?? 6),
+        strokeColor: state.pathStyle.strokeColor || baseCol,
         pathNodes: curveData.pathNodes,
         closedPath: curveData.closedPath,
         curveTension: curveData.curveTension,
@@ -752,11 +818,61 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     return true;
   }
 
+  // Context-menu shape style → a new (or the selected) motif layer.
+  function applyShapeStyle(layer) {
+    const st = state.shapeStyle, sh = layer.shape;
+    const base = st.color || (isPattern ? "#eff4cf" : "#e8c27a");
+    sh.color = base;
+    sh.colorB = st.colorB || "#5a7692";
+    sh.fillMode = st.fillMode || "solid";
+    sh.fillStops = [{ color: base, offset: 0 }, { color: sh.colorB, offset: 1 }];
+    sh.fillInterp = st.interp || "linear";
+    delete sh.fillPlace;
+    if (sh.fillMode === "point") sh.fillPointGradient = createDefaultPointGradient2D(base, sh.colorB, state.doc.size || ARTWORK_SIZE);
+    if (st.interp && sh.fillMode === "point" && st.interp !== "gaussian") sh.fillPointGradient.interp = st.interp;
+    sh.fillEnabled = true;
+    sh.strokeWidth = st.strokeWidth || 0;
+    sh.strokeColor = st.strokeColor || "#16181c";
+  }
+
+  // Brush Studio text menu values (or the native fallback) → a text layer.
+  function applyTextStyle(layer) {
+    const st = state.textStyle;
+    if (!st) return;
+    layer.text = { ...layer.text };
+    if (typeof st.value === "string" && st.value) layer.text.value = st.value.slice(0, 40);
+    if (st.fontFamily) layer.text.fontFamily = st.fontFamily;
+    if (Number.isFinite(st.fontWeight)) layer.text.fontWeight = st.fontWeight;
+    if (Number.isFinite(st.fontSize)) layer.text.fontSize = st.fontSize;
+    if (Number.isFinite(st.letterSpacing)) layer.text.letterSpacing = st.letterSpacing;
+    if (st.align) layer.text.align = st.align;
+    if (st.color) { layer.shape.color = st.color; layer.shape.fillMode = "solid"; layer.shape.fillStops = [{ color: st.color, offset: 0 }, { color: layer.shape.colorB || "#5a7692", offset: 1 }]; }
+    if (Number.isFinite(st.opacity)) layer.opacity = st.opacity;
+    if (Number.isFinite(st.strokeWidth)) layer.shape.strokeWidth = st.strokeWidth;
+    if (st.strokeColor) layer.shape.strokeColor = st.strokeColor;
+    if (Number.isFinite(st.rotation)) layer.transform = { ...layer.transform, rotation: st.rotation };
+  }
+
+  // Gradient tool on a colour slot (inspector card "Place in viewport", gradient menu target).
+  function editGradientSlot(slot = "fill") {
+    state.activePointGradSlot = slot === "stroke" || slot === "ground" ? slot : "fill";
+    state.selectedRampStop = -1;
+    if (state.viewChannel !== "vector") {
+      state.viewChannel = "vector";
+      headerUI.setView?.("vector");
+      syncViewDisplay();
+    }
+    selectVectorTool("gradient");
+    return true;
+  }
+
   function selectVectorTool(id) {
     if (activePathSession && id !== activePathSession.tool && id !== "node") {
       commitActivePathSession();
     }
     state.vectorTool = id;
+    if (SHAPE_TOOLS.has(id)) state.shapeStyle.motif = "";
+    if (id !== "gradient") state.selectedRampStop = -1;
     headerUI.setActiveTool(id);
     if (id === "node") {
       const sel = getSelectedLayer();
@@ -969,6 +1085,15 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         </g>`;
     }
 
+    // Linear / radial ramp handles (Gradient tool): anchors, stops along the line, radial rim
+    let rampMarkup = "";
+    if (state.vectorTool === "gradient" && state.viewChannel === "vector" && !activePathSession) {
+      const ramp = getRampTarget();
+      const rm = ramp ? rampMode(ramp) : "solid";
+      if (rm === "linear" || rm === "radial") rampMarkup = rampOverlayMarkup(ramp, { units, selectedStop: state.selectedRampStop });
+    }
+    if (pointerInteraction?.kind === "ramp-new" && pointerInteraction.preview) rampMarkup = pointerInteraction.preview(units) + rampMarkup;
+
     // Scene-space interactive Point Gradient nodes overlay
     let pointGradMarkup = "";
     const ptGradTarget = getPointGradientTarget(false);
@@ -1019,6 +1144,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       ${gridMarkup}
       <rect x="0" y="0" width="${docSize}" height="${docSize}" fill="none" stroke="#c1dcab" stroke-opacity="0.52" stroke-width="${units * 1.4}" pointer-events="none"/>
       ${selectionMarkup}
+      ${rampMarkup}
       ${pointGradMarkup}
       ${drawDraftMarkup}
     `;
@@ -1475,6 +1601,17 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
             evaluateAndRender(true);
           },
         });
+        SelectRow(wrap, {
+          Label: "Interpolation",
+          Options: POINT_GRADIENT_INTERPOLATIONS.map((e) => [e.label, e.id]),
+          Read: () => grad.interp || "gaussian",
+          Write: (v) => {
+            pushUndo();
+            if (v === "gaussian") delete grad.interp; else grad.interp = v;
+            setPointGrad(grad);
+            evaluateAndRender(true);
+          },
+        });
         ColorRow(wrap, {
           Label: "Field Base Colour",
           Read: () => grad.background || fallbackB,
@@ -1529,6 +1666,19 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
           },
         });
       }
+
+      // Interpolation + viewport placement (the same controls the docked inspector card shows)
+      const rampHere = () => resolveRampSlot(state.doc, slot === "ground" ? null : getSelectedLayer(), slot);
+      SelectRow(wrap, {
+        Label: "Interpolation",
+        Options: GRADIENT_INTERPOLATIONS.map((e) => [e.label, e.id]),
+        Read: () => { const r = rampHere(); return (r && r.host[r.keys.interp]) || "linear"; },
+        Write: (v) => { const r = rampHere(); if (!r) return; pushUndo(); r.host[r.keys.interp] = v; evaluateAndRender(true); },
+      });
+      ActionRow(wrap, [
+        { Label: `Place ${curMode === "radial" ? "Centre" : "Line"} in Scene (F)`, Glyph: "Gradient", Act: () => editGradientSlot(slot) },
+        { Label: "Reset Placement", Glyph: "Reset", Act: () => { const r = rampHere(); if (!r) return; pushUndo(); delete r.host[r.keys.place]; evaluateAndRender(true); rebuildInspector(); } },
+      ]);
 
       stops.forEach((stop, sIdx) => {
         const sRow = Construct("div", "se-gradient-stop-row");
@@ -2087,6 +2237,81 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       }
     }
 
+    // Linear / radial ramp: drag anchors, slide or add stops, or drag on the canvas to lay a new line / recentre
+    if (state.vectorTool === "gradient") {
+      let ramp = getRampTarget();
+      const rm = ramp ? rampMode(ramp) : "solid";
+      const wantsPoint = rm === "point" || ((rm === "solid" || !ramp) && state.gradientToolMode === "point");
+      if (!wantsPoint) {
+        const snap = structuredClone(state.doc);
+        const placed = rm === "linear" || rm === "radial";
+        const endEl = placed ? e.target.closest?.("[data-ramp-end]") : null;
+        const stopEl = placed ? e.target.closest?.("[data-ramp-stop]") : null;
+        const lineEl = placed ? e.target.closest?.("[data-ramp-line]") : null;
+        if (endEl) {
+          pointerInteraction = { kind: "ramp-end", ramp, which: endEl.dataset.rampEnd, undoSnap: snap };
+          svgEl.setPointerCapture?.(e.pointerId);
+          return;
+        }
+        if (stopEl) {
+          const idx = Number(stopEl.dataset.rampStop);
+          const stops = rampStops(ramp);
+          if ((e.detail >= 2 || e.altKey) && stops.length > 2) {
+            stops.splice(idx, 1);
+            writeRampStops(ramp, stops);
+            state.selectedRampStop = -1;
+            pushUndo(snap);
+            evaluateAndRender(true);
+            rebuildInspector();
+            Toast("Stop removed");
+            return;
+          }
+          state.selectedRampStop = idx;
+          pointerInteraction = { kind: "ramp-stop", ramp, idx, undoSnap: snap };
+          svgEl.setPointerCapture?.(e.pointerId);
+          renderVectorSvgCanvas();
+          return;
+        }
+        if (lineEl) {
+          const { a, b } = rampAnchors(ramp);
+          const { t } = projectOnRamp(a, b, pt.x, pt.y);
+          const stops = rampStops(ramp);
+          if (stops.length < 12 && t > 0.005 && t < 0.995) {
+            const color = sampleGradientStops(stops, t, ramp.host[ramp.keys.interp] || "linear");
+            stops.push({ color, offset: t });
+            const norm = writeRampStops(ramp, stops);
+            state.selectedRampStop = norm.findIndex((x) => x.offset === t && x.color === color);
+            pointerInteraction = { kind: "ramp-stop", ramp, idx: state.selectedRampStop, undoSnap: snap };
+            svgEl.setPointerCapture?.(e.pointerId);
+            evaluateAndRender(false, { skipPbr: true });
+            rebuildInspector();
+          }
+          return;
+        }
+        ramp = ensureRampTarget(placed ? rm : state.gradientToolMode);
+        // First placement on an arrayed / scattered layer spans the whole canvas; later drags keep the chosen span.
+        if (ramp?.layer && ramp.layer.kind !== "gradient" && !ramp.host[ramp.keys.place]) {
+          let many = false;
+          try { many = evaluateLayerInstances(ramp.layer, state.doc.size || ARTWORK_SIZE, state.doc.mode).length > 1; } catch { many = false; }
+          setRampSpace(ramp, many ? "scene" : "shape");
+        }
+        if (ramp) {
+          const start = [snapCoord(pt.x, e.shiftKey ? 0 : state.snapStep), snapCoord(pt.y, e.shiftKey ? 0 : state.snapStep)];
+          const mode = rampMode(ramp);
+          const act = { kind: "ramp-new", ramp, mode, start, cur: start, undoSnap: snap, minDrag: pt.unitsPerPx * 6 };
+          act.preview = (u) => `<line x1="${act.start[0]}" y1="${act.start[1]}" x2="${act.cur[0]}" y2="${act.cur[1]}" stroke="#eff4cf" stroke-width="${u * 1.4}" stroke-dasharray="${u * 4} ${u * 3}" pointer-events="none"/>`
+            + (mode === "radial" ? `<circle cx="${act.start[0]}" cy="${act.start[1]}" r="${Math.hypot(act.cur[0] - act.start[0], act.cur[1] - act.start[1])}" fill="none" stroke="#eff4cf" stroke-width="${u * 1.2}" stroke-dasharray="${u * 4} ${u * 3}" pointer-events="none"/>` : "");
+          pointerInteraction = act;
+          state.selectedRampStop = -1;
+          svgEl.setPointerCapture?.(e.pointerId);
+          syncPathSessionHints();
+          renderVectorSvgCanvas();
+          rebuildInspector();
+          return;
+        }
+      }
+    }
+
     // Scene-space Point Gradient click-to-place point directly in scene
     if (state.vectorTool === "gradient") {
       const snap = structuredClone(state.doc);
@@ -2161,7 +2386,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         activePathSession = {
           nodes: [],
           closed: false,
-          tension: 0.5,
+          tension: state.pathStyle.tension ?? 0.5,
           tool: state.vectorTool,
           hoverPt: null,
           nearStart: false,
@@ -2317,6 +2542,33 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     }
 
     const pt = clientToSvg(e.clientX, e.clientY);
+    if (pointerInteraction.kind === "ramp-end" || pointerInteraction.kind === "ramp-stop" || pointerInteraction.kind === "ramp-new") {
+      const act = pointerInteraction;
+      const px = snapCoord(pt.x, e.shiftKey ? 0 : state.snapStep), py = snapCoord(pt.y, e.shiftKey ? 0 : state.snapStep);
+      if (act.kind === "ramp-new") {
+        act.cur = [px, py];
+        renderVectorSvgCanvas();
+        return;
+      }
+      const { mode, a, b } = rampAnchors(act.ramp);
+      if (act.kind === "ramp-end") {
+        if (mode === "radial" && act.which === "a") writeRampAnchors(act.ramp, [px, py], [px + b[0] - a[0], py + b[1] - a[1]]);
+        else if (act.which === "a") writeRampAnchors(act.ramp, [px, py], b);
+        else writeRampAnchors(act.ramp, a, [px, py]);
+        selCountEl.textContent = mode === "radial" ? `Radius ${Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]))}` : `Line ${Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]))} · ${Math.round(act.ramp.host[act.ramp.keys.angle] ?? 0)}°`;
+      } else {
+        const t = Math.max(0.005, Math.min(0.995, projectOnRamp(a, b, pt.x, pt.y).t));
+        const stops = rampStops(act.ramp);
+        if (stops[act.idx]) stops[act.idx] = { ...stops[act.idx], offset: t };
+        const order = stops.map((x, i) => ({ x, i })).sort((p, q) => p.x.offset - q.x.offset);
+        act.idx = order.findIndex((o) => o.i === act.idx);
+        state.selectedRampStop = act.idx;
+        writeRampStops(act.ramp, order.map((o) => o.x));
+        selCountEl.textContent = `Stop ${act.idx + 1} · ${Math.round(t * 100)}%`;
+      }
+      evaluateAndRender(false, { skipPbr: true });
+      return;
+    }
     if (pointerInteraction.kind === "ptgrad-move" && pointerInteraction.tgt) {
       const grad = pointerInteraction.tgt.getGrad();
       const gp = grad.points[pointerInteraction.idx];
@@ -2444,6 +2696,26 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     pointerInteraction = null;
     svgEl.style.cursor = state.vectorTool === "pan" ? "grab" : state.vectorTool === "select" ? "default" : "crosshair";
 
+    if (act.kind === "ramp-new") {
+      const drag = Math.hypot(act.cur[0] - act.start[0], act.cur[1] - act.start[1]);
+      if (drag >= act.minDrag) writeRampAnchors(act.ramp, act.start, act.cur);
+      else if (act.mode === "radial") {
+        const { a, b } = rampAnchors(act.ramp);
+        writeRampAnchors(act.ramp, act.start, [act.start[0] + b[0] - a[0], act.start[1] + b[1] - a[1]]);
+      }
+      pushUndo(act.undoSnap);
+      syncPathSessionHints();
+      evaluateAndRender(true);
+      rebuildInspector();
+      return;
+    }
+    if (act.kind === "ramp-end" || act.kind === "ramp-stop") {
+      pushUndo(act.undoSnap);
+      evaluateAndRender(true);
+      rebuildInspector();
+      return;
+    }
+
     if (act.kind === "ptgrad-move") {
       if (act.undoSnap) pushUndo(act.undoSnap);
       syncPathSessionHints();
@@ -2470,19 +2742,26 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     if (act.kind === "draw") {
       pushUndo();
       const dr = act.draftRect;
-      const w = Math.max(48, dr.w < 12 ? 96 : dr.w);
-      const h = Math.max(48, dr.h < 12 ? (act.tool === "stripe" ? 36 : 96) : dr.h);
-      const cx = dr.w < 12 ? act.startX : dr.x + w * 0.5;
-      const cy = dr.h < 12 ? act.startY : dr.y + h * 0.5;
       const isText = act.tool === "text";
+      const style = state.shapeStyle;
+      const stamp = !isText && style.place === "click";
+      const def = isText ? 96 : style.size || 96;
+      const tiny = stamp || dr.w < 12;
+      const w = Math.max(24, tiny ? def : dr.w);
+      const h = Math.max(24, stamp || dr.h < 12 ? (act.tool === "stripe" ? Math.round(def * 0.38) : def) : dr.h);
+      const cx = tiny ? act.startX : dr.x + w * 0.5;
+      const cy = stamp || dr.h < 12 ? act.startY : dr.y + h * 0.5;
+      const motif = isText ? "square" : (style.motif || act.tool);
       const created = createArtworkLayer(isText ? "text" : "motif", {
-        name: isText ? "Vector Label" : `${act.tool.charAt(0).toUpperCase() + act.tool.slice(1)} Shape`,
+        name: isText ? "Vector Label" : `${(MOTIF_TYPES.find((m) => m.id === motif)?.label || motif.charAt(0).toUpperCase() + motif.slice(1))} Shape`,
         transform: { x: Math.round(cx), y: Math.round(cy), width: Math.round(w), height: Math.round(h), rotation: 0 },
-        shape: { motifType: isText ? "square" : act.tool, color: isPattern ? "#eff4cf" : "#e8c27a" },
+        shape: { motifType: motif, color: isPattern ? "#eff4cf" : "#e8c27a" },
       });
+      if (isText) applyTextStyle(created);
+      else applyShapeStyle(created);
       state.doc.layers.push(created);
       state.doc.selectedLayerId = created.id;
-      if (!e.shiftKey) selectVectorTool("select");
+      if (!e.shiftKey && !(style.keep && !isText)) selectVectorTool("select");
       evaluateAndRender(true);
       rebuildInspector();
       Toast(`Created ${created.name} at (${Math.round(cx)}, ${Math.round(cy)})`);
@@ -2771,9 +3050,67 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   stage.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     if (!artRDown || Math.hypot(e.clientX - artRDown.x, e.clientY - artRDown.y) < 5) {
-      openArtPopup(e.clientX, e.clientY);
+      if (!openToolMenu(state.vectorTool, e.clientX, e.clientY)) openArtPopup(e.clientX, e.clientY);
     }
     artRDown = null;
+  });
+
+  // ----------------------------------------------------------------- TOOL CONTEXT MENUS
+  // Shapes share one menu; Gradient, Curve / Pen and Text have their own. Text opens the Brush Studio Text menu when CardDock
+  // provides it (the same menu Texture Paint uses), with a native fallback.
+  let brushMenuHook = null;
+  let menuGesture = false;   // one undo step per menu gesture (a slider drag, a colour pick)
+  function commitMenuEdit(fn, { live = false, toast = "" } = {}) {
+    if (!menuGesture) { pushUndo(); menuGesture = true; }
+    fn();
+    evaluateAndRender(!live, live ? { skipPbr: true } : {});
+    if (!live) { menuGesture = false; rebuildInspector(); syncPathSessionHints(); }
+    if (toast) Toast(toast);
+  }
+  const toolMenus = createArtworkToolMenus({
+    state,
+    isPattern,
+    motifTypes: MOTIF_TYPES,
+    interpolations: GRADIENT_INTERPOLATIONS,
+    pointInterpolations: POINT_GRADIENT_INTERPOLATIONS,
+    fonts: ["DM Sans", "Georgia", "Courier New", "Arial Narrow", "Impact", "Brush Script MT"],
+    document: () => state.doc,
+    selectTool: (id) => selectVectorTool(id),
+    selectedLayer: () => getSelectedLayer(),
+    commit: commitMenuEdit,
+    rampTarget: () => getRampTarget(),
+    rampMode,
+    rampStops,
+    writeRampStops,
+    setRampSpace,
+    pointTarget: () => getPointGradientTarget(false),
+    ensurePoint: (ramp) => {
+      ramp.host[ramp.keys.point] = normalizePointGradient2D(ramp.host[ramp.keys.point], ramp.host[ramp.keys.a] || "#eff4cf", ramp.host[ramp.keys.b] || "#5a7692", state.doc.size || ARTWORK_SIZE);
+    },
+    editGradientSlot: (slot) => editGradientSlot(slot),
+    applyShapeStyle,
+    applyTextStyle,
+  });
+  function openToolMenu(toolId, x, y) {
+    const view = toolMenuView(toolId);
+    if (!view) return false;
+    closeArtPopup();
+    menuGesture = false;
+    if (view === "text" && brushMenuHook) {
+      toolMenus.close();
+      brushMenuHook(x, y, { tool: "text" });
+      return true;
+    }
+    return toolMenus.open(view, x, y);
+  }
+  headerUI.toolsBar?.addEventListener("contextmenu", (e) => {
+    const btn = e.target.closest?.("[data-tool-id]");
+    const id = btn?.dataset.toolId;
+    if (!id || !toolMenuView(id)) return;
+    e.preventDefault();
+    if (state.vectorTool !== id) selectVectorTool(id);
+    const box = btn.getBoundingClientRect();
+    openToolMenu(id, box.left, box.bottom + 8);
   });
 
   const onArtKeyDown = (e) => {
@@ -2799,6 +3136,21 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       e.preventDefault();
       commitActivePathSession();
       return;
+    }
+    if ((e.key === "Backspace" || e.key === "Delete") && state.vectorTool === "gradient" && !activePathSession && state.selectedRampStop >= 0) {
+      const ramp = getRampTarget();
+      const rm = ramp ? rampMode(ramp) : "solid";
+      const stops = ramp ? rampStops(ramp) : [];
+      if ((rm === "linear" || rm === "radial") && stops.length > 2 && stops[state.selectedRampStop]) {
+        e.preventDefault();
+        pushUndo();
+        stops.splice(state.selectedRampStop, 1);
+        writeRampStops(ramp, stops);
+        state.selectedRampStop = -1;
+        evaluateAndRender(true);
+        rebuildInspector();
+        return;
+      }
     }
     if ((e.key === "Backspace" || e.key === "Delete") && state.vectorTool === "gradient" && !activePathSession) {
       const tgt = getPointGradientTarget(false);
@@ -2884,10 +3236,44 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       }
       return true;
     },
+    // Gradient tool on a colour slot: the inspector card's "Place in viewport".
+    editGradient: (slot) => editGradientSlot(slot),
+    // What the Gradient tool turns a Solid slot into (gradient menu "Source").
+    useGradientMode(next) {
+      if (!["linear", "radial", "point"].includes(next)) return false;
+      state.gradientToolMode = next;
+      syncPathSessionHints();
+      return true;
+    },
+    // CardDock: Brush Studio's Text menu for the Text tool, and its values → text layers.
+    useBrushMenu(fn) { brushMenuHook = typeof fn === "function" ? fn : null; },
+    openToolMenu: (toolId, x = 120, y = 120) => openToolMenu(toolId, x, y),
+    currentTextStyle() {
+      const sel = getSelectedLayer();
+      if (sel?.kind === "text") {
+        return { value: sel.text?.value, fontFamily: sel.text?.fontFamily, fontWeight: sel.text?.fontWeight, fontSize: sel.text?.fontSize, letterSpacing: sel.text?.letterSpacing, align: sel.text?.align, color: sel.shape?.color, opacity: sel.opacity, strokeWidth: sel.shape?.strokeWidth, strokeColor: sel.shape?.strokeColor, rotation: sel.transform?.rotation };
+      }
+      return state.textStyle ? { ...state.textStyle } : null;
+    },
+    assignTextStyle(values) {
+      if (disposed || !values) return false;
+      state.textStyle = { ...(state.textStyle || {}), ...values };
+      const sel = getSelectedLayer();
+      if (sel?.kind === "text" && !sel.locked) {
+        if (!menuGesture) { pushUndo(); menuGesture = true; }
+        applyTextStyle(sel);
+        evaluateAndRender(false);
+      }
+      return true;
+    },
     getSnapshot: () => {
       const sel = getSelectedLayer();
       return {
         mode,
+        gradientSlot: state.activePointGradSlot,
+        gradientToolMode: state.gradientToolMode,
+        toolMenu: toolMenus.view,
+        shapeStyle: { ...state.shapeStyle },
         name: state.doc.name,
         resolution: state.resolution,
         layers: state.doc.layers.length,
@@ -2907,6 +3293,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       headerUI.dispose();
       layerStackUI.dispose?.();
       closeArtPopup();
+      toolMenus.dispose();
       window.removeEventListener("keydown", onArtKeyDown);
       window.removeEventListener("keyup", onArtKeyUp);
       window.removeEventListener("pointerup", endSvgPointer);

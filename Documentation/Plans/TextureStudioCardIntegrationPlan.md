@@ -145,3 +145,72 @@ Each channel was driven from its card in the live studio and read back at the wo
 | Brush 13/0 + 14/0 · Paint 15/0 + 0 errors · Material 17/0 · Outliners 11/0 · Bake 17/0 · Artwork 12/0 | green |
 
 Screenshots: `Experimental/TextureStudio/Screenshots/cards-{paint,brush-library,brush-stamp,material}.png`.
+
+## 7. Fill placement, interpolation, tool context menus
+
+### 7.1 What the request was
+
+| Ask | Where |
+| :--- | :--- |
+| Place gradients in the viewport. Radial has a movable centre, linear has movable stops along the line, and point field takes many smoothed points. | Stamp + Pattern (stage and card) |
+| Interpolation types for every fill except Solid | Linear, radial and point field: fill, outline and ground |
+| Same text context menu in both studios | The Stamp and Pattern Text tool opens Brush Studio's Text library, as in Texture Paint |
+| Context menus for other tools | Shapes, Gradient, Pen and Curve |
+
+### 7.2 Engine (`Engine/Patterns/ArtworkStackEngine.js`, copied to ArtworkInspector)
+
+- **Stop-ramp interpolation** (`fillInterp` / `strokeInterp` / `background.fillInterp`): `linear`, `hermite`, `cubic` (Catmull-Rom), `bezier` and `step`.
+  - Smooth modes are expanded into 40 sampled stops, so both Canvas2D and SVG get the same curve.
+- **Point-field interpolation** (`fillPointGradient.interp`): `gaussian` (default), `linear`, `hermite`, `cubic` and `bezier` falloff kernels, plus `step` (the nearest point wins).
+- **Placement** (`fillPlace` / `strokePlace` / `background.fillPlace`) = `{a, b, space?}` in frame-normalised units.
+  - Linear runs a → b. Radial is centred on a, with b on its rim.
+  - When no placement is set, the angle layout is used as before.
+- **`space: "scene"`**: one ramp spans the whole canvas instead of repeating inside every instance of an arrayed or scattered layer.
+  - Each instance maps the scene anchors into its own local space. It uses the un-wrapped position, so wrapped copies still match at the seam.
+  - Canvas and SVG are kept identical, as before.
+
+### 7.3 Stage interaction (`Workspaces/ArtworkGradientPlacement.js`, `ArtworkStackWorkspace.js`)
+
+- **Gradient tool (F):**
+  - Dragging on empty canvas lays the ramp.
+  - The square end handles move it. Dragging the radial centre moves the whole ramp and keeps its rim.
+  - Clicking the line adds a stop (up to 12).
+  - Stop dots slide along the line. Double-clicking, Alt-clicking or pressing Delete removes a stop when more than 2 remain.
+  - In point-field mode, a click adds a colour point.
+- **Span rule:** the first placement on a layer with more than one instance defaults to **Whole canvas**. A single shape defaults to **Each shape**. Both menus can switch it, and the switch keeps the anchors in place on the canvas.
+- Every gesture is one undo step.
+- **Native inspector:** an Interpolation select plus Place / Reset placement after Gradient Angle, and a point-field Interpolation select after Global Spread.
+
+### 7.4 Card (`Experimental/ArtworkInspector`)
+
+- **Slot editor:**
+  - Interpolation segments for every non-solid mode.
+  - Point-field mode with per-point colour, falloff and field base.
+  - Ramp spans (Each shape / Whole canvas).
+  - Place in viewport and Reset placement.
+- **Place in viewport:** when docked, `placeGradient(slot)` hands the slot to the stage gradient tool.
+- **Model:** `AssignSlotInterp`, `AssignSlotSpace`, `AssignPointColour`, `AssignPointField` and `ResetSlotPlace`.
+
+### 7.5 Tool context menus (`Workspaces/ArtworkToolMenu.js`)
+
+| Tool (right-click on toolbar or stage) | Menu |
+| :--- | :--- |
+| Square / circle / diamond / triangle / star / hexagon / stripe | **Shapes**: motif grid (all motifs), fill Solid / Linear / Radial / Point plus colours, outline width and colour, apply to selection |
+| Gradient | Target (Fill / Outline / Ground), source (Linear / Radial / Point field), interpolation, span, stop chips, reset placement |
+| Pen / Curve | Curve smoothing, outline width and colour, fill closed paths |
+| Text | Docked: **Brush Studio Text library** (font grid, the same menu as Texture Paint). The chosen font, weight and size apply to the selected text layer. Undocked: native text view. |
+
+### 7.6 Gates
+
+| Gate | Result |
+| :--- | :--- |
+| `CheckCardDock.mjs` | **32 / 32** (5 new: interpolation renders differ, viewport radial place and centre drag, tool context menus, Text tool to Brush Studio font library, card "Place in viewport" hand-off) |
+| `TextureStudioValidation.mjs` | **29 / 29** (21d now drives the renamed Gradient tool in point-field mode) |
+| `SmokeArtworkInspector.mjs` | 0 errors |
+
+Screenshots: `Experimental/TextureStudio/Screenshots/{fill-linear-scene,fill-point-field,menu-gradient,menu-shapes}.png`.
+
+### 7.7 Known limits
+
+- Interpolated ramps are baked into 40 sampled stops. This is exact enough for albedo, but SVG exports carry more `<stop>` elements.
+- Point-field placement uses document space, so arrayed instances share one field, as before.
