@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clipmap Lighting CPU Proof</title>
+<style>
+:root { color-scheme: dark; --bg:#0b0e12; --panel:#131922; --line:#2a3442; --ink:#e8edf5; --muted:#9ba9bb; --ok:#63dfaa; --warn:#ffbe63; --bad:#ff7777; }
+* { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,sans-serif; }
+main { width:min(1500px,calc(100% - 36px)); margin:28px auto 80px; } h1 { margin:0 0 4px; font-size:30px; } h2 { margin:28px 0 12px; font-size:20px; } p, li { color:var(--muted); } .banner { border:1px solid var(--warn); background:#2a2115; padding:14px 16px; border-radius:10px; color:#ffe0a8; } .facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; } .fact,.card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; } .value { display:block; font-size:22px; font-weight:700; color:var(--ok); } .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.08em; } table { border-collapse:collapse; width:100%; background:var(--panel); border:1px solid var(--line); } th,td { text-align:left; vertical-align:top; padding:10px; border-bottom:1px solid var(--line); } th { color:#c8d6e8; } td { color:var(--muted); } .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(360px,1fr)); gap:14px; } figure { margin:0; background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; } img { display:block; width:100%; height:auto; image-rendering:auto; background:#000; } figcaption { padding:9px 11px; color:var(--muted); font-size:13px; } .wide { grid-column:1/-1; } code,pre { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; } pre { white-space:pre-wrap; background:#07090c; border:1px solid var(--line); padding:13px; border-radius:8px; color:#cdd8e7; } .status { font-weight:700; } .status.ok { color:var(--ok); } .status.warn { color:var(--warn); } .status.bad { color:var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Static SDF Clipmap + Surface Cache — CPU Proof</h1>
+  <p>Executed C++ CPU reference at <strong>480 × 270</strong>. This page reports exactly what was exercised; it does not claim a GPU or production-engine integration.</p>
+  <div class="banner"><strong>Honest status:</strong> this is a validated CPU reference and a retained visual exhibit, not a photoreal final renderer. The controlled analytic room and low-detail vehicle are visibly synthetic. No photograph/real-scene ground truth, Vulkan dispatch, Slang compilation, frame-pacing test, or real-GPU benchmark was available in this checkout.</div>
+
+  <h2>Recorded execution</h2>
+  <div class="facts" id="facts"><div class="fact">Loading <code>Output/metrics.json</code>…</div></div>
+  <pre>g++ -std=c++20 -O3 -Wall -Wextra -Wpedantic -I. \
+  Exhibits/ClipmapLighting/ClipmapLightingValidation.cpp \
+  Engine/DistanceFieldSpace/ClipmapSurfaceCache.cpp \
+  -o _ClaudeScratch/clipmap-build/ClipmapLightingValidation
+_ClaudeScratch/clipmap-build/ClipmapLightingValidation Exhibits/ClipmapLighting/Output</pre>
+
+  <h2>Visual inspection record</h2>
+  <table>
+    <thead><tr><th>Observed in the actual captures</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>All listed render images have the requested 480 × 270 dimensions. The combined image is finite according to the C++ scan; the scan also recorded a nonzero mean luminance and no bright-pixel overflow above its stated HDR threshold.</td><td class="status ok">Verified for this CPU run</td></tr>
+      <tr><td>Images are stable and contain no stochastic grain: the path reference is fixed 16-direction Sobol hemisphere quadrature with two diffuse bounces, no PRNG, no temporal accumulation, and no denoiser.</td><td class="status ok">Verified method; not a general unbiased production path tracer</td></tr>
+      <tr><td>The vehicle, room, hard silhouettes, clipped foreground floor, overexposed ceiling region, and simple diffuse transport are visibly non-photoreal. The penumbra debug image is an SDF diagnostic rather than a visual-quality approval.</td><td class="status warn">Not acceptable evidence of “absolute realism”</td></tr>
+      <tr><td>Source-specific GI images are emitted separately below. Sun and point-cache contributions are materially dimmer than the area/emissive capture in this scene; that is visible rather than hidden.</td><td class="status warn">Demonstrates routing, not a quality sign-off</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Lighting proof — no display denoiser</h2>
+  <div class="grid">
+    <figure><img src="Output/01_combined_lighting.png" alt="Combined direct lighting and indirect lighting CPU render"><figcaption>Combined direct lighting plus cache/cone indirect lighting.</figcaption></figure>
+    <figure><img src="Output/02_gi_emissive_only.png" alt="Emissive-only indirect lighting"><figcaption>Indirect radiance from the emissive area card only.</figcaption></figure>
+    <figure><img src="Output/03_gi_sun_only.png" alt="Sun-only indirect lighting"><figcaption>Sun-injected surface-cache GI only. It is dim in this controlled enclosed scene.</figcaption></figure>
+    <figure><img src="Output/04_gi_point_only.png" alt="Point-light-only indirect lighting"><figcaption>Point-injected surface-cache GI only.</figcaption></figure>
+    <figure><img src="Output/05_gi_area_only.png" alt="Area-light-only indirect lighting"><figcaption>Area-card-injected surface-cache GI only.</figcaption></figure>
+    <figure><img src="Output/06_gi_combined.png" alt="Combined indirect lighting"><figcaption>Combined surface-cache GI only.</figcaption></figure>
+  </div>
+
+  <h2>SDF and cache debug proof</h2>
+  <div class="grid">
+    <figure><img src="Output/07_sdf_level0_slice.png" alt="Signed distance field slice"><figcaption>Level-0 signed-distance slice. Cyan is exterior, warm red is interior, white is the zero isosurface.</figcaption></figure>
+    <figure><img src="Output/08_clipmap_selection.png" alt="Clipmap level selection"><figcaption>Camera render coloured by selected clipmap level. The dynamic vehicle comes from its local analytic SDF, not a stale global bake.</figcaption></figure>
+    <figure><img src="Output/09_surface_cache_radiance.png" alt="Surface cache card radiance top view"><figcaption>Top-down surface-card radiance debug: cards are actual cache inputs, not a painted lighting overlay.</figcaption></figure>
+    <figure><img src="Output/10_sdf_penumbra.png" alt="SDF penumbra visibility debug"><figcaption>SDF cone-penumbra visibility debug. This diagnostic is intentionally retained despite its binary-looking scene result.</figcaption></figure>
+  </div>
+
+  <h2>Deterministic path reference and local vehicle motion</h2>
+  <div class="grid">
+    <figure><img src="Output/11_path_reference_16ray_2bounce.png" alt="Deterministic two bounce path reference"><figcaption>Two-bounce diffuse path reference: 16 fixed Sobol spherical-cap directions per primary hit, no stochastic noise and no denoiser.</figcaption></figure>
+    <figure><img src="Output/12_vehicle_motion.gif" alt="Vehicle local motion animation"><figcaption>12-frame animation. The static clipmap remains baked; vehicle SDF and its local surface card are transformed locally every frame.</figcaption></figure>
+  </div>
+
+  <h2>Architecture covered by this reference</h2>
+  <table>
+    <thead><tr><th>Implemented in C++</th><th>Evidence / contract</th><th>Not claimed</th></tr></thead>
+    <tbody>
+      <tr><td>Three Float32 static distance clipmap levels, 128³ samples each</td><td>Static scene is baked once around a fixed anchor; tri-linear sampling picks the first containing level.</td><td>Sparse streaming, scroll updates, GPU clipmap textures, brick residency, or a mesh baker.</td></tr>
+      <tr><td>Hybrid local vehicle SDF</td><td>Vehicle is evaluated in local coordinates after yaw transform and unioned at query time with static clipmap distance.</td><td>Vehicle mesh asset, skinned deformation, BLAS/TLAS, or collision production code.</td></tr>
+      <tr><td>Nine surface cards</td><td>Four floor cards avoid one moving vehicle shadowing the whole floor injection; walls, emitter, and moving vehicle card are retained.</td><td>Automatic card extraction, surfel allocation, feedback, residency, or multi-bounce convergence.</td></tr>
+      <tr><td>Sobol hemisphere cones + card gather</td><td>Sixteen fixed spherical-cap Sobol directions perform deterministic cone accessibility; card gather prevents a narrow emitter being missed by that finite direction set.</td><td>Unbiased Monte Carlo estimator or error-bounded physically exact global illumination.</td></tr>
+      <tr><td>SDF penumbra diagnostic</td><td>Cubic-smoothed cone visibility is rendered and retained as <code>10_sdf_penumbra.png</code>.</td><td>Replacement for production shadow maps/ray queries. It was not used as the production-quality shadow claim.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Current-blocking audit findings</h2>
+  <ul>
+    <li>The provided checkout initially contained no C++ rendering host, Vulkan resource lifecycle, Slang toolchain, CMake executable, vehicle asset, or existing SDF/GI/path-tracer implementation to wire into. The GPU step therefore remains unimplemented, not simulated.</li>
+    <li>The linked upstream branch was inspected at <code>c205cb698288ccd90bf909e25e28ce28d48d0dfa</code>. Its <code>SignedDistanceVolume</code> is a single sparse narrow-band volume rather than a scrolling clipmap. Its cone-GI shader samples sky radiance rather than a general surface cache. Its deterministic tracer is experimental WebGPU/WGSL, not a C++ Vulkan integration. These are reasons it was not copied in as a claimed replacement.</li>
+    <li>The only measured speedup is the clearly scoped dynamic-distance maintenance comparison: a full three-level static-plus-vehicle rebake versus a local vehicle/card refresh. It does <strong>not</strong> establish a whole-renderer GPU speedup, 60 FPS, 120 FPS, or hardware parity.</li>
+    <li>Because there is no measured real photograph, calibrated HDRI, physical material asset, or GPU reference here, no “fake versus real” or absolute-realism claim is made.</li>
+  </ul>
+</main>
+<script>
+fetch('Output/metrics.json').then(r => r.json()).then(m => {
+  const items = [
+    ['Resolution', m.resolution],
+    ['Determinism hash', m.determinismHash],
+    ['Static clipmap bake', m.staticBakeMilliseconds.toFixed(3) + ' ms'],
+    ['Full moving-scene rebake', m.fullRebakeMilliseconds.toFixed(3) + ' ms'],
+    ['Local hybrid refresh', m.hybridRefreshMilliseconds.toFixed(3) + ' ms'],
+    ['Scoped update reduction', (m.fullRebakeMilliseconds / m.hybridRefreshMilliseconds).toFixed(0) + '×'],
+    ['Combined CPU render', m.combinedRenderMilliseconds.toFixed(3) + ' ms'],
+    ['Path reference', m.pathTraceMilliseconds.toFixed(3) + ' ms'],
+    ['Hybrid SDF MAE', m.hybridMeanAbsoluteError.toExponential(3) + ' m'],
+    ['Stale SDF MAE', m.staleMeanAbsoluteError.toFixed(5) + ' m'],
+    ['NaN / Inf scan', m.combinedFinite && m.pathFinite ? 'PASS' : 'FAIL']
+  ];
+  document.getElementById('facts').innerHTML = items.map(([label,value]) => `<div class="fact"><span class="value">${value}</span><span class="label">${label}</span></div>`).join('');
+}).catch(error => { document.getElementById('facts').textContent = 'Could not load metrics: ' + error; });
+</script>
+</body>
+</html>

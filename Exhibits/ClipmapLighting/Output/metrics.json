@@ -1,0 +1,14 @@
+{
+  "resolution": "480x270",
+  "staticBakeMilliseconds": 189.952,
+  "fullRebakeMilliseconds": 371.906,
+  "hybridRefreshMilliseconds": 0.038968,
+  "combinedRenderMilliseconds": 3269.04,
+  "pathTraceMilliseconds": 20905.9,
+  "hybridMeanAbsoluteError": 4.4296e-08,
+  "staleMeanAbsoluteError": 0.49959,
+  "determinismHash": "0xdeda8611",
+  "combinedFinite": true,
+  "combinedLuminance": { "minimum": 0, "maximum": 31.6182, "mean": 1.8512, "blackPixels": 32, "brightPixels": 0 },
+  "pathFinite": true
+}
