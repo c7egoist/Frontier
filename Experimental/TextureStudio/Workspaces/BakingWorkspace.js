@@ -1174,6 +1174,15 @@ export function mountBakingWorkspace(root, appBridge) {
     useStudy,
     bakeRequest,
     currentStudy: () => state.studyId,
+    // CardDock: the map open in the Map Baking card is the one the stage inspects (once it has baked).
+    inspectMap(id) {
+      if (disposed || !id || id === state.inspectChannel || !BAKE_MAP_CATALOG.some((m) => m.id === id)) return false;
+      state.inspectChannel = id;
+      updateInspectedMapView();
+      renderLeftColumn();
+      rebuildInspector();
+      return true;
+    },
     loadSource(slot, file) { if (file && (slot === "low" || slot === "high")) loadCustomFile(file, slot); },
     getSnapshot: () => ({
       studyId: state.studyId,

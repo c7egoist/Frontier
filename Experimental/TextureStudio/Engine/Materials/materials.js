@@ -1034,6 +1034,7 @@ function buildMaterialShaderUniformValues(p, surfaceSources) {
     uSlub: p.slub,
     uPixelFill: p.pixelFill,
     uAoIntensity: p.aoIntensity ?? 1,
+    uReliefHeight: p.reliefHeight ?? 0.5,
     uEmissionScale: Math.max(1, p.emissionStrength),
     uTime: p.animTime ?? 0,
     uAnimSpeed: p.animSpeed ?? 1,
@@ -1491,7 +1492,7 @@ ${patternColorGLSL()}
       vec3 _tpBaseNorm = normal;
       if (uPaintHasMat != 0 && _tpMatCov.a > 0.001) {
       #endif
-      normal=reliefNormal(surfaceHeight+peelHeight*.2,normal,-vViewPosition);
+      normal=reliefNormal((surfaceHeight+peelHeight*.2)*uReliefHeight*2.,normal,-vViewPosition);
       #ifdef ALLOY_PATTERN
         if(patternNormalSample.a>.0001){
           vec3 PatternQx=dFdx(-vViewPosition),PatternQy=dFdy(-vViewPosition);

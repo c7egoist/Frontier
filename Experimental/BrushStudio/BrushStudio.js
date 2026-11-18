@@ -6,15 +6,17 @@
 // own dedicated studio (Brush Studio, Stamp Studio for decals, Text Studio, Eraser Studio …) laid out the same way:
 // pick a tool on the rail and the Studio card switches to it.
 //
-//   Mount(Host, { brush, tool, pad, scoped }) → Hub { State, Brush(), SetValue(), Select(), Section(), Tool(), Studio(), TogglePad(), Pad, Render,
+//   Mount(Host, { brush, tool, pad, scoped, library }) → Hub { State, Brush(), SetValue(), Select(), Section(), Tool(), Studio(), TogglePad(), Pad, Render,
 //                                              Subscribe(fn), Adopt({ tool, colour, size, opacity }) }
 // Subscribe(fn) hears fn(Brush(), Tool, Tools) after any brush / tool edit (coalesced to one call per task) — the host maps it to
 // its own painter.  Options.scoped: keys reach the studio only when typed inside it (docked in TextureStudio).
+// Options.library: "section" moves the presets out of the side Library card into a "Library" section at the top of each tool
+// studio's list, shown as a grid of that tool's presets (brushes, erasers, fill colours and grains, stamp shapes, gradients, fonts).
 
 import { icon } from "../MaterialInspector/Icons.js";
 import { Esc, Knob, ColourField, Stops, SwitchRow, Toggle, Segments, Dropdown, Clamp, Pct, Fixed, SyncSiblings, Download, History, KeyReaches } from "../MaterialInspector/CardKit.js";
 import * as M from "./BrushModel.js";
-import { TOOLS, TOOL, CreateTools, SetToolValue, PatchTool, TOOL_STACKS, VisibleToolFields, ERASERS, STUDIOS, TOOL_COLOURS, PALETTE, ToolChanged, ToolChangedBySection, SectionGroups, ToolDefault } from "./ToolModel.js";
+import { TOOLS, TOOL, CreateTools, SetToolValue, PatchTool, TOOL_STACKS, VisibleToolFields, ERASERS, STUDIOS, TOOL_COLOURS, PALETTE, ToolChanged, ToolChangedBySection, SectionGroups, ToolDefault, FONTS } from "./ToolModel.js";
 import { ChannelStack, StackAction, StackUi, ParseStackBind, VisibleCardFields } from "../MaterialInspector/ChannelStack.js";
 import { MountViewport } from "../MaterialInspector/Viewport.js";
 import { paintTool, toolSchema, toolArtURL } from "./Engine/PaintToolCatalogue.js";
@@ -42,7 +44,9 @@ export function Mount(Host, Options = {}) {
     Tool: TOOL[Options.tool] ? Options.tool : "paint", PrevTool: "paint", Studio: null, ToolSection: {}, PadOpen: Options.pad !== false, View: "albedo", Paper: "paper", Live: true, Preview: true,
     Tools: CreateTools(), Recent: [], Colours: [], Stats: {}, Note: "",
     Stacks: {},   // ChannelStack UI per stack bind: { Open, Folds, Query }
+    Lib: {},      // library-section mode: studio id → false once another section was picked (the Library section opens first)
   };
+  const LibrarySection = Options.library === "section";
   St.Studio = St.Tool;
   if (!M.PAINT_TOOLS.some((T) => T.id === St.ActiveId)) St.ActiveId = M.PAINT_TOOLS.find((T) => T.key === "brush").id;
   St.Open.add(paintTool(St.ActiveId).key);
@@ -383,6 +387,72 @@ export function Mount(Host, Options = {}) {
     PaintThumbs();
   }
 
+  // ---------------------------------------------------------------------------------------------- library section (docked)
+  // Each tool's presets as a grid: the paint brush, smudge and curve strokes pick a brush; the eraser picks a catalogue
+  // eraser; fill picks a colour or a grain; stamp a shape; gradient a preset ramp; text a font.  Move and eyedropper have none.
+  const LIBRARY_TITLES = { paint: "Brushes", smudge: "Brushes", curve: "Brushes", erase: "Erasers", fill: "Fills", stamp: "Stamps", gradient: "Gradients", text: "Fonts" };
+  const LibraryTitle = (Tool) => LIBRARY_TITLES[Tool] || "Presets";
+  const LibOpen = () => LibrarySection && St.Lib[St.Studio] !== false && Libraries(St.Studio).length > 0;
+  const BrushTile = (Id, Active) => ({ Kind: "brush", Value: Id, Label: BrushOf(Id).name, Active, Art: `<canvas class="bs-ltile-stroke" data-thumb="${Esc(Id)}" width="240" height="96"></canvas>` });
+  function Libraries(Tool) {
+    const Q = St.Filter.trim().toLowerCase();
+    const Match = (...Words) => !Q || Words.some((W) => String(W).toLowerCase().includes(Q));
+    const V = St.Tools[Tool] || {};
+    switch (Tool) {
+      case "paint": case "smudge": case "curve": {
+        const Mine = St.Custom.filter((Id) => Match(BrushOf(Id).name));
+        const Groups = M.PAINT_FAMILIES.map((F) => ({ Title: FAMILY_LABEL(F.key), Colour: FAMILY_COLOURS[F.key], Items: M.PAINT_TOOLS.filter((T) => T.key === F.key && T.key !== "eraser" && Match(BrushOf(T.id).name, F.key)).map((T) => BrushTile(T.id, T.id === St.ActiveId)) }));
+        return [...(Mine.length ? [{ Title: "My brushes", Colour: "#ff6b9a", Items: Mine.map((Id) => BrushTile(Id, Id === St.ActiveId)) }] : []), ...Groups].filter((G) => G.Items.length);
+      }
+      case "erase": return [{ Title: "Erasers", Colour: FAMILY_COLOURS.eraser, Items: ERASERS.filter((Id) => Match(BrushOf(Id).name)).map((Id) => ({ ...BrushTile(Id, !V.useBrush && V.instrument === Id), Kind: "eraser" })) }].filter((G) => G.Items.length);
+      case "fill": {
+        const Swatches = [...new Set([...(M.PAINT_SWATCHES[paintTool(Brush().instrument).key] || []), ...Object.values(M.PAINT_SWATCHES).flat(), ...St.Colours])].slice(0, 32);
+        return [
+          { Title: "Colours", Items: Swatches.filter((C) => Match(C)).map((C) => ({ Kind: "fill-colour", Value: C, Label: C.toUpperCase(), Active: V.source === "Colour" && String(V.colour).toLowerCase() === C.toLowerCase(), Art: `<i class="bs-ltile-colour" style="background:${C}"></i>` })) },
+          { Title: "Grains", Items: M.GRAINS.filter((G) => G.Id !== "none" && Match(G.Label)).map((G) => ({ Kind: "fill-grain", Value: G.Id, Label: G.Label, Active: V.source === "Grain" && V.grain === G.Id, Art: `<img alt="" src="${GrainThumb(G.Id, 96)}">` })) },
+        ].filter((G) => G.Items.length);
+      }
+      case "stamp": return [{ Title: "Shapes", Items: M.SHAPES.filter((E) => Match(E.Label)).map((E) => ({ Kind: "stamp", Value: E.Id, Label: E.Label, Active: V.shape === E.Id, Art: `<img alt="" src="${ShapeThumb(E.Id, 96)}">` })) }].filter((G) => G.Items.length);
+      case "gradient": return [{ Title: "Gradients", Items: M.COLOUR_GRADIENT_PRESETS.filter((G) => Match(G.label, G.sub || "")).map((G) => ({ Kind: "gradient", Value: G.id, Label: G.label, Active: V.preset === G.id, Art: `<i class="bs-ltile-ramp" style="background:linear-gradient(90deg, ${G.stops.join(", ")})"></i>` })) }].filter((G) => G.Items.length);
+      case "text": return [{ Title: "Fonts", Items: FONTS.filter((F) => Match(F.Label)).map((F) => ({ Kind: "font", Value: F.Id, Label: F.Label, Active: V.font === F.Id, Art: `<span class="bs-ltile-font" style="font-family:${Esc(F.Css)}">${Esc(String(V.content || "Aa").slice(0, 10) || "Aa")}</span>` })) }].filter((G) => G.Items.length);
+      default: return [];
+    }
+  }
+  function LibrarySig() {
+    const V = St.Tools[St.Studio] || {};
+    return `lib|${St.Studio}|${St.ActiveId}|${St.Filter}|${St.Custom.length}|${V.instrument}|${V.useBrush}|${V.source}|${V.colour}|${V.grain}|${V.shape}|${V.preset}|${V.font}|${V.content}`;
+  }
+  function RenderLibrarySection() {
+    const Tool = St.Studio, Groups = Libraries(Tool), Total = Groups.reduce((N, G) => N + G.Items.length, 0);
+    const Tile = (I) => `<button type="button" class="bs-ltile ${I.Active ? "active" : ""}" data-act="lib" data-kind="${I.Kind}" data-value="${Esc(I.Value)}" aria-pressed="${!!I.Active}" title="${Esc(I.Label)}">
+        <span class="bs-ltile-art">${I.Art}</span><span class="bs-ltile-name">${Esc(I.Label)}</span></button>`;
+    Settings.innerHTML = `<div class="bs-set-head">
+        ${Glyph("layers", 18, "#e8e8e8")}
+        <div><h2>${Esc(LibraryTitle(Tool))}</h2><small>${Total} preset${Total === 1 ? "" : "s"} · ${Esc(STUDIOS[Tool].Title)}</small></div>
+      </div>
+      <div class="bs-set-body bs-library">
+        <label class="mi-search bs-lsearch">${icon("search", 13)}<input type="search" data-act="filter" value="${Esc(St.Filter)}" placeholder="Search ${Esc(LibraryTitle(Tool).toLowerCase())}" aria-label="Search ${Esc(LibraryTitle(Tool).toLowerCase())}"></label>
+        ${Groups.map((G) => `<section class="bs-lgroup"><div class="bs-lgroup-head">${G.Colour ? `<i style="background:${G.Colour}"></i>` : ""}<b>${Esc(G.Title)}</b><small>${G.Items.length}</small></div>
+          <div class="bs-lgrid">${G.Items.map(Tile).join("")}</div></section>`).join("") || `<p class="mi-empty">Nothing matches “${Esc(St.Filter)}”.</p>`}
+      </div>`;
+    SigSettings = SettingsSig();
+    ThumbQueue = [...Settings.querySelectorAll("canvas[data-thumb]")];
+    PumpThumbs();
+  }
+  function UseLibraryItem(Kind, Value) {
+    switch (Kind) {
+      case "brush": Select(Value); if (St.Studio === "smudge" && !St.Tools.smudge.useBrush) Write("t|smudge|useBrush", true); break;
+      case "eraser": St.Tools = SetToolValue(SetToolValue(St.Tools, "erase", "useBrush", false), "erase", "instrument", Value); EraseMemo = null; RenderToolUi(); Pad.Schedule(); break;
+      case "fill-colour": St.Tools = SetToolValue(SetToolValue(St.Tools, "fill", "source", "Colour"), "fill", "colour", Value); RememberColour(Value); RenderToolUi(); break;
+      case "fill-grain": St.Tools = SetToolValue(SetToolValue(St.Tools, "fill", "source", "Grain"), "fill", "grain", Value); RenderToolUi(); break;
+      case "stamp": Write("t|stamp|shape", Value); break;
+      case "gradient": Write("t|gradient|preset", Value); break;
+      case "font": Write("t|text|font", Value); break;
+      default: return;
+    }
+    if (LibOpen()) RenderSettings();
+  }
+
   // Library stroke thumbnails are drawn by the real engine, a few per frame.
   let ThumbQueue = [], ThumbFrame = 0;
   function PaintThumbs() { ThumbQueue = [...Lib.querySelectorAll("canvas[data-thumb]")]; PumpThumbs(); }
@@ -419,7 +489,7 @@ export function Mount(Host, Options = {}) {
   const StudioSections = (Tool = St.Studio) => Tool === "paint" ? [...STUDIOS.paint.Sections, ...M.SECTIONS] : STUDIOS[Tool].Sections;
   const SectionId = () => IsBrushStudio() ? St.Section : (St.ToolSection[St.Studio] || STUDIOS[St.Studio].Sections[0].Id);
   const ToolSec = () => (IsBrushStudio() ? STUDIOS.paint.Sections : STUDIOS[St.Studio].Sections).find((S) => S.Id === SectionId()) || null;
-  const SecColour = (Id, Tool = St.Studio) => PALETTE[Math.max(0, StudioSections(Tool).findIndex((S) => S.Id === Id)) % PALETTE.length];
+  const SecColour = (Id, Tool = St.Studio) => Id === "library" ? "#e8e8e8" : PALETTE[Math.max(0, StudioSections(Tool).findIndex((S) => S.Id === Id)) % PALETTE.length];
   const Glyph = (Name, Size, Colour) => `<span class="bs-glyph" style="--c:${Colour}">${icon(Name, Size)}</span>`;
 
   function RenderHead() {
@@ -451,15 +521,16 @@ export function Mount(Host, Options = {}) {
 
   // ---------------------------------------------------------------------------------------------- section list
   function RenderSections() {
-    const Tool = St.Studio, Active = SectionId();
+    const Tool = St.Studio, Active = LibOpen() ? "library" : SectionId();
     const ToolBy = ToolChangedBySection(Tool, St.Tools[Tool]);
     const By = IsBrushStudio() ? { ...M.ChangedBySection(Brush()), ...ToolBy } : ToolBy;
     const Row = (S) => `<button type="button" class="bs-sec ${S.Id === Active ? "active" : ""}" data-act="section" data-section="${S.Id}" aria-current="${S.Id === Active}" title="${Esc(S.Hint)}" style="--c:${SecColour(S.Id)}">
         ${Glyph(S.Glyph, 14, SecColour(S.Id))}<span class="bs-sec-label">${Esc(S.Label)}</span>${By[S.Id] ? `<i class="bs-sec-count" title="${By[S.Id]} edited">${By[S.Id]}</i>` : ""}
       </button>`;
+    const Lib = LibrarySection && Libraries(Tool).length ? Row({ Id: "library", Label: "Library", Glyph: "layers", Hint: `${LibraryTitle(Tool)} presets` }) : "";
     Nav.innerHTML = IsBrushStudio()
-      ? `<small class="bs-sec-cap">Paint</small>${STUDIOS.paint.Sections.map(Row).join("")}<small class="bs-sec-cap">Brush</small>${M.SECTIONS.map(Row).join("")}`
-      : `<small class="bs-sec-cap">${Esc(TOOL[Tool].Label)}</small>${STUDIOS[Tool].Sections.map(Row).join("")}`;
+      ? `${Lib}<small class="bs-sec-cap">Paint</small>${STUDIOS.paint.Sections.map(Row).join("")}<small class="bs-sec-cap">Brush</small>${M.SECTIONS.map(Row).join("")}`
+      : `${Lib}<small class="bs-sec-cap">${Esc(TOOL[Tool].Label)}</small>${STUDIOS[Tool].Sections.map(Row).join("")}`;
   }
 
   // ---------------------------------------------------------------------------------------------- settings column
@@ -468,6 +539,7 @@ export function Mount(Host, Options = {}) {
     return `${Tool}|${Sec.Id}|${St.ActiveId}|` + SectionGroups(Tool, Sec).filter((G) => !G.When || G.When(V, Bv)).map((G) => VisibleToolFields(G, V, Bv).map((F) => F.K + FieldSig(F, Tool)).join(",")).join(";");
   }
   function SettingsSig() {
+    if (LibOpen()) return LibrarySig();
     if (ToolSec()) return ToolSig();
     const Sec = M.SECTIONS.find((S) => S.Id === St.Section), V = Brush().values;
     if (St.Section === "instrument") return `${St.Section}|${Brush().instrument}|${JSON.stringify(Brush().params)}`;
@@ -476,6 +548,7 @@ export function Mount(Host, Options = {}) {
   }
 
   function RenderSettings() {
+    if (LibOpen()) return RenderLibrarySection();
     if (ToolSec()) return RenderToolSettings();
     const Sec = M.SECTIONS.find((S) => S.Id === St.Section), B = Brush(), V = B.values, Ch = Changed();
     const Count = M.ChangedBySection(B)[Sec.Id];
@@ -864,7 +937,7 @@ export function Mount(Host, Options = {}) {
       const N = Settings.querySelector(`[data-act="cs-search"][data-bind="${CSS.escape(El.dataset.bind)}"]`); N?.focus(); try { N?.setSelectionRange(Pos, Pos); } catch { /* */ }
       return;
     }
-    if (El.dataset.act === "filter") { St.Filter = El.value; const Pos = El.selectionStart; RenderLibrary(); const N = Lib.querySelector('[data-act="filter"]'); N?.focus(); try { N?.setSelectionRange(Pos, Pos); } catch { /* */ } return; }
+    if (El.dataset.act === "filter") { St.Filter = El.value; const Pos = El.selectionStart; const InGrid = Settings.contains(El); RenderLibrary(); if (InGrid) RenderSettings(); const N = (InGrid ? Settings : Lib).querySelector('[data-act="filter"]'); N?.focus(); try { N?.setSelectionRange(Pos, Pos); } catch { /* */ } return; }
     const Bind = El.dataset.bind;
     if (!Bind) return;
     if (El.type === "file") return;
@@ -896,8 +969,9 @@ export function Mount(Host, Options = {}) {
     const Act = El.dataset.act, Bind = El.dataset.bind;
     switch (Act) {
       case "pick": Select(El.dataset.id); break;
+      case "lib": UseLibraryItem(El.dataset.kind, El.dataset.value); break;
       case "family": { const K = El.dataset.family; St.Open.has(K) ? St.Open.delete(K) : St.Open.add(K); RenderLibrary(); break; }
-      case "section": { const Id = El.dataset.section; if (IsBrushStudio() && !STUDIOS.paint.Sections.some((S) => S.Id === Id)) St.Section = Id; else if (IsBrushStudio()) St.Section = Id; else St.ToolSection[St.Studio] = Id; RenderSections(); RenderSettings(); Settings.scrollTop = 0; break; }
+      case "section": { const Id = El.dataset.section; if (LibrarySection) St.Lib[St.Studio] = Id === "library"; if (Id === "library") { RenderSections(); RenderSettings(); Settings.scrollTop = 0; break; } if (IsBrushStudio() && !STUDIOS.paint.Sections.some((S) => S.Id === Id)) St.Section = Id; else if (IsBrushStudio()) St.Section = Id; else St.ToolSection[St.Studio] = Id; RenderSections(); RenderSettings(); Settings.scrollTop = 0; break; }
       case "set": ApplySet(Bind, El.dataset.value); if (Bind.startsWith("b|") || Bind.startsWith("p|")) RenderSettings(); break;
       case "toggle": ApplyToggle(Bind); if (!Bind.startsWith("t|")) RenderSettings(); break;
       case "cs-open": case "cs-group": case "cs-toggle": case "cs-group-toggle": case "cs-bulk": {
@@ -1053,7 +1127,7 @@ export function Mount(Host, Options = {}) {
   // ---------------------------------------------------------------------------------------------- first paint
   St.Recent = [St.ActiveId];
   Hub.Render = () => { RenderLibrary(); RenderHead(); RenderSections(); RenderSettings(); RenderPadBar(); RenderRail(); RenderSide(); RenderFoot(); Pad.Resize(); Pad.Replay(); };
-  Hub.Section = (Id) => { if (IsBrushStudio() || M.SECTIONS.some((S) => S.Id === Id)) { if (!IsBrushStudio()) St.Studio = "paint"; St.Section = Id; } else St.ToolSection[St.Studio] = Id; RenderHead(); RenderSections(); RenderSettings(); };
+  Hub.Section = (Id) => { if (LibrarySection) { St.Lib[St.Studio] = Id === "library"; if (Id === "library") { RenderSections(); RenderSettings(); return; } } if (IsBrushStudio() || M.SECTIONS.some((S) => S.Id === Id)) { if (!IsBrushStudio()) St.Studio = "paint"; St.Section = Id; } else St.ToolSection[St.Studio] = Id; RenderHead(); RenderSections(); RenderSettings(); };
   Hub.SetView = (V) => Vp.SetView(V);
   Hub.Viewport = Vp;
   Hub.Destroy = () => { document.removeEventListener("keydown", KeyGate); Pad.Destroy(); };

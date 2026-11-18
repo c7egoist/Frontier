@@ -23,13 +23,13 @@
 
 /* both sheets define these two: inside a card the card's version wins */
 .pz-scope .icon-btn { border: 1px solid transparent; }
-.pz-scope .icon-btn:hover:not(:disabled) { background: #2a2a2a; border-color: transparent; color: #eee; }
+.pz-scope .icon-btn:hover:not(:disabled) { background: var(--pz-g7, #2a2a2a); border-color: transparent; color: #eee; }
 
 /* Brush Studio as the right-click context menu of the brush tools (Texture Paint) */
-.cd-brush-menu { position: fixed; z-index: 90; width: min(860px, calc(100vw - 24px)); height: min(640px, calc(100vh - 24px)); display: flex; flex-direction: column; border-radius: 24px; background: #101010f2; border: 1px solid #2c2c2c; box-shadow: 0 30px 80px #000b; backdrop-filter: blur(10px); overflow: hidden; animation: cd-rise 0.16s cubic-bezier(0.16, 1, 0.3, 1); }
+.cd-brush-menu { position: fixed; z-index: 90; width: min(720px, calc(100vw - 24px)); height: min(640px, calc(100vh - 24px)); display: flex; flex-direction: column; border-radius: 24px; background: color-mix(in srgb, var(--panel) 95%, transparent); border: 1px solid var(--line-strong); box-shadow: 0 30px 80px #000b; backdrop-filter: blur(10px); overflow: hidden; animation: cd-rise 0.16s cubic-bezier(0.16, 1, 0.3, 1); }
 .cd-brush-menu[hidden] { display: none; }
 @keyframes cd-rise { from { opacity: 0; transform: translateY(6px) scale(0.985); } }
-.cd-brush-bar { display: flex; align-items: center; gap: 10px; padding: 10px 12px 8px 16px; border-bottom: 1px solid #222; flex: none; }
+.cd-brush-bar { display: flex; align-items: center; gap: 10px; padding: 10px 12px 8px 16px; border-bottom: 1px solid var(--line); flex: none; }
 .cd-brush-bar b { font-weight: 400; font-size: 13px; }
 .cd-brush-bar small { color: #777; }
 .cd-brush-bar .cd-spacer { flex: 1; }
@@ -42,4 +42,69 @@
 .cd-brush-body .bs-lib, .cd-brush-body .bs-studio { min-height: 0; max-height: none; height: 100%; overflow: auto; box-shadow: none; }
 .cd-brush-title { font-size: 13px; font-weight: 400; letter-spacing: 0.2px; }
 .cd-brush-tool { flex: 1; font-family: "DM Mono", ui-monospace, monospace; font-size: 9.5px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--amber, #ffb238); }
-.cd-brush-close { width: 28px; height: 28px; border-radius: 50%; font-size: 17px; line-height: 1; color: #9a9a9a; background: #1c1c1c; }
+.cd-brush-close { width: 28px; height: 28px; border-radius: 50%; font-size: 17px; line-height: 1; color: #9a9a9a; background: var(--raised); }
+
+/* ------------------------------------------------------------------------------------------------ docked theme
+   The cards keep their charcoal palette on their own pages; docked here they take TextureStudio's theme.  Every card grey
+   is written `var(--pz-gN, #hex)` (bands by lightness, N = 0 darkest … 8), so the bands map onto the studio's :root
+   colours without touching a card rule.  Unset outside the dock → the original greys. */
+:is(.cd-host, .cd-brush-menu) {
+  --pz-g0: var(--field);                                        /* #000 · #0d0d0d   inputs, readouts */
+  --pz-g1: var(--panel);                                        /* #121212          wells */
+  --pz-g2: color-mix(in srgb, var(--panel) 45%, var(--card-bottom)); /* #151515 · #171717 search, meters, foot */
+  --pz-g3: var(--card);                                         /* #181818 … #1b1b1b folds, stats, card base */
+  --pz-g4: color-mix(in srgb, var(--card) 50%, var(--card-top));    /* #1c1c1c … #1f1f1f */
+  --pz-g5: var(--card-top);                                     /* #202020 … #232323 card top, slider rail */
+  --pz-g6: var(--raised);                                       /* #262626          selected rows, active sections */
+  --pz-g7: color-mix(in srgb, var(--raised) 86%, #fff 6%);      /* #2a2a2a … #2f2f2f hovers, swatches */
+  --pz-g8: color-mix(in srgb, var(--raised) 78%, #fff 10%);     /* #333 · #3a3a3a   toggle off */
+  --pz-line: var(--line);
+  color: var(--text);
+}
+/* card surfaces: the studio column already frames the card, so it sits flat in the theme's card colour */
+:is(.cd-host, .cd-brush-menu) :is(.mi-card, .ol-card, .bs-lib, .bs-studio) { background: linear-gradient(180deg, var(--card-top), var(--card-bottom)); border-color: transparent; }
+.cd-brush-menu :is(.bs-rail, .bs-side, .bs-sections) { background: var(--card-bottom); border-color: transparent; }
+
+/* no outlines on outliners or card controls */
+:is(.cd-host, .cd-brush-menu) :is(.ol-card, .ol-stat, .ol-filter, .ol-round, .ol-rows, .ol-foot, .ol-row, .ol-row.selected,
+  .mi-card, .mi-metric, .mi-fold, .mi-search, .mi-dd-btn, .mi-dd-list, .split-value, .mi-text-btn, .mi-readout, .bs-group, .bs-ltile, .bs-paper) {
+  border-color: transparent; outline: 0;
+}
+:is(.cd-host, .cd-brush-menu) :is(.ol-rows, .ol-foot) { border-top-color: transparent; }
+:is(.cd-host, .cd-brush-menu) .bs-ltile.active { border-color: transparent; box-shadow: inset 0 0 0 1px var(--line-strong); }
+:is(.cd-host, .cd-brush-menu) .ol-row.selected { background: var(--raised); }
+:is(.cd-host, .cd-brush-menu) .mi-metric { background: linear-gradient(135deg, var(--raised), var(--card-top)); }
+
+/* icon tint colours only the glyph — no tinted tile behind it */
+:is(.cd-host, .cd-brush-menu) :is(.pi-type, .pi-mark, .ol-icon, .mi-mark, .cs-on.lit, .mi-swatch.ai-glyph, .ol-group-glyph, .ol-layer-chip, .bs-glyph),
+:is(.cd-host, .cd-brush-menu) :is(.ol-row.selected .ol-icon, .mi-row.open .mi-swatch.ai-glyph, .cs-stack.tone-blue .cs-on.lit) {
+  background: transparent; box-shadow: none;
+}
+:is(.cd-host, .cd-brush-menu) .ol-row.selected .ol-icon { color: var(--text); }
+/* layer thumbnails (the real texture) keep a rounded frame */
+/* a checker shows through where a layer is still transparent (an unpainted paint layer) */
+:is(.cd-host, .cd-brush-menu) .ol-icon:has(> canvas, > img) { background: repeating-conic-gradient(#2a2b2f 0 25%, #1c1d20 0 50%) 50% / 8px 8px; }
+
+/* toggles follow the studio's .switch: white when on, dark knob */
+:is(.cd-host, .cd-brush-menu) .toggle { background: #232326; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+:is(.cd-host, .cd-brush-menu) .toggle i { background: #bcbcbc; }
+:is(.cd-host, .cd-brush-menu) .toggle:hover { background: #2b2b2f; }
+:is(.cd-host, .cd-brush-menu) .toggle.on, :is(.cd-host, .cd-brush-menu) .toggle.on:hover { background: #fff; box-shadow: none; }
+:is(.cd-host, .cd-brush-menu) .toggle.on i { background: #111; }
+:is(.cd-host, .cd-brush-menu) .ol-disc { background: #fff; color: #111; }
+:is(.cd-host, .cd-brush-menu) .ol-disc.muted { background: var(--raised); color: var(--muted); }
+:is(.cd-host, .cd-brush-menu) .ol-disc.warn { background: var(--amber); color: #2a1b00; }
+
+/* sliders: the studio's pill-range colours */
+:is(.cd-host, .cd-brush-menu) input[type="range"] { background: linear-gradient(90deg, var(--slider-fill) 0 var(--fill, 50%), #232326 var(--fill, 50%) 100%); }
+:is(.cd-host, .cd-brush-menu) input[type="range"]::-webkit-slider-thumb { background: var(--slider-thumb); }
+:is(.cd-host, .cd-brush-menu) input[type="range"]::-moz-range-thumb { background: var(--slider-thumb); }
+
+/* the brush menu shows presets in each tool's Library section (grid), so the side library list is hidden */
+.cd-brush-body .bs-shell { grid-template-columns: minmax(0, 1fr); }
+.cd-brush-body .bs-lib { display: none !important; }
+.cd-brush-menu .bs-ltile { background: var(--card-top); }
+.cd-brush-menu .bs-ltile:hover { background: var(--raised); }
+.cd-brush-menu .bs-ltile.active { background: var(--raised); }
+.cd-brush-menu .bs-ltile-art { background: var(--field); }
+.cd-brush-menu .bs-settings:focus, .cd-brush-menu .bs-settings:focus-visible { outline: 0; }

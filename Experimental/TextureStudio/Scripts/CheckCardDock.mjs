@@ -64,6 +64,36 @@ try {
   });
   Check("material · card edit reaches the stage params", Math.abs(R.Stage - R.Next) < 1e-6, JSON.stringify(R));
 
+  // every Material Inspector channel lands on the stage material; Height (reliefHeight) now scales the shader relief
+  R = await Run(async () => {
+    const T = window.__frontierTextureStudio, Card = T.card("material"), Api = T.workspaceApi();
+    const P = structuredClone(Card.State.P);
+    P.reliefHeight = 0.83;
+    Card.Apply(P); Card.Render();
+    await new Promise((Ok) => setTimeout(Ok, 400));
+    const M = Api.currentMaterial?.();
+    return { Params: Api.getParams().reliefHeight, Uniform: M?.userData?.shader?.uniforms?.uReliefHeight?.value ?? null, Material: M?.userData?.params?.reliefHeight };
+  });
+  Check("material · Height channel reaches the relief uniform", Math.abs(R.Params - 0.83) < 1e-6 && Math.abs((R.Uniform ?? R.Material) - 0.83) < 1e-6, JSON.stringify(R));
+
+  // docked panels wear TextureStudio's theme (cards keep their own greys on their own pages)
+  R = await Run(() => {
+    const Css = (Sel, Prop) => { const E = document.querySelector(Sel); return E ? getComputedStyle(E)[Prop] : null; };
+    return {
+      Card: Css(".cd-right > .cd-material .mi-card", "backgroundImage"),
+      CardBorder: Css(".cd-right > .cd-material .mi-card", "borderTopColor"),
+      Outliner: Css(".cd-left .ol-card", "borderTopColor"),
+      Row: Css(".cd-left .ol-row", "borderTopColor"),
+      Stat: Css(".cd-left .ol-stat", "borderTopColor"),
+      Icon: Css(".cd-left .ol-icon", "backgroundColor"),
+      Disc: Css(".cd-left .ol-disc:not(.muted):not(.warn)", "backgroundColor"),
+    };
+  });
+  const Clear = (C) => C === "rgba(0, 0, 0, 0)" || C === "transparent";
+  Check("theme · docked card surfaces use the studio card colours", /rgb\(32, 33, 36\)/.test(R.Card || "") && Clear(R.CardBorder), JSON.stringify(R));
+  Check("theme · outliners have no outlines; icon tiles have no tint", Clear(R.Outliner) && Clear(R.Row) && Clear(R.Stat) && Clear(R.Icon), JSON.stringify(R));
+  Check("theme · status discs are white, not green", !R.Disc || R.Disc === "rgb(255, 255, 255)", JSON.stringify(R));
+
   R = await Run(async () => {
     const T = window.__frontierTextureStudio, Card = T.card("material");
     const Before = Card.State.P.Name || Card.State.P.name;
@@ -120,6 +150,14 @@ try {
   Check("bake · card study drives the stage", R.Study === "box", R.Study);
   Check("bake · card request runs the workspace baker", R.Dry === false && R.Baked && R.Maps?.length === 2, JSON.stringify(R));
 
+  R = await Run(async () => {
+    const T = window.__frontierTextureStudio, Card = T.card("bake"), Api = T.workspaceApi();
+    Card.State.Open = "curvature"; Card.Render();
+    await new Promise((Ok) => setTimeout(Ok, 200));
+    return { Inspect: Api.getSnapshot().inspectChannel };
+  });
+  Check("bake · the map open in the card is the map the stage inspects", R.Inspect === "curvature", JSON.stringify(R));
+
   // ------------------------------------------------------------------------------------------ Texture Paint + Brush
   await Switch("paint");
   await Sleep(1500);
@@ -149,13 +187,28 @@ try {
   });
   Check("paint · card layer add builds an engine layer", R.Added && R.Kind === "fill" && R.FullRes, JSON.stringify(R));
 
+  R = await Run(async () => {
+    await new Promise((Ok) => setTimeout(Ok, 600));
+    const Rows = [...document.querySelectorAll(".cd-paint-outliner .ol-row[data-row^='layer:']")];
+    const Engine = window.__frontierTextureStudio.workspaceApi().currentDocument();
+    const Folder = new Set(Engine.layers.filter((L) => L.kind === "folder").map((L) => `layer:${L.id}`));
+    const Img = Rows.filter((E) => E.querySelector(".ol-icon img.pi-thumb"));
+    const Loaded = Img.filter((E) => E.querySelector("img.pi-thumb").src.startsWith("data:image/png"));
+    return { Rows: Rows.length, Thumbs: Img.length, Loaded: Loaded.length, FolderThumbs: Img.filter((E) => Folder.has(E.dataset.row)).length, Layers: Rows.filter((E) => !Folder.has(E.dataset.row)).length };
+  });
+  Check("paint · layer rows show each layer's real texture", R.Thumbs > 0 && R.Thumbs === R.Layers && R.Loaded === R.Thumbs && !R.FolderThumbs, JSON.stringify(R));
+
   R = await Run(() => {
     const B = document.querySelector("[data-tool-id='paint']"), Box = B.getBoundingClientRect();
     B.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: Box.left, clientY: Box.bottom }));
     const Menu = document.querySelector(".cd-brush-menu");
-    return { Open: !!Menu && !Menu.hidden, Studio: !!Menu?.querySelector(".bs-studio"), Library: !!Menu?.querySelector(".bs-lib"), Popup: !!document.querySelector(".tool-popup-menu") };
+    const Lib = Menu?.querySelector(".bs-lib");
+    return { Open: !!Menu && !Menu.hidden, Studio: !!Menu?.querySelector(".bs-studio"), SideHidden: !Lib || getComputedStyle(Lib).display === "none", Popup: !!document.querySelector(".tool-popup-menu"),
+      Section: Menu?.querySelector(".bs-sec.active")?.dataset.section, Tiles: Menu?.querySelectorAll(".bs-lgrid .bs-ltile[data-kind='brush']").length || 0,
+      Grid: getComputedStyle(Menu?.querySelector(".bs-lgrid") || document.body).display };
   });
-  Check("brush · right-click the Brush tool opens Brush Studio (not the old popup)", R.Open && R.Studio && R.Library && !R.Popup, JSON.stringify(R));
+  Check("brush · right-click the Brush tool opens Brush Studio (not the old popup)", R.Open && R.Studio && !R.Popup, JSON.stringify(R));
+  Check("brush · side preset list hidden; Library section shows the brushes as a grid", R.SideHidden && R.Section === "library" && R.Tiles > 20 && R.Grid === "grid", JSON.stringify(R));
 
   R = await Run(async () => {
     const T = window.__frontierTextureStudio, Card = T.card("brush"), Api = T.workspaceApi();
@@ -166,6 +219,41 @@ try {
     return { Color: B.color, Size: B.size, Radius: B.pixelRadius };
   });
   Check("brush · studio colour / size reach the workspace brush", R.Color === "#3a7bd5" && Math.abs(R.Size - 0.465) < 0.01, JSON.stringify(R));
+
+  R = await Run(async () => {
+    const T = window.__frontierTextureStudio, Card = T.card("brush"), Api = T.workspaceApi();
+    const On = [...(Card.Brush().values["mat.channels"] || [])].filter((C) => C !== "metalness");
+    Card.SetValue("mat.channels", [...On, "sheen"]);
+    Card.SetValue("mat.stack", { per: { ...(Card.Brush().values["mat.stack"]?.per || {}), sheen: { value: 61 } } });
+    await new Promise((Ok) => setTimeout(Ok, 200));
+    const B = Api.currentBrush();
+    return { Sheen: B.paintChannels.sheen, Metal: B.paintChannels.metalness, Value: B.extValues.sheen };
+  });
+  Check("brush · Paint channel stack reaches the workspace channel map and values", R.Sheen === true && R.Metal === false && Math.abs(R.Value - 0.61) < 1e-6, JSON.stringify(R));
+
+  // each tool's Library section lists that tool's presets
+  R = await Run(async () => {
+    const T = window.__frontierTextureStudio, Card = T.card("brush"), Api = T.workspaceApi(), Out = {};
+    const Menu = document.querySelector(".cd-brush-menu");
+    for (const [Tool, Kind] of [["erase", "eraser"], ["fill", "fill-colour"], ["stamp", "stamp"], ["gradient", "gradient"], ["text", "font"]]) {
+      Api.selectTool(Tool);
+      await new Promise((Ok) => setTimeout(Ok, 80));
+      Menu.querySelector(".bs-sec[data-section='library']")?.click();
+      await new Promise((Ok) => setTimeout(Ok, 60));
+      Out[Tool] = Menu.querySelectorAll(`.bs-lgrid .bs-ltile[data-kind='${Kind}']`).length;
+    }
+    // picking a gradient tile sets the gradient tool's preset
+    Api.selectTool("gradient");
+    await new Promise((Ok) => setTimeout(Ok, 80));
+    Menu.querySelector(".bs-sec[data-section='library']")?.click();
+    const Tile = [...Menu.querySelectorAll(".bs-ltile[data-kind='gradient']")].find((E) => E.getAttribute("aria-pressed") !== "true");
+    Tile?.click();
+    await new Promise((Ok) => setTimeout(Ok, 60));
+    Out.Picked = Card.State.Tools.gradient.preset === Tile?.dataset.value;
+    Api.selectTool("paint");
+    return Out;
+  });
+  Check("brush · Library grid per tool (erasers, fills, stamps, gradients, fonts)", R.erase > 0 && R.fill > 0 && R.stamp > 0 && R.gradient > 0 && R.text === 6 && R.Picked, JSON.stringify(R));
 
   R = await Run(async () => {
     const T = window.__frontierTextureStudio, Card = T.card("brush"), Api = T.workspaceApi();

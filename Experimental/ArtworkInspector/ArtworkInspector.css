@@ -4,7 +4,7 @@
 .ai-ident { display: flex; gap: 14px; align-items: flex-start; }
 .ai-ident-copy { flex: 1; min-width: 0; }
 .ai-thumb-frame { width: 64px; height: 64px; margin-top: 4px; border-radius: 16px; flex: none; overflow: hidden; box-shadow: inset 0 0 0 1px #ffffff14, 0 6px 16px #0006; }
-.ai-thumb-frame.stamp { background: repeating-conic-gradient(#1c1c1c 0% 25%, #252525 0% 50%) 0 0/10px 10px; }
+.ai-thumb-frame.stamp { background: repeating-conic-gradient(var(--pz-g4, #1c1c1c) 0% 25%, var(--pz-g5, #252525) 0% 50%) 0 0/10px 10px; }
 .ai-thumb { width: 100%; height: 100%; background-repeat: no-repeat; background-position: center; background-size: contain; }
 .ai-thumb-frame.pattern .ai-thumb { background-repeat: repeat; background-size: 50% 50%; }
 .ai-ident .mi-name { margin-top: 5px; font-size: 22px; }
@@ -19,7 +19,7 @@
 .ai-layer-tools .mi-x:disabled { opacity: 0.25; background: transparent; }
 
 /* property rows: glyph swatches */
-.mi-swatch.ai-glyph { background: #1c1c1c; color: #8a8a8a; }
+.mi-swatch.ai-glyph { background: var(--pz-g4, #1c1c1c); color: #8a8a8a; }
 .mi-row.open .mi-swatch.ai-glyph { color: var(--amber); background: #261f10; }
 
 /* modifier rows: bypass dot + head */
@@ -30,7 +30,7 @@
 .ai-foot-tools { display: flex; align-items: center; gap: 4px; }
 
 /* small inline bits */
-.ai-text-input { display: flex; height: 34px; border-radius: 14px; background: #0e0e0e; border: 1px solid #ffffff0c; padding: 0 12px; }
+.ai-text-input { display: flex; height: 34px; border-radius: 14px; background: var(--pz-g0, #0e0e0e); border: 1px solid #ffffff0c; padding: 0 12px; }
 .ai-text-input input { flex: 1; min-width: 0; border: 0; background: transparent; font-size: 15px; letter-spacing: 1px; color: #f0f0f0; outline: none; }
 .ai-text-input:focus-within { border-color: #ffb2384d; outline: none; }
 .ai-inline-tools { display: flex; gap: 6px; }
@@ -42,7 +42,7 @@
 .ai-add-select { position: relative; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 15px; border: 1px dashed #ffffff1c; color: #8a8a8a; font-size: 10px; }
 .ai-add-select:hover { border-color: #ffb23866; color: #ddd; }
 .ai-add-select select { flex: 1; min-width: 0; border: 0; background: transparent; color: inherit; font-size: 10px; cursor: pointer; appearance: none; outline: none; }
-.ai-add-select select option { background: #1b1b1b; color: #ddd; }
+.ai-add-select select option { background: var(--pz-g3, #1b1b1b); color: #ddd; }
 .ai-pop button span { display: inline-flex; align-items: center; gap: 8px; }
 .ai-pop { width: 240px; }
 

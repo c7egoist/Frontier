@@ -3758,11 +3758,29 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     if (!layerId) return;
     layerThumbCache.delete(layerId);
     maskThumbCache.delete(layerId);
+    announceThumbs();
   }
 
   function invalidateAllLayerThumbs() {
     layerThumbCache.clear();
     maskThumbCache.clear();
+    announceThumbs();
+  }
+
+  // CardDock: the Paint Outliner shows each layer's real thumbnail; it hears when thumbnails go stale (at most ~4×/s).
+  const thumbListeners = new Set();
+  const thumbUrls = new WeakMap();
+  let thumbAnnounce = 0;
+  function announceThumbs() {
+    if (!thumbListeners.size || thumbAnnounce) return;
+    thumbAnnounce = setTimeout(() => { thumbAnnounce = 0; if (!disposed) for (const fn of thumbListeners) fn(); }, 240);
+  }
+  function layerThumbUrl(layerId) {
+    const layer = state.doc.layers.find((l) => l.id === layerId);
+    const cv = layer && getCachedLayerThumbCanvas(layer);
+    if (!cv) return null;
+    if (!thumbUrls.has(cv)) { try { thumbUrls.set(cv, cv.toDataURL("image/png")); } catch { thumbUrls.set(cv, null); } }
+    return thumbUrls.get(cv);
   }
 
   function getCachedLayerThumbCanvas(layer) {
@@ -5902,6 +5920,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     dock: { grid, leftCol, centerCol, rightCol },
     currentDocument: () => state.doc,
     watchLayers(fn) { layerListeners.add(fn); return () => layerListeners.delete(fn); },
+    layerThumb: layerThumbUrl,
+    watchThumbs(fn) { thumbListeners.add(fn); return () => thumbListeners.delete(fn); },
     assignLayers,
     currentBrush: () => state.brush,
     assignBrush,

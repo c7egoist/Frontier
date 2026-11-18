@@ -2228,6 +2228,7 @@ export function mountMaterialWorkspace(root, appBridge) {
       return MATERIAL_CATALOG.filter((m) => m.category === cat).map((m) => ({ id: m.id, name: m.name, type: m.type }));
     },
     getParams: () => state.params,
+    currentMaterial: () => activeMaterial,
     // CardDock: the grid and columns the cards are seated in, and the two-way params hand-off.
     dock: { grid, centerCol, rightCol },
     watchParams(fn) { paramListeners.add(fn); return () => paramListeners.delete(fn); },

@@ -92,3 +92,56 @@ Screenshots: `Experimental/TextureStudio/Screenshots/cards-{material,pattern,pai
 - Bake sets (multi-part templates) plan in the card but bake one study on the stage; the card says so.
 - The Brush Studio's drawing pad viewport is left out of the menu — the Texture Paint viewport is the canvas.
 - Card history is per card; the workspace's own undo stack is unchanged.
+
+## 6. Theme pass, channel audit, layer thumbnails, Brush Library grid
+
+### 6.1 Channel audit — is every channel hooked to what it shows?
+
+Each channel was driven from its card in the live studio and read back at the workspace or viewport.
+
+| Area | Channels | Result before | Fix |
+| :--- | :--- | :--- | :--- |
+| Material Inspector → stage material | 29 (3 vector maps not probed) | 25 move the material. **Height (`reliefHeight`) went nowhere**: the stage shader never read it. Occlusion and Coat IOR reach shader uniforms (`uAoIntensity`, `uCoatIor`). Coverage only means something on a detail or coat stratum. Emissive colour shows only once Glow strength is above 0, which is by design. | `materials.js` adds a new `uReliefHeight` uniform that scales the relief normal (0.5 = 1×, so existing materials look the same) |
+| Layer Inspector → paint engine layer (fill, material, generator) | 22 × 3 + per-channel opacity and blend | **66 / 66** land where the engine reads them | — |
+| Brush Studio → workspace brush | per-tool channel stacks | **Not hooked**: only colour, size, opacity, flow, roughness, metalness and height travelled. The channel on/off maps (`paintChannels`, `eraseChannels`, `fillChannels`, `gradientChannels`, `textChannels`) and extended values (sheen, clearcoat …) were ignored. | `CardDock.ChannelPatch`: the active tool's stack sets that tool's channel map. Fill, stamp and text values go to the brush PBR fields and `extValues`. The paint brush's emissive strength sets the glow. |
+| Map Baking card → baker | 18 maps | ids match the engine catalogue 18/18, and every request key is consumed. **The map open in the card did not change the map the stage inspects.** | `BakingWorkspace.inspectMap(id)` — the card's open map now drives the stage's inspected map |
+
+### 6.2 Docked theme (imported panels only)
+
+`CardDock.css` remaps the cards onto TextureStudio `:root` colours. The standalone card pages stay as they were.
+
+- **Colours.** Every card grey is now written as `var(--pz-gN, #original)`, sorted into 9 bands by lightness. The change covers 159 declarations across Material / Outliner / Artwork / Bake / Paint / Brush CSS. The bands are unset outside the dock, so the original greys still apply there. Inside `.cd-host` and `.cd-brush-menu` they map to `--field`, `--panel`, `--card`, `--card-top` and `--raised`. Sliders use `--slider-fill` and `--slider-thumb`.
+- **No outlines** on outliner cards, stats, filters, rows, the footer, metrics, folds, search, dropdowns or split values.
+- **Icon colour colours only the glyph.** There is no tinted tile behind `pi-type`, `ol-icon`, `mi-mark`, `cs-on.lit`, `ai-glyph` or `bs-glyph`.
+- **Toggles match the studio `.switch`.** On is white with a `#111` knob; off is `#232326`. Status discs are white instead of green.
+
+### 6.3 Layer thumbnails
+
+- `TexturePaintWorkspace` exposes `layerThumb(id)`, which returns a data URL from its existing thumbnail cache. It also exposes `watchThumbs(fn)`, which fires at most about 4 times a second when thumbnails are invalidated.
+- `MountPaintOutliner(Host, Card, { thumb })` shows the real texture in each layer row. Folders keep their icon, and a checker shows through where a layer is still transparent.
+
+### 6.4 Brush menu: Library section as a grid
+
+- `BrushStudio.Mount(…, { library: "section" })` hides the side preset list. Each tool's section list now opens on **Library**, which shows that tool's presets as a grid:
+
+| Tool | Library grid |
+| :--- | :--- |
+| Paint / Smudge / Curve | Brushes by family, drawn as engine stroke previews |
+| Erase | Erasers |
+| Fill | Colours + grains |
+| Stamp | Shapes |
+| Gradient | Gradient ramps |
+| Text | Fonts, previewing the current text |
+
+- Search filters the grid. Picking a tile sets the brush, eraser, fill source, shape, preset or font.
+- The standalone Brush Studio page keeps its side library unchanged.
+
+### Gates
+
+| Gate | Result |
+| :--- | :--- |
+| `CheckCardDock.mjs` | **27 / 27** (9 new: relief uniform, theme ×3, bake inspect, layer thumbnails, Library grid, channel stack → brush, per-tool Library) |
+| `TextureStudioValidation.mjs` | **29 / 29** |
+| Brush 13/0 + 14/0 · Paint 15/0 + 0 errors · Material 17/0 · Outliners 11/0 · Bake 17/0 · Artwork 12/0 | green |
+
+Screenshots: `Experimental/TextureStudio/Screenshots/cards-{paint,brush-library,brush-stamp,material}.png`.

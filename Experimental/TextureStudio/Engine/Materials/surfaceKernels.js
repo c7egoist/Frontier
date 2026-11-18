@@ -6,7 +6,7 @@ export function extendedSurfaceGLSL() {
     uniform vec3 uSecondary;
     uniform float uMoisture,uScattering,uFreckles,uPaperRibs,uFiberContrast;
     uniform float uOxidation,uPanelMode,uBusbarWidth,uDimpleDepth,uDenimFade,uSlub,uPixelFill;
-    uniform float uBakeHeightRange,uEmissionScale,uAoIntensity;
+    uniform float uBakeHeightRange,uEmissionScale,uAoIntensity,uReliefHeight;
     float oxideMask=0.,contactMask=0.,emitterMask=0.,candyCrystalMask=0.,candySpeckleMask=0.,candySugarRough=0.,engMetalMask=0.,engPadMask=0.,engHoleMask=0.,engEmitMask=0.;
     vec3 candyFacetDir=vec3(0.,0.,1.),engEmitColor=vec3(0.);
     vec3 bakeSRGB(vec3 c){c=max(c,vec3(0.));return mix(c*12.92,1.055*pow(c,vec3(1./2.4))-.055,step(vec3(.0031308),c));}

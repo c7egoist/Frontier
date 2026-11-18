@@ -13,7 +13,9 @@ import { Esc, Dropdown } from "../MaterialInspector/CardKit.js";
 import { Shell, TreeRow, GroupRow, RowTool, CreateOutliner, Matches } from "../MaterialInspector/OutlinerKit.js";
 import { PAINT_CHANNEL } from "../MaterialInspector/ChannelStack.js";
 
-export function MountPaintOutliner(Host, Inspector) {
+// Options.thumb(layerId) → image URL | null: a host that holds the texels (TextureStudio) shows each layer's real texture in
+// the row icon; without it (or for folders) the row shows the layer-type icon.
+export function MountPaintOutliner(Host, Inspector, Options = {}) {
   const { State: S, Model: B } = Inspector;
   let Outliner;
 
@@ -27,6 +29,11 @@ export function MountPaintOutliner(Host, Inspector) {
       return `<i style="background:${Fill}" title="${Esc(C.Label)}"></i>`;
     };
     return `<span class="pi-peek">${Shown.map(Dot).join("")}${Stack.on.length > 6 ? `<em>+${Stack.on.length - 6}</em>` : ""}</span>`;
+  }
+
+  function LayerIcon(L, T) {
+    const Url = L.kind !== "folder" && Options.thumb ? Options.thumb(L.id) : null;
+    return Url ? `<img class="pi-thumb" alt="" draggable="false" src="${Esc(Url)}">` : `<span class="pi-type" style="--c:${B.LAYER_TONES[L.kind]}">${icon(T.Icon, 14)}</span>`;
   }
 
   function Passes(L, St) {
@@ -49,7 +56,7 @@ export function MountPaintOutliner(Host, Inspector) {
       const Shown = B.Effective(S.P, L);
       let Html = TreeRow({
         Id: `layer:${L.id}`, Depth, Kind: `layer ${L.locked ? "locked" : ""}`, Draggable: true, Renaming: St.Renaming === `layer:${L.id}`,
-        Icon: `<span class="pi-type" style="--c:${B.LAYER_TONES[L.kind]}">${icon(T.Icon, 14)}</span>`,
+        Icon: LayerIcon(L, T),
         Name: L.name, Selected: S.P.selectedLayerId === L.id, Muted: !Shown,
         Meta: Folder ? `${Kids.length} layer${Kids.length === 1 ? "" : "s"} · ${L.blend.toLowerCase()} · ${Math.round(L.opacity * 100)}%`
           : `${L.blend.toLowerCase()} · ${Math.round(L.opacity * 100)}% · ${B.LayerStack(L).on.length} ch${L.partFilter >= 0 ? ` · ${B.PartOptions(S.P).find(([, V]) => V === L.partFilter)?.[0] || "part"}` : ""}`,

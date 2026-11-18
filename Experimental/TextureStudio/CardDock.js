@@ -23,6 +23,9 @@ import { MountBakeOutliner } from "../BakeInspector/BakeOutliner.js";
 import { Mount as MountPaintCard } from "../PaintInspector/PaintInspector.js";
 import { MountPaintOutliner } from "../PaintInspector/PaintOutliner.js";
 import { Mount as MountBrushStudio } from "../BrushStudio/BrushStudio.js";
+import { BRUSH_STACK } from "../BrushStudio/BrushModel.js";
+import { TOOL_STACKS } from "../BrushStudio/ToolModel.js";
+import { PAINT_CHANNELS, PAINT_CHANNEL, ToEngine } from "../MaterialInspector/ChannelStack.js";
 
 const Seats = new Map();     // card key → { Left, Right, Card, Extra }
 let Undock = [];             // listeners to drop when the workspace unmounts
@@ -161,7 +164,10 @@ function DockBake(Api) {
   const P = Seat.Card.State.P;
   if (!P.set && P.studyId !== Api.currentStudy() && Api.currentStudy() !== "custom") Seat.Card.UseTarget(Api.currentStudy());
   Seat.Last = Seat.Card.State.P.studyId;
+  let Inspected = null;
   const Off = Seat.Card.Subscribe(() => {
+    const Open = Seat.Card.State.Open;
+    if (Open && Open !== Inspected) { Inspected = Open; Api.inspectMap?.(Open); }
     const Next = Seat.Card.State.P;
     if (Next.set || Next.studyId === Seat.Last) return;
     Seat.Last = Next.studyId;
@@ -181,13 +187,17 @@ function DockPaint(Api) {
     const Right = Host("mi-host cd-paint");
     const Left = Host("ol-host cd-paint-outliner");
     const Card = MountPaintCard(Right, { docked: true, scoped: true, store: false });
-    MountPaintOutliner(Left, Card);
-    Seat = { Left, Right, Card, Adopting: false, Last: null };
+    const Thumbs = { Api: null };
+    const Outliner = MountPaintOutliner(Left, Card, { thumb: (Id) => Thumbs.Api?.layerThumb?.(Id) || null });
+    Seat = { Left, Right, Card, Outliner, Thumbs, Adopting: false, Last: null };
     Seats.set("paint", Seat);
   }
   SeatGrid(Api.dock);
   SeatLeft(Api.dock, Seat.Left);
   SeatRight(Api.dock, Seat.Right);
+  Seat.Thumbs.Api = Api;
+  if (Api.watchThumbs) Undock.push(Api.watchThumbs(() => { if (!Seat.Outliner.State?.Renaming) Seat.Outliner.Render(); }));
+  Undock.push(() => { if (Seat.Thumbs.Api === Api) Seat.Thumbs.Api = null; });
 
   const Adopt = (Doc) => {
     Seat.Adopting = true;
@@ -210,7 +220,36 @@ function DockPaint(Api) {
 // Brush Studio card values → the workspace brush. Sizes: the card's 0–100 slider spans the workspace's 0.03–0.9 radius.
 const SIZE_LO = 0.03, SIZE_HI = 0.9;
 const Unit = (V, Lo = 0, Hi = 1) => Math.max(Lo, Math.min(Hi, (+V || 0) / 100));
-export function BrushPatch(Brush, Tool) {
+// Channel stacks: the active tool's stack (the brush's Paint channels for Paint / Curve) → the workspace's channel map for
+// that tool, and every channel value the stack carries → the brush's PBR fields / extended values.
+const CHANNEL_SLOT = { paint: "paintChannels", curve: "paintChannels", stamp: "paintChannels", erase: "eraseChannels", fill: "fillChannels", gradient: "gradientChannels", text: "textChannels" };
+const CORE_FIELDS = { roughness: "roughness", metalness: "metalness", height: "height" };
+const GLOW_MAX = (PAINT_CHANNEL.emissiveIntensity?.Max ?? 400) / 100;
+export function ChannelPatch(Brush, Tool, Tools, Held = {}) {
+  const Slot = CHANNEL_SLOT[Tool];
+  if (!Slot) return {};
+  const Stack = Tool === "paint" || Tool === "curve" || !TOOL_STACKS[Tool] ? BRUSH_STACK : TOOL_STACKS[Tool];
+  const Full = Stack === BRUSH_STACK ? Stack.Read(Brush.values) : Stack.Read(Tools?.[Tool] || {});
+  const Patch = { [Slot]: Object.fromEntries(PAINT_CHANNELS.map((C) => [C.Id, Full.on.includes(C.Id)])) };
+  if (Tool === "erase" || Tool === "gradient") return Patch;  // erasers and ramps carry which channels, not values
+  const Ext = { ...(Held.extValues || {}) };
+  for (const Id of Full.on) {
+    const Per = Full.per[Id] || {};
+    if (Id === "albedo") continue;
+    if (Id === "emissive") {
+      Ext.emissive = /^#[0-9a-f]{6}$/i.test(Per.value) ? Per.value : Brush.values["colour.primary"] || Ext.emissive;
+      if (Per.strength !== undefined && !Full.on.includes("emissiveIntensity")) Ext.emissiveIntensity = (Unit(Per.strength)) * GLOW_MAX;
+      continue;
+    }
+    if (Per.value === undefined) continue;
+    if (CORE_FIELDS[Id]) { if (Stack !== BRUSH_STACK) Patch[CORE_FIELDS[Id]] = ToEngine(Id, Per.value); continue; }
+    Ext[Id] = ToEngine(Id, Per.value);
+  }
+  Patch.extValues = Ext;
+  return Patch;
+}
+
+export function BrushPatch(Brush, Tool, Tools = null, Held = {}) {
   const V = Brush.values;
   const Size = SIZE_LO + (SIZE_HI - SIZE_LO) * Unit(V["prop.size"]);
   return {
@@ -235,6 +274,7 @@ export function BrushPatch(Brush, Tool) {
       temperatureShift: Unit(V["colour.temperature"]),
       ...(Array.isArray(V["colour.palette"]) ? { paletteColors: [...V["colour.palette"]] } : {}),
     },
+    ...ChannelPatch(Brush, Tool, Tools, Held),
   };
 }
 // …and back: what the studio shows when the workspace's tool, colour or size changes outside the card.
@@ -257,7 +297,7 @@ function BrushSeat() {
       <button type="button" class="icon-btn cd-brush-close" aria-label="Close Brush Studio" title="Close (Esc)">×</button></div>
     <div class="cd-brush-body"></div>`;
   document.body.append(Menu);
-  const Card = MountBrushStudio(Menu.querySelector(".cd-brush-body"), { pad: false, scoped: true });
+  const Card = MountBrushStudio(Menu.querySelector(".cd-brush-body"), { pad: false, scoped: true, library: "section" });
   Seat = { Menu, Card, Api: null, Pushing: false };
   Seats.set("brush", Seat);
 
@@ -267,14 +307,14 @@ function BrushSeat() {
   document.addEventListener("pointerdown", (E) => { if (!Menu.hidden && !Menu.contains(E.target)) Close(); }, true);
   document.addEventListener("keydown", (E) => { if (E.key === "Escape" && !Menu.hidden) Close(); });
 
-  const Push = Coalesce(([Brush, Tool]) => {
+  const Push = Coalesce(([Brush, Tool, Tools]) => {
     if (!Seat.Api) return;
     Seat.Pushing = true;
-    try { Seat.Api.assignBrush(BrushPatch(Brush, Tool)); } finally { Seat.Pushing = false; }
+    try { Seat.Api.assignBrush(BrushPatch(Brush, Tool, Tools, Seat.Api.currentBrush?.() || {})); } finally { Seat.Pushing = false; }
   });
-  Card.Subscribe((Brush, Tool) => {
+  Card.Subscribe((Brush, Tool, Tools) => {
     Menu.querySelector(".cd-brush-tool").textContent = Card.State.Tool;
-    if (Seat.Api) Push([Brush, Tool]);
+    if (Seat.Api) Push([Brush, Tool, Tools]);
   });
   return Seat;
 }
