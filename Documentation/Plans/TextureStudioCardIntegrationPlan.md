@@ -214,3 +214,28 @@ Screenshots: `Experimental/TextureStudio/Screenshots/{fill-linear-scene,fill-poi
 
 - Interpolated ramps are baked into 40 sampled stops. This is exact enough for albedo, but SVG exports carry more `<stop>` elements.
 - Point-field placement uses document space, so arrayed instances share one field, as before.
+
+## 8. No inspector preview; rows open side by side
+
+### 8.1 Asks
+
+- Drop the preview from the inspector. When docked, the Pattern / Stamp card no longer shows its document thumbnail, because the viewport is the preview. The standalone card page keeps its thumbnail, since it has no viewport.
+- Panels open and close independently, so several stay open together: Text + Outline in Pattern / Stamp, Emissive + Roughness in Material, any channels in the Paint layer inspector and Brush Studio.
+
+### 8.2 How
+
+| Piece | Change |
+| :--- | :--- |
+| `MaterialInspector/ChannelStack.js` (shared by Material, Paint, Brush Studio) | `Ui.Opened` lists every open row and `Ui.Open` is the last one touched. Adds `StackRowOpen`, `StackReveal` and `StackFoldAll`. `cs-open` toggles only its own row. |
+| `MaterialInspector.js` | `S.Opened` holds `"<stratum>:<channel>"`. `S.Channel` stays the row edits go to: a pointerdown or focus inside an open row makes it current (capture phase, ignored while a render puts focus back). Esc folds every row; the outliner opens a channel beside the others. |
+| `ArtworkInspector.js` | Same model for property and modifier rows (`S.Opened` per layer, `S.Open` = current). Esc folds all. `RowOpen` and `FoldRows` are exposed on the hub. |
+| `CardKit.Rebuild` + Material render | Focus restore is scoped to the focused row, because field ids repeat when several editors are open. |
+| Bake card | Unchanged. Its one open map is what the viewport inspects. |
+
+### 8.3 Gates
+
+| Gate | Result |
+| :--- | :--- |
+| `CheckCardDock.mjs` | **36 / 36**. New checks: material emission + roughness open together and close independently; pattern rows open side by side; no docked preview thumbnail; paint channel rows side by side. The brush hand-off check now polls instead of using one 200 ms wait. |
+| Smoke: Material 0 errors · Artwork 0 errors (new "rows open side by side") · Paint 0 · Brush 14/0 · Bake 0 · Outliners 10/0 | green |
+| Model checks: Material, Artwork, Paint, Brush | 0 fails |

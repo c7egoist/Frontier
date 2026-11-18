@@ -67,7 +67,12 @@ const { Mount } = await import(pathToFileURL(ROOT + "ArtworkInspector.js"));
 const App = Mount(w.document.getElementById("Card"), { mode: "pattern" });
 const St = App.State, A = App.Model;
 const L = () => A.Selected(St.Doc);
-const open = (id) => { if (St.Open !== id) click(q(`[data-act="open"][data-id="${id}"]`)); expect(St.Open === id, `open ${id}`); };
+// Rows open independently (several at once); a pointerdown inside an open row makes it the current one.
+const open = (id) => {
+  const head = () => q(`[data-act="open"][data-id="${id}"]`);
+  if (!App.RowOpen(id)) click(head()); else head().dispatchEvent(new w.Event("pointerdown", { bubbles: true }));
+  expect(St.Open === id && App.RowOpen(id), `open ${id}`);
+};
 const stat = (k) => q(`[data-stat="${k}"]`);
 
 await step("boot pattern", async () => {
@@ -171,7 +176,7 @@ await step("modifiers", async () => {
   const up = q(`[data-act="mod-up"][data-mod="${m.id}"]`); if (up && !up.disabled) click(up);
   click(q('[data-act="add-mod-toggle"]'));
   click(q('[data-act="add-mod"][data-type="noise-scale"]'));
-  const dice = q('[data-act="dice"]'); if (dice) { const seed = L().modifiers.at(-1).seed; click(dice); expect(L().modifiers.at(-1).seed !== seed, "dice"); }
+  const dice = q(`[data-row="mod:${L().modifiers.at(-1).id}"] [data-act="dice"]`); if (dice) { const seed = L().modifiers.at(-1).seed; click(dice); expect(L().modifiers.at(-1).seed !== seed, "dice"); }
   click(q(`[data-act="mod-remove"]`));
   expect(L().modifiers.length === n0 + 1, "removed");
 });
@@ -221,6 +226,16 @@ await step("storage sync + escape", async () => {
   open("blend"); key("Escape"); expect(St.Open === null, "escape");
 });
 
+await step("rows open side by side", async () => {
+  App.FoldRows(); App.Render();
+  const ids = qa('[data-act="open"]').map((b) => b.dataset.id).slice(0, 3);
+  for (const id of ids) click(q(`[data-act="open"][data-id="${id}"]`));
+  expect(ids.every((id) => q(`.mi-row.open[data-row="${id}"]`)), `all of ${ids} open together`);
+  click(q(`[data-act="open"][data-id="${ids[0]}"]`));
+  expect(!q(`.mi-row.open[data-row="${ids[0]}"]`) && q(`.mi-row.open[data-row="${ids[1]}"]`), "closing one keeps the rest");
+  App.FoldRows(); App.Render();
+});
+
 await step("every starter renders (both modes)", async () => {
   for (const mode of ["pattern", "stamp"]) {
     St.Mode = mode;
@@ -228,7 +243,7 @@ await step("every starter renders (both modes)", async () => {
       if (!options("library").includes(e.Id)) { St.Doc = A.Create(mode, e.Id); App.Render(); continue; }
       pick("library", e.Id);
       expect(St.Doc.starterId === e.Id, `${mode} ${e.Id}`);
-      for (const r of qa('[data-act="open"]').map((b) => b.dataset.id)) { open(r); }
+      for (const r of qa('[data-act="open"]').map((b) => b.dataset.id)) { open(r); App.FoldRows(); }   // one editor at a time
     }
   }
   St.Mode = "pattern";

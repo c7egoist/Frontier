@@ -14,7 +14,7 @@ import { icon } from "../MaterialInspector/Icons.js";
 import { KeyReaches, Esc, Knob, ColourField, Stops, Toggle, SwitchRow, Segments, Chips, Dropdown, StatTile, SyncSiblings, Download, Rebuild, History, HEX } from "../MaterialInspector/CardKit.js";
 
 const S = {
-  Mode: "pattern", Doc: null, Open: null, AddLayer: false, AddMod: false, Renaming: null, Folds: {},
+  Mode: "pattern", Doc: null, Open: null, Opened: new Set(), AddLayer: false, AddMod: false, Renaming: null, Folds: {},
   Status: "", StatusTimer: 0, Stats: null, StatsKey: "", Thumb: "", ThumbKey: "", ThumbBlob: "",
   Docked: false,   // true when an outliner card owns the layer stack (the strip is then left out of this card)
 };
@@ -268,9 +268,29 @@ function RowSwatch(R) {
   return `<span class="mi-swatch ai-glyph">${icon(R.Glyph, 13)}</span>`;
 }
 
+// Rows open independently: S.Opened keeps "<layer>:<row>" for every expanded row, S.Open is the last one touched.
+const OpenId = (Id) => `${S.Doc.selectedLayerId}:${Id}`;
+const RowOpen = (Id) => S.Open === Id || S.Opened.has(OpenId(Id));
+function ToggleRow(Id) {
+  if (RowOpen(Id)) {
+    S.Opened.delete(OpenId(Id));
+    if (S.Open === Id) S.Open = null;
+  } else { if (S.Open) S.Opened.add(OpenId(S.Open)); S.Opened.add(OpenId(Id)); S.Open = Id; }
+}
+// Pointer / focus inside an open row makes it the current one (outliner highlight, hand-offs) without closing others.
+let Restoring = false;   // a rebuild puts focus back: that focusin is not the user picking a row
+function TrackRow(Event) {
+  if (Restoring) return;
+  const Id = Event.target.closest?.("[data-row]")?.dataset.row;
+  if (!Id || Id === S.Open || !RowOpen(Id)) return;
+  if (S.Open) S.Opened.add(OpenId(S.Open));
+  S.Open = Id;
+}
+function FoldRows() { const At = `${S.Doc.selectedLayerId}:`; for (const K of [...S.Opened]) if (K.startsWith(At)) S.Opened.delete(K); S.Open = null; }
+
 function PropertyRows(L) {
   return A.LayerRows(S.Doc, L).map((R) => {
-    const Open = S.Open === R.Id;
+    const Open = RowOpen(R.Id);
     return `<div class="mi-row ${Open ? "open" : ""}" data-row="${R.Id}">
       <button type="button" class="mi-row-head" data-act="open" data-id="${R.Id}" data-fid="row:${R.Id}" aria-expanded="${Open}">
         ${RowSwatch(R)}
@@ -287,7 +307,7 @@ function ModifierRows(L) {
   if (!Mods.length) return `<p class="mi-empty">No modifiers — the ${L.kind === "text" ? "text is" : "motif is"} drawn once. Add an array to repeat it.</p>`;
   return Mods.map((M, I) => {
     const Def = A.MODIFIER_DEFINITIONS.find((D) => D.type === M.type) || { label: M.type, badge: "" };
-    const Id = `mod:${M.id}`, Open = S.Open === Id, On = M.enabled !== false;
+    const Id = `mod:${M.id}`, Open = RowOpen(Id), On = M.enabled !== false;
     return `<div class="mi-row ai-mod ${Open ? "open" : ""} ${On ? "" : "off"}" data-row="${Id}">
       <div class="ai-mod-line">
         <button type="button" class="mi-dot" data-act="mod-toggle" data-mod="${M.id}" role="switch" aria-checked="${On}" title="${On ? "Bypass" : "Enable"} ${Esc(Def.label)}" aria-label="${On ? "Bypass" : "Enable"} ${Esc(Def.label)}"></button>
@@ -359,7 +379,7 @@ function CardHtml() {
     </header>
 
     <section class="mi-ident ai-ident">
-      <div class="ai-thumb-frame ${S.Mode}"><div class="ai-thumb" data-thumb style="background-image:${ThumbUrl()}" role="img" aria-label="${Esc(D.name)} preview"></div></div>
+      ${S.Docked ? "" : `<div class="ai-thumb-frame ${S.Mode}"><div class="ai-thumb" data-thumb style="background-image:${ThumbUrl()}" role="img" aria-label="${Esc(D.name)} preview"></div></div>`}
       <div class="ai-ident-copy">
         <span class="mi-eyebrow">${Esc((Entry?.Group || "Imported").toUpperCase())}${Index >= 0 ? ` / ${String(Index + 1).padStart(2, "0")}` : ""}</span>
         <input class="mi-name" data-act="name" data-fid="name" value="${Esc(D.name)}" maxlength="80" spellcheck="false" aria-label="${Mode.Title} name">
@@ -412,7 +432,8 @@ function CardHtml() {
 
 // ------------------------------------------------------------------------------------------------ render
 function Render() {
-  Rebuild(Root, CardHtml(), ".ai-card");
+  Restoring = true;
+  try { Rebuild(Root, CardHtml(), ".ai-card"); } finally { Restoring = false; }
   for (const Fn of Peers) Fn(false);
 }
 
@@ -503,7 +524,7 @@ function OnClick(Event) {
     case "layer-remove": { const Name = A.FindLayer(D, El.dataset.layer)?.name; Apply(A.RemoveLayer(D, El.dataset.layer)); S.Open = null; Flash(`${Name} deleted`); break; }
     case "add-layer-toggle": S.AddLayer = !S.AddLayer; S.AddMod = false; break;
     case "add-layer": { const R = A.AddLayer(D, El.dataset.kind); Apply(R.Doc); S.AddLayer = false; S.Open = El.dataset.kind === "text" ? "text" : El.dataset.kind === "motif" ? "shape" : "fill"; Flash(`${El.dataset.kind[0].toUpperCase()}${El.dataset.kind.slice(1)} layer added`); break; }
-    case "open": S.Open = S.Open === El.dataset.id ? null : El.dataset.id; S.AddLayer = S.AddMod = false; break;
+    case "open": ToggleRow(El.dataset.id); S.AddLayer = S.AddMod = false; break;
     case "add-mod-toggle": S.AddMod = !S.AddMod; S.AddLayer = false; break;
     case "add-mod": { const R = A.AddModifier(D, L.id, El.dataset.type); Apply(R.Doc); S.Open = `mod:${R.Id}`; S.AddMod = false; Flash(`${A.MODIFIER_DEFINITIONS.find((X) => X.type === El.dataset.type)?.label} added`); break; }
     case "mod-toggle": Apply(A.EditLayer(D, L.id, (E) => { const M = E.modifiers.find((X) => X.id === El.dataset.mod); M.enabled = M.enabled === false; })); break;
@@ -543,7 +564,7 @@ function OnClick(Event) {
     default: return;
   }
   Render();
-  if (Act === "open" && S.Open) Root.querySelector(`[data-fid="row:${CSS.escape(S.Open)}"]`)?.focus({ preventScroll: true });
+  if (Act === "open" && S.Open === El.dataset.id) { Restoring = true; Root.querySelector(`[data-fid="row:${CSS.escape(S.Open)}"]`)?.focus({ preventScroll: true }); Restoring = false; }
 }
 
 function OnInput(Event) {
@@ -628,7 +649,7 @@ function OnKey(Event) {
   }
   if (Event.key === "Escape" && !Typing) {
     if (S.AddLayer || S.AddMod) S.AddLayer = S.AddMod = false;
-    else if (S.Open) S.Open = null;
+    else if (S.Open || [...S.Opened].some((K) => K.startsWith(`${S.Doc.selectedLayerId}:`))) FoldRows();
     else return;
     Render();
   }
@@ -650,6 +671,8 @@ export function Mount(Host, Options = {}) {
   const Cat = A.Catalog(S.Mode);
   const Wanted = Options.starter || Params.get("starter") || Store?.getItem(`${A.STORAGE_PREFIX}${S.Mode}#current`) || Cat[0].Id;
   Select(LoadStored(Cat.some((E) => E.Id === Wanted) ? Wanted : Cat[0].Id));
+  Root.addEventListener("pointerdown", TrackRow, true);
+  Root.addEventListener("focusin", TrackRow, true);
   Root.addEventListener("click", OnClick);
   Root.addEventListener("input", OnInput);
   Root.addEventListener("change", OnChange);
@@ -664,7 +687,7 @@ export function Mount(Host, Options = {}) {
 
 // What the outliner (or a host) drives the card through — every edit goes Apply → Render, so undo and storage stay whole.
 const Hub = {
-  State: S, Model: A, History: H, Render, Apply, Settle, Flash, Step, Layer, CurrentStats, ThumbUrl,
+  State: S, Model: A, History: H, Render, Apply, Settle, Flash, Step, Layer, CurrentStats, ThumbUrl, RowOpen, FoldRows,
   Subscribe(Fn) { Peers.add(Fn); return () => Peers.delete(Fn); },
   Load(Id) { Settle(); Select(LoadStored(Id)); Render(); Flash(`Loaded ${S.Doc.name}`); },
   // Host hand-off: show the artwork document the host already owns (Texture Studio's Pattern / Stamp stage).

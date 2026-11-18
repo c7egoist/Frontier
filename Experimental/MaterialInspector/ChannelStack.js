@@ -154,17 +154,30 @@ export function LinkedStack({ Key, Link = {}, Card, On = ["albedo"], Overrides =
   return { Key, Link, Card, Channels, Default, Store, Read, Assign, Field: (Flat, Ch, K, Raw) => Assign(AssignStackField(Read(Flat), Ch, K, Raw, Card, Channels)) };
 }
 
-// UI state lives with the consumer, one object per stack: { Open, Folds: { Group: bool }, Query }.
-export const StackUi = () => ({ Open: null, Folds: {}, Query: "" });
+// UI state lives with the consumer, one object per stack: { Open, Opened, Folds: { Group: bool }, Query }.
+// Rows open independently: Opened lists every expanded row; Open is the last one touched (focus / host hand-offs).
+export const StackUi = () => ({ Open: null, Opened: [], Folds: {}, Query: "" });
+
+export const StackRowOpen = (Ui, Id) => Ui.Open === Id || (Ui.Opened || []).includes(Id);
+
+// Expand / collapse one row without touching the others.
+export function StackReveal(Ui, Id, Show = true) {
+  const List = (Ui.Opened || (Ui.Open ? [Ui.Open] : [])).filter((K) => K !== Id);
+  if (Show) List.push(Id);
+  Ui.Opened = List;
+  Ui.Open = Show ? Id : (Ui.Open === Id ? List[List.length - 1] ?? null : Ui.Open);
+}
+
+export function StackFoldAll(Ui) { Ui.Open = null; Ui.Opened = []; }
 
 // One click handler for every consumer.  Returns { Ui: true } when only UI state changed (re-render), { Next } with the
 // new stack value when channels were switched, or null when the act is not a stack act / was refused.
 export function StackAction(Act, El, Value, Ui, Card, { Min = 1, Channels = PAINT_CHANNELS, Groups = PAINT_GROUPS } = {}) {
   const Ch = El.dataset.ch, Group = El.dataset.group;
   switch (Act) {
-    case "cs-open": Ui.Open = Ui.Open === Ch ? null : Ch; return { Ui: true };
+    case "cs-open": StackReveal(Ui, Ch, !StackRowOpen(Ui, Ch)); return { Ui: true };
     case "cs-group": Ui.Folds[Group] = El.dataset.open !== "true"; return { Ui: true };
-    case "cs-toggle": { const Next = ToggleStackChannel(Value, Ch, Min, Channels); if (Next && Next.on.includes(Ch) && CardFields(Card, Channels.find((C) => C.Id === Ch)).length) Ui.Open = Ch; return Next ? { Next } : { Refused: `Keep at least ${Min} channel${Min > 1 ? "s" : ""} on` }; }
+    case "cs-toggle": { const Next = ToggleStackChannel(Value, Ch, Min, Channels); if (Next && Next.on.includes(Ch) && CardFields(Card, Channels.find((C) => C.Id === Ch)).length) StackReveal(Ui, Ch); return Next ? { Next } : { Refused: `Keep at least ${Min} channel${Min > 1 ? "s" : ""} on` }; }
     case "cs-group-toggle": { const All = Channels.filter((C) => C.Group === Group).every((C) => Value.on.includes(C.Id)); const Next = ToggleStackGroup(Value, Group, !All, Min, Channels); return Next ? { Next } : { Refused: "Keep at least one channel on" }; }
     case "cs-bulk": {
       const Ids = Channels.map((C) => C.Id), First = Channels.find((C) => C.Group === Groups[0])?.Id || Ids[0];
@@ -187,7 +200,7 @@ export function StackAction(Act, El, Value, Ui, Card, { Min = 1, Channels = PAIN
 // }
 export function ChannelStack(Spec) {
   const S = { Title: "Channels", Channels: PAINT_CHANNELS, Groups: PAINT_GROUPS, Switch: true, Bulk: true, FlatBelow: 0, Ui: StackUi(), Acts: {}, ...Spec };
-  const Ui = { Open: null, Folds: {}, Query: "", ...S.Ui };
+  const Ui = { Open: null, Opened: [], Folds: {}, Query: "", ...S.Ui };
   const OpenAct = S.Acts.Open || "cs-open", GroupAct = S.Acts.Group || "cs-group";
   const On = S.Value ? S.Value.on : S.Channels.map((C) => C.Id), Per = S.Value?.per || {};
   const Q = (Ui.Query || "").trim().toLowerCase();
@@ -234,7 +247,7 @@ export function ChannelStack(Spec) {
     </div>`;
   };
   const Row = (C) => {
-    const Open = Ui.Open === C.Id, IsOn = On.includes(C.Id), HasCard = !!(S.Editor || VisibleCardFields(S.Card, C, Per[C.Id]).length);
+    const Open = StackRowOpen(Ui, C.Id), IsOn = On.includes(C.Id), HasCard = !!(S.Editor || VisibleCardFields(S.Card, C, Per[C.Id]).length);
     const R = Readout(C);
     const Head = S.Head ? S.Head(C) : `<button type="button" class="mi-row-head" data-act="${OpenAct}" ${Attr} data-ch="${Esc(C.Id)}" data-fid="cs:${Esc(S.Bind || S.Id)}:${Esc(C.Id)}" aria-expanded="${Open}" ${HasCard ? "" : `aria-disabled="true"`}>
         ${Swatch(C)}${S.Edited?.(C) ? `<i class="cs-dot" title="Edited"></i>` : ""}<span class="mi-row-name">${Esc(C.Label)}<small>${Esc(C.Hint)}</small></span>
@@ -251,7 +264,7 @@ export function ChannelStack(Spec) {
     const Rows = Visible.filter((C) => C.Group === G);
     if (!Rows.length) return "";
     const OnHere = Rows.filter((C) => On.includes(C.Id)).length, AllHere = S.Channels.filter((C) => C.Group === G);
-    const Open = Q ? true : Ui.Folds[G] ?? (S.DefaultOpen ? S.DefaultOpen(G, Rows.map((C) => C.Id)) : G === S.Groups[0] || OnHere > 0 || Rows.some((C) => C.Id === Ui.Open));
+    const Open = Q ? true : Ui.Folds[G] ?? (S.DefaultOpen ? S.DefaultOpen(G, Rows.map((C) => C.Id)) : G === S.Groups[0] || OnHere > 0 || Rows.some((C) => StackRowOpen(Ui, C.Id)));
     const Badge = S.GroupBadge ? S.GroupBadge(G, Rows.map((C) => C.Id)) : S.Value ? `<span class="cs-on ${OnHere ? "lit" : ""}" title="${OnHere} of ${AllHere.length} on">${OnHere}/${AllHere.length}</span>` : "";
     const Head = `<button type="button" class="mi-group-head" data-act="${GroupAct}" ${Attr} data-group="${Esc(G)}" data-group-id="${Esc(`${S.Id || S.Bind}:${G}`)}" data-open="${Open}" aria-expanded="${Open}">
         <span class="mi-chev">${icon("chevron", 11)}</span><span>${Esc(G)}</span><small>${Rows.length}</small>${Badge}

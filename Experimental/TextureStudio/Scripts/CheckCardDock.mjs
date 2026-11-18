@@ -297,9 +297,10 @@ try {
     const T = window.__frontierTextureStudio, Card = T.card("brush"), Api = T.workspaceApi();
     Card.SetValue("colour.primary", "#3a7bd5");
     Card.SetValue("prop.size", 50);
-    await new Promise((Ok) => setTimeout(Ok, 200));
+    // the hand-off is coalesced: poll briefly instead of one fixed wait (slow under load)
+    for (let I = 0; I < 20 && Api.currentBrush().color !== "#3a7bd5"; I++) await new Promise((Ok) => setTimeout(Ok, 100));
     const B = Api.currentBrush();
-    return { Color: B.color, Size: B.size, Radius: B.pixelRadius };
+    return { Color: B.color, Size: B.size, Radius: B.pixelRadius, Tool: Card.State.Tool, Prim: Card.Brush?.().values?.["colour.primary"], Ws: Api.getSnapshot?.().tool, Hash: location.hash };
   });
   Check("brush · studio colour / size reach the workspace brush", R.Color === "#3a7bd5" && Math.abs(R.Size - 0.465) < 0.01, JSON.stringify(R));
 
@@ -351,6 +352,50 @@ try {
   });
   Check("brush · workspace tool change follows into the studio", R.Tool === "erase", JSON.stringify(R));
   Check("brush · Esc closes the menu; stray keys stay out of the studio", R.Closed && R.StudioTool === "erase", JSON.stringify(R));
+
+  // ------------------------------------------------------------------------------------------ several rows open at once
+  await Switch("material");
+  R = await Run(async () => {
+    const Card = window.__frontierTextureStudio.card("material"), L = Card.Layer();
+    const Want = ["emission", "emissive", "emissiveColour", "emissionColour"].find((K) => L.Channels.includes(K));
+    const Keys = [Want || L.Channels.find((K) => K !== "roughness" && K !== "colour"), "roughness"].filter((K) => K && L.Channels.includes(K));
+    Card.FoldChannels(); Card.Render();
+    for (const K of Keys) Card.OpenChannel(L.Identity, K);
+    const Seat = document.querySelector(".cd-right > .cd-material");   // the card's root: its innerHTML is rebuilt on render
+    const Open = [...Seat.querySelectorAll(".mi-row.open")].map((E) => E.dataset.row);
+    const Editors = [...Seat.querySelectorAll(".mi-editor")].map((E) => E.dataset.editor);
+    // closing one leaves the other
+    Seat.querySelector(`.mi-row-head[data-ch="${Keys[0]}"]`)?.click();
+    const After = [...Seat.querySelectorAll(".mi-row.open")].map((E) => E.dataset.row);
+    return { Keys, Open, Editors, After };
+  });
+  Check("material · channel rows open side by side (emission + roughness) and close independently",
+    R.Keys.length === 2 && R.Keys.every((K) => R.Open.includes(K) && R.Editors.includes(K)) && !R.After.includes(R.Keys[0]) && R.After.includes(R.Keys[1]), JSON.stringify(R));
+
+  await Switch("pattern");
+  R = await Run(async () => {
+    const Card = window.__frontierTextureStudio.card("artwork"), Root = document.querySelector(".cd-right > .cd-artwork");
+    Card.FoldRows(); Card.Render();
+    const Ids = [...Root.querySelectorAll('[data-act="open"][data-id]')].map((E) => E.dataset.id).filter((Id) => ["text", "fill", "stroke", "shape", "placement"].includes(Id)).slice(0, 2);
+    for (const Id of Ids) Root.querySelector(`[data-act="open"][data-id="${Id}"]`).click();
+    const Open = [...Root.querySelectorAll(".mi-row.open")].map((E) => E.dataset.row);
+    Card.FoldRows(); Card.Render();
+    return { Ids, Open, Thumb: !!Root.querySelector(".ai-thumb, [data-thumb]") };
+  });
+  Check("pattern · property rows open side by side (e.g. fill + outline)", R.Ids.length === 2 && R.Ids.every((Id) => R.Open.includes(Id)), JSON.stringify(R));
+  Check("pattern · docked inspector carries no preview thumbnail (the viewport is the preview)", !R.Thumb, JSON.stringify(R));
+
+  await Switch("paint");
+  R = await Run(async () => {
+    const Root = document.querySelector(".cd-right > .cd-paint");
+    const Heads = [...Root.querySelectorAll('.cs-row .mi-row-head[data-act="cs-open"]:not([aria-disabled="true"])')].slice(0, 2);
+    const Ids = Heads.map((H) => H.dataset.ch);
+    for (const Id of Ids) { Root.querySelector(`.cs-row .mi-row-head[data-ch="${Id}"]`)?.click(); await new Promise((Ok) => setTimeout(Ok, 60)); }
+    const Open = [...Root.querySelectorAll(".cs-row.open")].map((E) => E.dataset.row);
+    for (const Id of Ids) { Root.querySelector(`.cs-row.open .mi-row-head[data-ch="${Id}"]`)?.click(); await new Promise((Ok) => setTimeout(Ok, 60)); }
+    return { Ids, Open };
+  });
+  Check("paint · layer channel rows open side by side", R.Ids.length === 2 && R.Ids.every((Id) => R.Open.includes(Id)), JSON.stringify(R));
 
   // ------------------------------------------------------------------------------------------ remount
   await Switch("material");

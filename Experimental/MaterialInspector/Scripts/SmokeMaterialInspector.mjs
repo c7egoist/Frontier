@@ -68,7 +68,11 @@ const St = App.State, M = App.Model;
 const layer = () => M.FindLayer(St.P, St.LayerId);
 const stored = () => JSON.parse(w.localStorage.getItem(PREFIX + St.P.id));
 const row = (k) => q(`.mi-row-head[data-ch="${k}"]`);
-const open = (k) => { if (St.Channel !== k) click(row(k)); expect(St.Channel === k && q(`[data-editor="${k}"]`), `editor for ${k}`); };
+// Rows open independently (several at once); a pointerdown inside an open row makes it the one edits go to.
+const open = (k) => {
+  if (!App.RowOpen(k)) click(row(k)); else row(k).dispatchEvent(new w.Event("pointerdown", { bubbles: true }));
+  expect(St.Channel === k && q(`[data-editor="${k}"]`), `editor for ${k}`);
+};
 
 await step("boot: one card, Derez, strata + grouped channels", async () => {
   expect(qa(".mi-card").length === 1, "exactly one card");
@@ -84,7 +88,7 @@ await step("boot: one card, Derez, strata + grouped channels", async () => {
 
 await step("rows: open / close / arrows / escape", async () => {
   open("roughness");
-  expect(q(".mi-row.open").dataset.row === "roughness", "row open");
+  expect(q('.mi-row.open[data-row="roughness"]') && q('.mi-row.open[data-row="colour"]'), "row opens beside the one already open");
   key("ArrowDown", {}, row("roughness"));
   expect(St.Channel === "metallic", `arrow → ${St.Channel}`);
   key("Escape");

@@ -15,7 +15,7 @@
 
 import { icon } from "../MaterialInspector/Icons.js";
 import { KeyReaches, Esc, Knob, ColourField, Toggle, SwitchRow, Segments, Dropdown, StatTile, SyncSiblings, Download, Rebuild, History } from "../MaterialInspector/CardKit.js";
-import { ChannelStack, StackAction, StackUi, ParseStackBind, PAINT_GROUPS } from "../MaterialInspector/ChannelStack.js";
+import { ChannelStack, StackAction, StackUi, StackFoldAll, ParseStackBind, PAINT_GROUPS } from "../MaterialInspector/ChannelStack.js";
 import * as B from "./PaintModel.js";
 
 const Store = (() => { try { return globalThis.localStorage; } catch { return null; } })();
@@ -331,7 +331,7 @@ export function Mount(Root, Options = {}) {
       const Heads = [...Root.querySelectorAll(".mi-row-head")], At = Heads.indexOf(T);
       Heads[Math.max(0, Math.min(Heads.length - 1, At + (Event.key === "ArrowDown" ? 1 : -1)))]?.focus();
     }
-    if (Event.key === "Escape" && !Typing && S.Stack.Open && Root.contains(T)) { S.Stack.Open = null; Render(); }
+    if (Event.key === "Escape" && !Typing && (S.Stack.Open || S.Stack.Opened?.length) && Root.contains(T)) { StackFoldAll(S.Stack); Render(); }
   }
 
   // -------------------------------------------------------------------------------------------- hub

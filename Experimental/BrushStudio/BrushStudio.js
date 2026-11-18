@@ -284,8 +284,9 @@ export function Mount(Host, Options = {}) {
   function StackSig(Bind) {
     const S = StackOf(Bind);
     if (!S) return "";
-    const Full = S.L.Read(S.Flat), Ui = StackUiOf(Bind), Ch = Ui.Open && M.PAINT_CHANNEL[Ui.Open];
-    return `${Full.on.join(",")}~${Ui.Open}~${JSON.stringify(Ui.Folds)}~${Ui.Query}~${Ch ? VisibleCardFields(S.L.Card, Ch, Full.per[Ch.Id]).map((F) => F.K).join(",") : ""}`;
+    const Full = S.L.Read(S.Flat), Ui = StackUiOf(Bind), Opened = [...new Set([...(Ui.Opened || []), ...(Ui.Open ? [Ui.Open] : [])])];
+    const Cards = Opened.map((Id) => { const Ch = M.PAINT_CHANNEL[Id]; return Ch ? `${Id}:${VisibleCardFields(S.L.Card, Ch, Full.per[Ch.Id]).map((F) => F.K).join(",")}` : ""; }).join("|");
+    return `${Full.on.join(",")}~${Opened.join(",")}~${JSON.stringify(Ui.Folds)}~${Ui.Query}~${Cards}`;
   }
   const FieldSig = (F, Tool) => (F.T === "stack" ? StackSig(Tool ? `t|${Tool}|${F.K}` : `b|${F.K}`) : F.K === "@mat.stack" ? StackSig("b|mat.stack") : "");
   // After a slider drag: refresh row readouts and swatches without rebuilding the open card.

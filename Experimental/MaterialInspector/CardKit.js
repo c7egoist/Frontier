@@ -201,11 +201,13 @@ export function Download(Text, Name, Type) {
 export function Rebuild(Root, Html, Selector) {
   const Active = document.activeElement;
   const Focus = Active?.closest?.(Selector) ? Active.dataset.fid : null;
+  const FocusRow = Focus ? Active.closest("[data-row]")?.dataset.row : null;   // several rows can be open: fids repeat
   const Sel = Focus && Active.selectionStart != null ? [Active.selectionStart, Active.selectionEnd] : null;
   const Scroll = document.scrollingElement?.scrollTop ?? 0;
   Root.innerHTML = Html;
   if (Focus) {
-    const El = Root.querySelector(`[data-fid="${CSS.escape(Focus)}"]`);
+    const Scope = (FocusRow && Root.querySelector(`[data-row="${CSS.escape(FocusRow)}"]`)) || Root;
+    const El = Scope.querySelector(`[data-fid="${CSS.escape(Focus)}"]`) || Root.querySelector(`[data-fid="${CSS.escape(Focus)}"]`);
     if (El) { El.focus({ preventScroll: true }); if (Sel) try { El.setSelectionRange(...Sel); } catch { /* number inputs */ } }
   }
   if (document.scrollingElement) document.scrollingElement.scrollTop = Scroll;

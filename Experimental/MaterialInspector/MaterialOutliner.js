@@ -148,7 +148,7 @@ export function MountMaterialOutliner(Host, Hub) {
     if (Kind === "layer") {
       Outliner.State.Expanded[RowId] = true;
       if (S.LayerId !== A) Hub.SelectLayer(A);
-      else { S.Channel = null; Hub.Render(); }   // re-selecting the active stratum folds the channel editor away
+      else { Hub.FoldChannels(); Hub.Render(); }   // re-selecting the active stratum folds the channel editor away
     }
     else if (Kind === "ch") { Outliner.State.Expanded[`layer:${A}`] = true; Hub.OpenChannel(A, B); }
     else if (Kind === "grp") { Outliner.State.Expanded[RowId] = !(Host.querySelector(`[data-row="${CSS.escape(RowId)}"]`)?.getAttribute("aria-expanded") === "true"); Outliner.Render(); }

@@ -19,6 +19,7 @@ const SHORT_GEN = { "camouflage-smooth": "Camo soft", camouflage: "Camo pixel", 
 
 const S = {
   P: null, LayerId: null, Channel: null, Query: "",
+  Opened: new Set(),   // "<layer>:<channel>" rows expanded alongside the focused S.Channel — any number open at once
   Groups: {}, Folds: {}, AddOpen: false, Renaming: null,
   History: [], Future: [], Pending: null, Status: "", StatusTimer: 0,
   Scoped: false,   // docked in a host page (Texture Studio): keys only when typed inside the card
@@ -89,6 +90,7 @@ function Flash(Text) {
 
 function Select(Material) {
   S.P = Material;
+  S.Opened = new Set();
   S.LayerId = Layer().Identity;
   S.Channel = Layer().Channels.includes("colour") ? "colour" : Layer().Channels[0];
   S.History = []; S.Future = []; S.Pending = null; S.Query = ""; S.AddOpen = false; S.Groups = {};
@@ -107,8 +109,29 @@ function SwatchHtml(L, Key) {
   return `<span class="mi-swatch scalar" style="--fill:${Pct(V, Spec.Minimum, Spec.Maximum)}"></span>`;
 }
 
+// Rows open independently. S.Channel is the row being worked in (edits target it); S.Opened keeps every other open row.
+const OpenId = (Key) => `${S.LayerId}:${Key}`;
+const RowOpen = (Key) => S.Channel === Key || S.Opened.has(OpenId(Key));
+function Remember() { if (S.Channel) S.Opened.add(OpenId(S.Channel)); }
+function ToggleChannel(Key) {
+  if (RowOpen(Key)) {
+    S.Opened.delete(OpenId(Key));
+    if (S.Channel === Key) S.Channel = Layer().Channels.filter((K) => S.Opened.has(OpenId(K))).at(-1) || null;
+  } else { Remember(); S.Opened.add(OpenId(Key)); S.Channel = Key; }
+  S.AddOpen = false;
+}
+function FoldChannels() { for (const K of Layer().Channels) S.Opened.delete(OpenId(K)); S.Channel = null; }
+// Pointer / focus inside an open row makes it the row edits go to (capture phase: runs before the click / input).
+let Restoring = false;   // Render puts focus back: that focusin is not the user picking a row
+function TrackRow(Event) {
+  if (Restoring) return;
+  const Key = Event.target.closest?.("[data-row]")?.dataset.row;
+  if (!Key || Key === S.Channel || !RowOpen(Key) || !Layer().Channels.includes(Key)) return;
+  Remember(); S.Channel = Key;
+}
+
 function RowHead(L, Key) {
-  const Spec = M.CHANNEL[Key], R = M.ChannelReadout(S.P, L, Key), Open = S.Channel === Key;
+  const Spec = M.CHANNEL[Key], R = M.ChannelReadout(S.P, L, Key), Open = RowOpen(Key);
   const Scrub = R.Kind === "value" && Spec.Type === "scalar";
   return `<button type="button" class="mi-row-head" data-act="open" data-ch="${Key}" data-fid="row:${Key}" aria-expanded="${Open}">
       ${SwatchHtml(L, Key)}
@@ -124,10 +147,10 @@ function GroupsHtml(L) {
   return ChannelStack({
     Id: L.Identity, Bare: true, Switch: false, FlatBelow: 8, Groups: M.GROUPS, Acts: { Group: "group" },
     Channels: L.Channels.map((K) => ({ Id: K, Label: M.CHANNEL[K].Caption, Hint: M.CHANNEL[K].Hint, Group: M.CHANNEL[K].Group })),
-    Ui: { Open: S.Channel, Query: S.Query, Folds: Object.fromEntries(M.GROUPS.filter((G) => `${L.Identity}:${G}` in S.Groups).map((G) => [G, S.Groups[`${L.Identity}:${G}`]])) },
+    Ui: { Open: S.Channel, Opened: L.Channels.filter(RowOpen), Query: S.Query, Folds: Object.fromEntries(M.GROUPS.filter((G) => `${L.Identity}:${G}` in S.Groups).map((G) => [G, S.Groups[`${L.Identity}:${G}`]])) },
     Empty: `No channel on this stratum matches “${S.Query}”.`,
     Swatch: (C) => SwatchHtml(L, C.Id), Head: (C) => RowHead(L, C.Id), Editor: (C) => EditorHtml(L, C.Id),
-    DefaultOpen: (G, Ids) => G === "Core" || Authored(Ids) > 0 || Ids.includes(S.Channel),
+    DefaultOpen: (G, Ids) => G === "Core" || Authored(Ids) > 0 || Ids.some(RowOpen),
     GroupBadge: (G, Ids) => { const N = Authored(Ids); return N ? `<span class="mi-auth" title="${N} channel${N > 1 ? "s" : ""} driven by a field, ramp or image">${icon("field", 10)}${N}</span>` : ""; },
   });
 }
@@ -360,13 +383,17 @@ function DrawPreviews() {
 // ------------------------------------------------------------------------------------------------ render
 function Render() {
   const Focus = document.activeElement?.closest?.(".mi-card") ? document.activeElement.dataset.fid : null;
+  const FocusRow = Focus ? document.activeElement.closest("[data-row]")?.dataset.row : null;   // fids repeat across open rows
   const Sel = Focus && document.activeElement.selectionStart != null ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
   const Scroll = document.scrollingElement?.scrollTop ?? 0;
   Root.innerHTML = CardHtml();
   DrawPreviews();
   if (Focus) {
-    const El = Root.querySelector(`[data-fid="${CSS.escape(Focus)}"]`);
+    const Scope = (FocusRow && Root.querySelector(`[data-row="${CSS.escape(FocusRow)}"]`)) || Root;
+    const El = Scope.querySelector(`[data-fid="${CSS.escape(Focus)}"]`);
+    Restoring = true;
     if (El) { El.focus({ preventScroll: true }); if (Sel) try { El.setSelectionRange(...Sel); } catch { /* number inputs */ } }
+    Restoring = false;
   }
   if (document.scrollingElement) document.scrollingElement.scrollTop = Scroll;
   for (const Fn of Peers) Fn(false);
@@ -448,7 +475,7 @@ function OnClick(Event) {
   if (["search", "name", "rename", "library", "import", "texture-file"].includes(Act)) return;
   if (Act === "open") {
     if (Event.target.closest("[data-scrub]")?.dataset.dragged === "1") return;
-    SetChannel(S.Channel === El.dataset.ch ? null : El.dataset.ch);
+    ToggleChannel(El.dataset.ch);
   } else if (Act === "group") S.Groups[El.dataset.groupId] = El.dataset.open !== "true";
   else if (Act === "layer") {
     if (Event.detail >= 2) { S.Renaming = El.dataset.layer; Render(); Root.querySelector(".mi-rename")?.select(); return; }
@@ -493,6 +520,7 @@ function OnClick(Event) {
   } else if (Act === "remove-channel") {
     const Key = S.Channel, Rows = VisibleRows(), At = Rows.indexOf(Key);
     Apply(M.RemoveChannel(S.P, L.Identity, Key));
+    S.Opened.delete(OpenId(Key));
     S.Channel = Rows.filter((K) => K !== Key)[Math.max(0, At - 1)] || Layer().Channels[0];
     Flash(`${M.CHANNEL[Key].Caption} removed from ${L.Name}`);
   } else if (Act === "add-toggle") S.AddOpen = !S.AddOpen;
@@ -518,7 +546,7 @@ function OnClick(Event) {
     return;
   }
   Render();
-  if (Act === "open" && S.Channel) Root.querySelector(`[data-fid="row:${S.Channel}"]`)?.focus({ preventScroll: true });
+  if (Act === "open" && S.Channel) { Restoring = true; Root.querySelector(`[data-fid="row:${S.Channel}"]`)?.focus({ preventScroll: true }); Restoring = false; }
 }
 
 function Download(Text, Name, Type) {
@@ -616,7 +644,7 @@ function OnKey(Event) {
   }
   if (Event.key === "Escape" && !Typing) {
     if (S.AddOpen) S.AddOpen = false;
-    else if (S.Channel) S.Channel = null;
+    else if (S.Channel || Layer().Channels.some(RowOpen)) FoldChannels();
     else return;
     Render();
   }
@@ -686,6 +714,8 @@ export function Mount(Host, Options = {}) {
   Root.addEventListener("click", OnClick);
   Root.addEventListener("input", OnInput);
   Root.addEventListener("change", OnChange);
+  Root.addEventListener("pointerdown", TrackRow, true);
+  Root.addEventListener("focusin", TrackRow, true);
   Root.addEventListener("pointerdown", OnPointerDown);
   Root.addEventListener("toggle", OnToggle, true);
   Root.addEventListener("focusout", (E) => { if (E.target.dataset?.act === "rename") FinishRename(E.target); });
@@ -707,7 +737,7 @@ export function Mount(Host, Options = {}) {
 // What an outliner (or a host) drives the card through.  Everything mutates via Apply → Render, so undo, storage and the
 // card stay in step whichever view made the change.
 const Hub = {
-  State: S, Model: M, Render, Apply, Settle, Flash, Step, Layer, SwatchHtml,
+  State: S, Model: M, Render, Apply, Settle, Flash, Step, Layer, SwatchHtml, FoldChannels, RowOpen,
   Subscribe(Fn) { Peers.add(Fn); return () => Peers.delete(Fn); },
   Load(Id) { Settle(); Select(LoadStored(Id)); Render(); Flash(`Loaded ${S.P.name}`); },
   // Host hand-off: show a material the host already owns (Texture Studio's live params). History restarts; nothing is
@@ -734,8 +764,10 @@ const Hub = {
     }
     Render();
   },
+  // Opens beside whatever is already open (rows are independent); Key becomes the row edits go to.
   OpenChannel(LayerId, Key) {
-    S.LayerId = LayerId; S.Query = ""; SetChannel(Key);
+    Remember();
+    S.LayerId = LayerId; S.Query = ""; SetChannel(Key); S.Opened.add(OpenId(Key));
     S.Groups[`${LayerId}:${M.CHANNEL[Key].Group}`] = true;
     Render();
     Root.querySelector(`[data-fid="row:${CSS.escape(Key)}"]`)?.scrollIntoView?.({ block: "nearest" });
