@@ -470,6 +470,15 @@ await suite("7. Full TextureStudio Shell & All 5 Workspaces Mount & Switch Clean
           else if (a && typeof a === "object") { a.parentNode = el; el.children.push(a); }
         }
       },
+      appendChild(a) { el.append(a); return a; },
+      insertBefore(a, ref) {
+        if (!a || typeof a !== "object") return a;
+        a.parentNode?.children && (a.parentNode.children = a.parentNode.children.filter((c) => c !== a));
+        a.parentNode = el;
+        const at = el.children.indexOf(ref);
+        if (at < 0) el.children.push(a); else el.children.splice(at, 0, a);
+        return a;
+      },
       prepend(...args) {
         for (let i = args.length - 1; i >= 0; i--) {
           const a = args[i];
@@ -2096,12 +2105,22 @@ await suite("19. Look-Dev Polish: Right-Tabbed Strata, Seated Cloth/Pedestal + G
   // 19a. Material Workspace: NOTHING on the left + [Properties | Layer Stack] tabs in right Material Inspector
   api.switchWorkspace("material");
   const grid = globalThis.document.querySelector(".studio-grid");
-  assert(grid?.classList.contains("studio-grid-2col"), "Material Workspace must use .studio-grid-2col with no left sidebar");
+  // CardDock seats the Material Outliner card left and the Material Inspector card right (outliner · viewport · inspector);
+  // the native inspector stays mounted, hidden (.cd-native), so its structure is still checked below.
+  const docked = grid?.classList.contains("cd-docked");
   const cols = grid ? grid.children.filter((c) => c.classList.contains("studio-column")) : [];
-  assert.equal(cols.length, 2, `Material Workspace must have exactly 2 columns (viewport + right inspector), got ${cols.length}`);
-  assert(cols[0].classList.contains("viewport-column"), "First column in Material Workspace must be the full-bleed viewport (no left panel)");
+  if (docked) {
+    assert.equal(cols.length, 3, `Docked Material Workspace must have 3 columns (outliner card + viewport + inspector card), got ${cols.length}`);
+    assert(cols[0].classList.contains("cd-left") && cols[0].querySelector(".cd-material-outliner"), "Docked Material Workspace: Material Outliner card on the left");
+    assert(cols[1].classList.contains("viewport-column"), "Docked Material Workspace: viewport in the middle");
+    assert(cols[2].classList.contains("cd-right") && cols[2].querySelector(".cd-material"), "Docked Material Workspace: Material Inspector card on the right");
+  } else {
+    assert(grid?.classList.contains("studio-grid-2col"), "Material Workspace must use .studio-grid-2col with no left sidebar");
+    assert.equal(cols.length, 2, `Material Workspace must have exactly 2 columns (viewport + right inspector), got ${cols.length}`);
+    assert(cols[0].classList.contains("viewport-column"), "First column in Material Workspace must be the full-bleed viewport (no left panel)");
+  }
 
-  const rightInspector = cols[1];
+  const rightInspector = cols[cols.length - 1];
   const summaryHost = rightInspector.querySelector(".mw-inspector-summary");
   const tabsHost = rightInspector.querySelector(".mw-inspector-tabs");
   const scrollInner = rightInspector.querySelector(".panel-scroll .panel-scroll-inner");

@@ -9,6 +9,15 @@ export function animatedVfxGLSL() {
   uniform float uTime;
   uniform float uAnimSpeed;
 
+  // VFX outputs live at file scope (like surfaceKernels' engEmitColor): the paint overlay wraps the colour chunk in its own
+  // block, and the roughness / metalness / emissive chunks read these after it closes.
+  vec3 vfxEmitColor = vec3(0.0);
+  float vfxEmitMask = 0.0;
+  float vfxRoughOverride = -1.0;
+  float vfxMetalOverride = -1.0;
+  float vfxDiscardMask = 0.0;
+  float vfxAlphaOverride = -1.0;
+
   float vfxHash21(vec2 p){
     p = fract(p * vec2(123.34, 456.21));
     p += dot(p, p + 45.32);
@@ -114,12 +123,12 @@ export function animatedVfxGLSL() {
 
 export function animatedVfxColor() {
   return `
-    vec3 vfxEmitColor = vec3(0.0);
-    float vfxEmitMask = 0.0;
-    float vfxRoughOverride = -1.0;
-    float vfxMetalOverride = -1.0;
-    float vfxDiscardMask = 0.0;
-    float vfxAlphaOverride = -1.0;
+    vfxEmitColor = vec3(0.0);
+    vfxEmitMask = 0.0;
+    vfxRoughOverride = -1.0;
+    vfxMetalOverride = -1.0;
+    vfxDiscardMask = 0.0;
+    vfxAlphaOverride = -1.0;
     #if uType >= 47 && uType <= 59
     {
       float vT = uTime * max(0.05, uAnimSpeed);

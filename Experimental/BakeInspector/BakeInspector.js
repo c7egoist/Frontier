@@ -17,7 +17,7 @@
 
 import * as B from "./BakeModel.js";
 import { icon } from "../MaterialInspector/Icons.js";
-import { Esc, Knob, SwitchRow, Segments, Dropdown, StatTile, SyncSiblings, Download, Rebuild, History } from "../MaterialInspector/CardKit.js";
+import { KeyReaches, Esc, Knob, SwitchRow, Segments, Dropdown, StatTile, SyncSiblings, Download, Rebuild, History } from "../MaterialInspector/CardKit.js";
 
 const S = {
   P: null, Open: null, Part: null, Groups: {}, Folds: {}, Status: "", StatusTimer: 0,
@@ -565,6 +565,7 @@ export function Mount(El, Options = {}) {
   Root = El;
   Host = Options;
   S.Docked = !!Options.docked;
+  S.Scoped = !!Options.scoped;
   let Stored = null;
   try { Stored = Store?.getItem(B.STORAGE_KEY); } catch { Stored = null; }
   try { S.P = Stored ? B.Normalise(JSON.parse(Stored)) : B.Create(); } catch { S.P = B.Create(); }
@@ -572,7 +573,7 @@ export function Mount(El, Options = {}) {
   Root.addEventListener("input", OnInput);
   Root.addEventListener("change", OnChange);
   Root.addEventListener("toggle", (E) => { const F = E.target.closest?.("[data-fold]"); if (F) S.Folds[F.dataset.fold] = F.open; }, true);
-  document.addEventListener("keydown", OnKey);
+  document.addEventListener("keydown", (E) => { if (KeyReaches(E, Root, S.Scoped)) OnKey(E); });
   if (S.Docked && !S.Open) S.Open = S.P.selected[0] || null;
   if (S.P.set) S.Part = B.Ordered(S.P)[0]?.id || null;
   Render();

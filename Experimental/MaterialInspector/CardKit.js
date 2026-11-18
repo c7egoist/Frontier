@@ -212,6 +212,10 @@ export function Rebuild(Root, Html, Selector) {
 }
 
 // JSON-snapshot undo history with live-edit coalescing (a drag is one step).
+// Docked hosts (Texture Studio) carry several cards on one page: a scoped card only hears keys typed inside it, and a
+// detached card (its workspace is not showing) hears nothing.  Standalone pages are unscoped and behave as before.
+export const KeyReaches = (Event, Root, Scoped) => !!Root?.isConnected && (!Scoped || Root.contains(Event.target));
+
 export function History(Limit = 80) {
   const H = { Past: [], Future: [], Pending: null };
   H.Begin = (Current) => { if (H.Pending === null) H.Pending = JSON.stringify(Current); };

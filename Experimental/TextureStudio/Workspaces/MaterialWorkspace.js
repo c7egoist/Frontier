@@ -190,6 +190,11 @@ export function mountMaterialWorkspace(root, appBridge) {
 
   let dragLayerId = null;
 
+  // Docked cards (CardDock.js) hear about params the workspace itself changed: library picks, asset drops, tile
+  // patterns. Params the card pushes in (assignParams) are not echoed back.
+  const paramListeners = new Set();
+  const announceParams = () => { for (const fn of paramListeners) fn(state.params); };
+
   function ensureAuthoring(params) {
     if (!params.Authoring) {
       params.Authoring = DeclareMaterialAuthoring(params);
@@ -2037,6 +2042,7 @@ export function mountMaterialWorkspace(root, appBridge) {
 
     CloseScope(inspectorScope);
     Broadcast();
+    announceParams();
   }
 
   // ----------------------------------------------------------------- EVENTS, DROP & LOOP
@@ -2222,6 +2228,23 @@ export function mountMaterialWorkspace(root, appBridge) {
       return MATERIAL_CATALOG.filter((m) => m.category === cat).map((m) => ({ id: m.id, name: m.name, type: m.type }));
     },
     getParams: () => state.params,
+    // CardDock: the grid and columns the cards are seated in, and the two-way params hand-off.
+    dock: { grid, centerCol, rightCol },
+    watchParams(fn) { paramListeners.add(fn); return () => paramListeners.delete(fn); },
+    assignParams(next) {
+      if (disposed || !next) return false;
+      let copy;
+      try { copy = structuredClone(next); } catch { copy = JSON.parse(JSON.stringify(next)); }
+      if (state.params.pattern) {
+        copy.pattern = state.params.pattern;
+        if (state.params.patternChannelMask) copy.patternChannelMask = state.params.patternChannelMask;
+      }
+      state.params = copy;
+      if (copy.id) state.selectedId = copy.id;
+      syncMaterialLive();
+      syncProposedBar();
+      return true;
+    },
     getSnapshot: () => ({
       id: state.params.id,
       name: state.params.name,

@@ -222,6 +222,12 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   const undoStack = [];
   const redoStack = [];
 
+  // Docked cards (CardDock.js) hear about documents the workspace itself changed (stage edits, starters, drops); a
+  // document the card pushes in (assignDocument) is not echoed back.
+  const docListeners = new Set();
+  let assigningDoc = false;
+  const announceDoc = () => { if (!assigningDoc) for (const fn of docListeners) fn(state.doc, mode); };
+
   const grid = Construct("div", "studio-grid");
 
   // ----------------------------------------------------------------- LEFT: FULL DESIGN LAYER STACK + LIVE THUMBNAILS
@@ -1090,6 +1096,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     headerUI.setResolution(state.resolution);
     if (reRenderLeft) renderLeftColumn();
     Broadcast();
+    announceDoc();
   }
 
   // ----------------------------------------------------------------- LEFT LAYER STACK (FULL DESIGN + LIVE PREVIEWS)
@@ -2860,6 +2867,23 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   return {
     name: isPattern ? "Pattern" : "Stamp",
     applyAsset,
+    // CardDock: the grid and columns the cards are seated in, and the two-way document hand-off.
+    dock: { grid, leftCol, centerCol, rightCol },
+    currentDocument: () => state.doc,
+    watchDocument(fn) { docListeners.add(fn); return () => docListeners.delete(fn); },
+    assignDocument(next) {
+      if (disposed || !next || !Array.isArray(next.layers)) return false;
+      let copy;
+      try { copy = structuredClone(next); } catch { copy = JSON.parse(JSON.stringify(next)); }
+      assigningDoc = true;
+      try {
+        state.doc = copy;
+        evaluateAndRender(false);
+      } finally {
+        assigningDoc = false;
+      }
+      return true;
+    },
     getSnapshot: () => {
       const sel = getSelectedLayer();
       return {

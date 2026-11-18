@@ -1004,7 +1004,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   const paintToolReadout = Construct(
     "span",
     "se-sel-count",
-    `${TOOL_LABELS[state.brush.tool] || "Brush"} · ${Math.round(state.brush.size || 24)}px`,
+    `${TOOL_LABELS[state.brush.tool] || "Brush"} · ${Math.round((state.brush.size || 0.14) * 100)}px`,
   );
   paintStageFooter.append(paintStageHints, paintToolReadout);
 
@@ -3660,19 +3660,29 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     e.preventDefault();
     const moved = rightDownPos3D ? Math.hypot(e.clientX - rightDownPos3D.x, e.clientY - rightDownPos3D.y) : 0;
     rightDownPos3D = null;
-    if (moved < 5) openToolPopup(e.clientX, e.clientY);
+    if (moved < 5) openBrushMenu(e.clientX, e.clientY);
   }, { capture: true });
   pane2D.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     const moved = rightDownPos2D ? Math.hypot(e.clientX - rightDownPos2D.x, e.clientY - rightDownPos2D.y) : 0;
     rightDownPos2D = null;
-    if (moved < 5) openToolPopup(e.clientX, e.clientY);
+    if (moved < 5) openBrushMenu(e.clientX, e.clientY);
   }, { capture: true });
 
   rightCol.addEventListener("contextmenu", (e) => {
     if (["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(e.target?.tagName)) return;
     e.preventDefault();
-    openToolPopup(e.clientX, e.clientY);
+    openBrushMenu(e.clientX, e.clientY);
+  });
+
+  // Right-click a tool button: select it, then open its menu (Brush Studio when docked, the tool popup otherwise).
+  headerUI.toolsBar.addEventListener("contextmenu", (e) => {
+    const btn = e.target.closest?.("[data-tool-id]");
+    if (!btn || !TOOL_LABELS[btn.dataset.toolId]) return;
+    e.preventDefault();
+    if (state.brush.tool !== btn.dataset.toolId) selectTool(btn.dataset.toolId);
+    const box = btn.getBoundingClientRect();
+    openBrushMenu(box.left, box.bottom + 8, { anchor: btn });
   });
 
   // ----------------------------------------------------------------- LAYER ORDERING & LEFT COLUMN
@@ -3706,8 +3716,21 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     return true;
   }
 
+  // CardDock replaces the tool popup with the Brush Studio context menu; without it the native popup opens.
+  let brushMenuHook = null;
+  function openBrushMenu(clientX, clientY, extra = {}) {
+    if (brushMenuHook) {
+      if (activeToolPopup) closeToolPopup();
+      brushMenuHook(clientX, clientY, { tool: state.brush.tool, ...extra });
+      return;
+    }
+    openToolPopup(clientX, clientY);
+  }
+  const toolListeners = new Set();
+
   function selectTool(id) {
     state.brush.tool = id;
+    for (const fn of toolListeners) fn(id);
     headerUI.setActiveTool(id);
     paintToolReadout.textContent = `${TOOL_LABELS[id] || "Brush"} · ${Math.round((state.brush.size || 0.14) * 100)}px`;
     rebuildCurve3DVisual();
@@ -3864,7 +3887,71 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     return copy;
   }
 
+  // CardDock: the Layer Inspector / Paint Outliner cards hear about every layer change the workspace makes; a document the
+  // card pushes in (assignLayers) is not echoed back.
+  const layerListeners = new Set();
+  let assigningLayers = false;
+  let layerAnnounce = 0;
+  function announceLayers() {
+    if (assigningLayers || !layerListeners.size || layerAnnounce) return;
+    layerAnnounce = requestAnimationFrame(() => { layerAnnounce = 0; if (!disposed) for (const fn of layerListeners) fn(state.doc); });
+  }
+
+  // Card layer document (PaintModel: TextureStudio layers without texels) → engine layers. A layer the workspace already
+  // holds keeps its pixels, mask texels and stamp rasters and takes the card's properties; a new id is built at full
+  // resolution; a missing id is removed; the order follows the card.
+  const CARD_LAYER_KEYS = ["name", "parentId", "visible", "locked", "blend", "opacity", "partFilter", "channels", "channelOpacity", "channelBlends", "extValues", "fill", "material", "generator"];
+  function assignLayers(next) {
+    if (disposed || !next || !Array.isArray(next.layers) || !next.layers.length) return false;
+    const held = new Map(state.doc.layers.map((l) => [l.id, l]));
+    const layers = [];
+    for (const src of next.layers) {
+      let layer = held.get(src.id);
+      if (!layer || layer.kind !== src.kind) {
+        layer = createPaintLayer(src.kind, { ...src, res, pixels: undefined, mask: undefined, stamps: src.kind === "decal" || src.kind === "text" ? src.stamps : undefined });
+        layer.id = src.id;
+        if (gpuPaint.isActive && layer.pixels) gpuPaint.syncCpuPixelsToLayerGpu(layer);
+      } else {
+        for (const key of CARD_LAYER_KEYS) {
+          if (src[key] === undefined) continue;
+          layer[key] = src[key] && typeof src[key] === "object" ? structuredClone(src[key]) : src[key];
+        }
+        if (layer.kind === "text" && src.text && JSON.stringify(src.text) !== JSON.stringify(layer.text)) {
+          layer.text = structuredClone(src.text);
+          for (const st of layer.stamps || []) { st.text = { ...layer.text }; st.stampData = rasterizeTextStampMaps(st.text); }
+        }
+      }
+      if (!src.mask) {
+        layer.mask = null;
+      } else {
+        if (!layer.mask) {
+          layer.mask = { pixels: new Uint8ClampedArray(res * res).fill(255), generatorThreshold: 0.48, generatorSoftness: 0.16, generatorNoiseScale: 6.0, generatorNoiseMix: 0.25, featherRadius: 0 };
+          if (gpuPaint.isActive) gpuPaint.fillMaskGpu(layer, 1);
+        }
+        layer.mask.enabled = src.mask.enabled !== false;
+        layer.mask.invert = !!src.mask.invert;
+        layer.mask.opacity = src.mask.opacity ?? 1;
+        layer.mask.generatorPreset = src.mask.preset || src.mask.generatorPreset || "none";
+      }
+      layers.push(layer);
+    }
+    assigningLayers = true;
+    try {
+      state.doc.layers = layers;
+      if (next.name) state.doc.name = next.name;
+      state.doc.selectedLayerId = layers.some((l) => l.id === next.selectedLayerId) ? next.selectedLayerId : layers.at(-1).id;
+      invalidateAllLayerThumbs();
+      renderLeftColumn();
+      refreshComposite();
+      Broadcast();
+    } finally {
+      assigningLayers = false;
+    }
+    return true;
+  }
+
   function renderLeftColumn() {
+    announceLayers();
     const meshLabel = PAINT_MESH_LIST.find((m) => m.id === state.meshId)?.label || state.meshId;
 
     layerStackUI.render({
@@ -5794,10 +5881,33 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     });
   }
 
+  // CardDock: brush settings from the Brush Studio card (already mapped to this workspace's brush fields).
+  function assignBrush(patch) {
+    if (disposed || !patch) return false;
+    if (patch.tool && patch.tool !== state.brush.tool && TOOL_LABELS[patch.tool]) selectTool(patch.tool);
+    const { tool, jitter, colourDynamics, ...flat } = patch;
+    Object.assign(state.brush, flat);
+    if (jitter) state.brush.jitter = { ...state.brush.jitter, ...jitter };
+    if (colourDynamics) state.brush.colourDynamics = { ...state.brush.colourDynamics, ...colourDynamics };
+    if (flat.size !== undefined) state.brush.pixelRadius = Math.round(state.brush.size * 110);
+    paintToolReadout.textContent = `${TOOL_LABELS[state.brush.tool] || "Brush"} · ${Math.round((state.brush.size || 0.14) * 100)}px`;
+    Broadcast();
+    return true;
+  }
+
   return {
     name: "Texture Paint",
     applyAsset,
     applyImportedMesh,
+    dock: { grid, leftCol, centerCol, rightCol },
+    currentDocument: () => state.doc,
+    watchLayers(fn) { layerListeners.add(fn); return () => layerListeners.delete(fn); },
+    assignLayers,
+    currentBrush: () => state.brush,
+    assignBrush,
+    selectTool,
+    watchTool(fn) { toolListeners.add(fn); return () => toolListeners.delete(fn); },
+    useBrushMenu(fn) { brushMenuHook = typeof fn === "function" ? fn : null; },
     applyBridgedMaterial(matParams) {
       const l = createPaintLayer("material", createMaterialLayerOverridesFromPreset(matParams, res));
       state.doc.layers.push(l);

@@ -10,11 +10,11 @@
 //
 // The card edits a document (PaintModel.js, built on TextureStudio's createPaintLayer); it draws no texels.
 //
-//   Mount(El, { docked }) → Inspector { State, Model, History, Render, Apply, Settle, Flash, Step, Subscribe(Fn), OpenLayer(Id),
+//   Mount(El, { docked, scoped, store }) → Inspector { State, Model, History, Render, Apply, Settle, Flash, Step, Subscribe(Fn), OpenLayer(Id),
 //                                 Add(Type), Duplicate(Id), Remove(Id), Move(Drag, Target, Where), Rename(Id, Name) }
 
 import { icon } from "../MaterialInspector/Icons.js";
-import { Esc, Knob, ColourField, Toggle, SwitchRow, Segments, Dropdown, StatTile, SyncSiblings, Download, Rebuild, History } from "../MaterialInspector/CardKit.js";
+import { KeyReaches, Esc, Knob, ColourField, Toggle, SwitchRow, Segments, Dropdown, StatTile, SyncSiblings, Download, Rebuild, History } from "../MaterialInspector/CardKit.js";
 import { ChannelStack, StackAction, StackUi, ParseStackBind, PAINT_GROUPS } from "../MaterialInspector/ChannelStack.js";
 import * as B from "./PaintModel.js";
 
@@ -27,7 +27,7 @@ export function Mount(Root, Options = {}) {
   const Notify = (Live) => { for (const Fn of Peers) Fn(Live); };
 
   // -------------------------------------------------------------------------------------------- plumbing
-  const Save = () => { try { Store?.setItem(B.STORAGE_KEY, JSON.stringify(B.Serialise(S.P))); } catch { /* private mode / quota */ } };
+  const Save = () => { if (Options.store === false) return; try { Store?.setItem(B.STORAGE_KEY, JSON.stringify(B.Serialise(S.P))); } catch { /* private mode / quota */ } };
   function Apply(Next, Live = false) { if (!Next || Next === S.P) return; H.Begin(S.P); S.P = Next; if (!Live) Settle(); }
   function Settle() { if (H.Settle(S.P)) Save(); }
   function Step(Back) {
@@ -350,6 +350,16 @@ export function Mount(Root, Options = {}) {
     Rename(Id, Name) { Apply(B.Rename(S.P, Id, Name)); Render(); },
     Edit(Id, Patch) { Apply(B.Edit(S.P, Id, Patch)); Render(); },
     Stack: (Id) => B.LayerStack(B.Layer(S.P, Id)),
+    // Host hand-off: show the host's live layer document (Texture Studio's paint engine; texels stay with the host).
+    Adopt(Doc) {
+      Settle();
+      let Next;
+      try { Next = B.Normalise(B.Serialise(Doc)); } catch { return false; }
+      S.P = Next;
+      H.Clear?.();
+      Render();
+      return true;
+    },
   };
 
   // -------------------------------------------------------------------------------------------- boot
@@ -361,7 +371,7 @@ export function Mount(Root, Options = {}) {
   Root.addEventListener("input", OnInput);
   Root.addEventListener("change", OnChange);
   Root.addEventListener("toggle", (E) => { const F = E.target.closest?.("[data-fold]"); if (F) S.Folds[F.dataset.fold] = F.open; }, true);
-  document.addEventListener("keydown", OnKey);
+  document.addEventListener("keydown", (E) => { if (KeyReaches(E, Root, !!Options.scoped)) OnKey(E); });
   Render();
   return Inspector;
 }

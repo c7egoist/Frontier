@@ -15,6 +15,7 @@ import { mountBakingWorkspace } from "./Workspaces/BakingWorkspace.js";
 import { Toast } from "./StudioControls.js";
 import { SetActiveColourSlot, SetFallbackColourSlot } from "./ColourCodex.js";
 import { LoadUvBridgeTransfer } from "../Shared/UvTextureBridge.js";
+import { DockCards, UndockCards, DockedCard } from "./CardDock.js";
 
 const WORKSPACES = [
   { id: "material", label: "Material", mount: mountMaterialWorkspace },
@@ -185,6 +186,7 @@ function activateWorkspace(id) {
   if (activeId === target.id && activeWorkspace) return;
 
   if (activeWorkspace) {
+    UndockCards();
     try {
       activeWorkspace.dispose?.();
     } catch (e) {
@@ -207,6 +209,8 @@ function activateWorkspace(id) {
   mainMount.innerHTML = "";
   try {
     activeWorkspace = target.mount(mainMount, appBridge);
+    // Project Zero cards replace the native side panels (outliner · viewport · inspector); see CardDock.js.
+    DockCards(target.id, activeWorkspace, appBridge);
   } catch (err) {
     console.error(`Failed to mount workspace ${target.label}:`, err);
     mainMount.innerHTML = `<div style="padding:28px;color:#ff8b78;font-family:monospace;">Workspace "${target.label}" error: ${err?.message || err}</div>`;
@@ -242,6 +246,9 @@ window.__frontierTextureStudio = {
   applyImportedMesh: (transfer, targetWs) => appBridge.applyImportedMesh(transfer, targetWs),
   sendPatternToMaterial: (pat) => appBridge.sendPatternToMaterial(pat),
   notify: (msg) => Toast(msg),
+  // CardDock: the docked card hubs ("material", "artwork", "bake", "paint", "brush") and the active workspace api.
+  card: (key) => DockedCard(key),
+  workspaceApi: () => activeWorkspace,
 };
 
 const initialHash = window.location.hash.replace(/^#/, "").toLowerCase();

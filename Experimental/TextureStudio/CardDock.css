@@ -1,0 +1,45 @@
+/* CardDock.css — seats the Project Zero cards (Material, Pattern / Stamp, Map Baking, Paint layers, Brush Studio) in
+   Texture Studio's workspace grid. The cards bring their own look (../MaterialInspector/MaterialInspector.css and
+   friends, scoped under .pz-scope); this file only places them and settles the two class names both sheets use. */
+
+/* the grid: outliner card · viewport · inspector card */
+.studio-grid.cd-docked { grid-template-columns: 316px minmax(0, 1fr) 420px; }
+@media (max-width: 1440px) { .studio-grid.cd-docked { grid-template-columns: 286px minmax(0, 1fr) 380px; } }
+@media (max-width: 1180px) { .studio-grid.cd-docked { grid-template-columns: 250px minmax(0, 1fr) 340px; } }
+.studio-grid.cd-docked.mw-fullscreen { grid-template-columns: minmax(0, 1fr) !important; }
+.studio-grid.cd-docked.mw-fullscreen > .cd-column { display: none; }
+
+/* the native side panels stay mounted (their code still runs) but out of sight */
+.cd-native { display: none !important; }
+
+/* a column that holds a card: no panel chrome of its own, the card is the panel */
+.studio-column.cd-column { background: transparent; border: 0; border-radius: 22px; overflow: hidden auto; scrollbar-width: thin; scrollbar-color: #242424 transparent; }
+.cd-column > .cd-host { width: 100%; max-width: none; min-height: 100%; }
+.cd-column > .cd-host > .mi-card { min-height: 100%; box-shadow: none; }
+.cd-column.cd-left { overflow: hidden; display: flex; }
+.cd-column.cd-left > .cd-host { display: flex; min-height: 0; height: 100%; }
+.cd-host.ol-host { position: static; flex: 1 1 auto; width: 100%; max-height: none; top: auto; }
+.cd-host.ol-host > .ol-card { box-shadow: none; }
+
+/* both sheets define these two: inside a card the card's version wins */
+.pz-scope .icon-btn { border: 1px solid transparent; }
+.pz-scope .icon-btn:hover:not(:disabled) { background: #2a2a2a; border-color: transparent; color: #eee; }
+
+/* Brush Studio as the right-click context menu of the brush tools (Texture Paint) */
+.cd-brush-menu { position: fixed; z-index: 90; width: min(860px, calc(100vw - 24px)); height: min(640px, calc(100vh - 24px)); display: flex; flex-direction: column; border-radius: 24px; background: #101010f2; border: 1px solid #2c2c2c; box-shadow: 0 30px 80px #000b; backdrop-filter: blur(10px); overflow: hidden; animation: cd-rise 0.16s cubic-bezier(0.16, 1, 0.3, 1); }
+.cd-brush-menu[hidden] { display: none; }
+@keyframes cd-rise { from { opacity: 0; transform: translateY(6px) scale(0.985); } }
+.cd-brush-bar { display: flex; align-items: center; gap: 10px; padding: 10px 12px 8px 16px; border-bottom: 1px solid #222; flex: none; }
+.cd-brush-bar b { font-weight: 400; font-size: 13px; }
+.cd-brush-bar small { color: #777; }
+.cd-brush-bar .cd-spacer { flex: 1; }
+.cd-brush-bar .cd-live { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; color: #9a9a9a; }
+.cd-brush-bar .cd-live i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
+.cd-brush-body { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+/* inside the menu the studio drops its drawing pad viewport: library · settings */
+.cd-brush-body .bs-shell { height: 100%; min-height: 0; display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 10px; padding: 10px; }
+.cd-brush-body .bs-view { display: none !important; }
+.cd-brush-body .bs-lib, .cd-brush-body .bs-studio { min-height: 0; max-height: none; height: 100%; overflow: auto; box-shadow: none; }
+.cd-brush-title { font-size: 13px; font-weight: 400; letter-spacing: 0.2px; }
+.cd-brush-tool { flex: 1; font-family: "DM Mono", ui-monospace, monospace; font-size: 9.5px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--amber, #ffb238); }
+.cd-brush-close { width: 28px; height: 28px; border-radius: 50%; font-size: 17px; line-height: 1; color: #9a9a9a; background: #1c1c1c; }

@@ -11,7 +11,7 @@
 
 import * as A from "./ArtworkModel.js";
 import { icon } from "../MaterialInspector/Icons.js";
-import { Esc, Knob, ColourField, Stops, Toggle, SwitchRow, Segments, Chips, Dropdown, StatTile, SyncSiblings, Download, Rebuild, History, HEX } from "../MaterialInspector/CardKit.js";
+import { KeyReaches, Esc, Knob, ColourField, Stops, Toggle, SwitchRow, Segments, Chips, Dropdown, StatTile, SyncSiblings, Download, Rebuild, History, HEX } from "../MaterialInspector/CardKit.js";
 
 const S = {
   Mode: "pattern", Doc: null, Open: null, AddLayer: false, AddMod: false, Renaming: null, Folds: {},
@@ -613,6 +613,7 @@ function OnStorage(Event) {
 export function Mount(Host, Options = {}) {
   Root = Host;
   S.Docked = !!Options.docked;
+  S.Scoped = !!Options.scoped;
   const Params = new URLSearchParams(globalThis.location?.search || "");
   S.Mode = Options.mode || (Params.get("mode") === "stamp" ? "stamp" : "pattern");
   const Cat = A.Catalog(S.Mode);
@@ -623,7 +624,7 @@ export function Mount(Host, Options = {}) {
   Root.addEventListener("change", OnChange);
   Root.addEventListener("toggle", (E) => { const F = E.target.closest?.("[data-fold]"); if (F) S.Folds[F.dataset.fold] = F.open; }, true);
   Root.addEventListener("focusout", (E) => { if (E.target.dataset?.act === "rename") FinishRename(E.target); });
-  document.addEventListener("keydown", OnKey);
+  document.addEventListener("keydown", (E) => { if (KeyReaches(E, Root, S.Scoped)) OnKey(E); });
   document.addEventListener("click", (E) => { if ((S.AddLayer || S.AddMod) && E.target.isConnected && !Root.contains(E.target)) { S.AddLayer = S.AddMod = false; Render(); } });
   globalThis.addEventListener?.("storage", OnStorage);
   Render();
@@ -635,6 +636,20 @@ const Hub = {
   State: S, Model: A, History: H, Render, Apply, Settle, Flash, Step, Layer, CurrentStats, ThumbUrl,
   Subscribe(Fn) { Peers.add(Fn); return () => Peers.delete(Fn); },
   Load(Id) { Settle(); Select(LoadStored(Id)); Render(); Flash(`Loaded ${S.Doc.name}`); },
+  // Host hand-off: show the artwork document the host already owns (Texture Studio's Pattern / Stamp stage).
+  Adopt(Doc, Mode) {
+    Settle();
+    let Next;
+    try { Next = structuredClone(Doc); } catch { Next = JSON.parse(JSON.stringify(Doc)); }
+    if (!Next || !Array.isArray(Next.layers)) return false;
+    if (Mode) S.Mode = Mode;
+    S.Doc = Next;
+    if (S.Open && !A.FindLayer(S.Doc, S.Doc.selectedLayerId)) S.Open = null;
+    S.AddLayer = false; S.AddMod = false; S.Renaming = null;
+    H.Clear();
+    Render();
+    return true;
+  },
   // Select a layer and optionally open one of its property / modifier rows ("fill", "mask", "mod:<id>", …).
   SelectLayer(Id, Open) {
     if (!A.FindLayer(S.Doc, Id)) return;

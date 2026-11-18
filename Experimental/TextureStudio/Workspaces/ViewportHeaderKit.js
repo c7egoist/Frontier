@@ -248,6 +248,7 @@ export function createViewportHeader(parentCol, opts = {}) {
     btn.type = "button";
     btn.title = t.title || (t.kbd ? `${t.label} (${t.kbd})` : t.label);
     if (!inMenu && t.datasetKey) btn.dataset[t.datasetKey] = t.id;
+    btn.dataset.toolId = t.id;   // CardDock: right-click a tool button for its Brush Studio menu
     btn.setAttribute("aria-label", t.label);
     btn.setAttribute("aria-pressed", t.active ? "true" : "false");
     btn.addEventListener("click", () => {

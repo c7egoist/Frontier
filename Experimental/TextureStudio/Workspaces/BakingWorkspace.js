@@ -495,6 +495,7 @@ export function mountBakingWorkspace(root, appBridge) {
       return;
     }
     state.baking = true;
+    state.lastError = null;
     state.progress = 0.04;
     state.progressText = "Initializing GPU baker…";
     btnBakeNow.disabled = true;
@@ -576,6 +577,7 @@ export function mountBakingWorkspace(root, appBridge) {
       rebuildInspector();
       Toast(`Baked cleanly via ${state.lastDevice}`);
     } catch (err) {
+      state.lastError = err?.message || String(err);
       Toast(`Bake failed: ${err.message}`);
     } finally {
       state.baking = false;
@@ -589,7 +591,9 @@ export function mountBakingWorkspace(root, appBridge) {
 
   let progressBarEl = null;
   let progressLabelEl = null;
+  let progressHook = null;   // CardDock: the Map Baking card's progress bar while it drives a bake
   function updateProgressUi() {
+    progressHook?.(state.progress, state.progressText);
     if (progressBarEl) progressBarEl.style.width = `${Math.round(state.progress * 100)}%`;
     if (progressLabelEl) progressLabelEl.textContent = state.progressText;
   }
@@ -1121,10 +1125,56 @@ export function mountBakingWorkspace(root, appBridge) {
     if (payload) applyAsset(payload);
   });
 
+  // CardDock: the Map Baking card drives this workspace's baker with its request (BakeModel.Request): the study, the
+  // surface settings (bakeMeshMaps) and the volume settings (bakeVolumeSdf), the same split runBake makes.
+  function useStudy(id) {
+    if (!id || id === state.studyId || ![...studySelect.options].some((o) => o.value === id)) return false;
+    studySelect.value = id;
+    studySelect.dispatchEvent(new Event("change"));
+    return true;
+  }
+
+  async function bakeRequest(request, { Progress, Signal } = {}) {
+    if (disposed) throw new Error("The Baking workspace is closed");
+    if (state.baking) throw new Error("A bake is already running");
+    if (request?.parts) throw new Error("Bake sets bake part by part; choose a study to bake on this stage");
+    const surface = request?.surface || null, volume = request?.volume || null;
+    const channels = [...(surface?.channels || []), ...(volume ? ["volumeSdf"] : [])];
+    if (!channels.length) throw new Error("Choose at least one map");
+    if (request.studyId && state.studyId !== "custom") useStudy(request.studyId);
+    if (surface) {
+      for (const key of ["resolution", "samples", "frontDistance", "rearDistance", "aoDistance", "thicknessRange", "padding", "normalY"]) {
+        if (surface[key] !== undefined) state[key] = surface[key];
+      }
+    }
+    if (volume) {
+      state.sdfRes = volume.nx || state.sdfRes;
+      if (Number.isFinite(volume.padding)) state.sdfPadding = volume.padding;
+      state.sdfSigned = volume.signMode !== "unsigned";
+    }
+    if (["auto", "gpu", "cpu"].includes(request.device)) state.deviceMode = request.device;
+    state.selectedChannels = new Set(channels);
+    if (Signal?.aborted) throw new DOMException("Bake cancelled", "AbortError");
+    progressHook = (p, text) => Progress?.(p, text);
+    try {
+      await runBake();
+    } finally {
+      progressHook = null;
+    }
+    if (state.lastError) throw new Error(state.lastError);
+    if (Signal?.aborted) throw new DOMException("Bake cancelled", "AbortError");
+    return { Device: state.lastDevice, Ms: state.lastElapsedMs, Maps: channels, Data: state.bakedSurface?.bridgeData || null };
+  }
+
   return {
     name: "Baking",
     applyAsset,
     applyImportedMesh,
+    dock: { grid, leftCol, centerCol, rightCol },
+    useStudy,
+    bakeRequest,
+    currentStudy: () => state.studyId,
+    loadSource(slot, file) { if (file && (slot === "low" || slot === "high")) loadCustomFile(file, slot); },
     getSnapshot: () => ({
       studyId: state.studyId,
       viewMode: state.viewMode,

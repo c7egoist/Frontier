@@ -6,10 +6,13 @@
 // own dedicated studio (Brush Studio, Stamp Studio for decals, Text Studio, Eraser Studio …) laid out the same way:
 // pick a tool on the rail and the Studio card switches to it.
 //
-//   Mount(Host, { brush, tool, pad }) → Hub { State, Brush(), SetValue(), Select(), Section(), Tool(), Studio(), TogglePad(), Pad, Render }
+//   Mount(Host, { brush, tool, pad, scoped }) → Hub { State, Brush(), SetValue(), Select(), Section(), Tool(), Studio(), TogglePad(), Pad, Render,
+//                                              Subscribe(fn), Adopt({ tool, colour, size, opacity }) }
+// Subscribe(fn) hears fn(Brush(), Tool, Tools) after any brush / tool edit (coalesced to one call per task) — the host maps it to
+// its own painter.  Options.scoped: keys reach the studio only when typed inside it (docked in TextureStudio).
 
 import { icon } from "../MaterialInspector/Icons.js";
-import { Esc, Knob, ColourField, Stops, SwitchRow, Toggle, Segments, Dropdown, Clamp, Pct, Fixed, SyncSiblings, Download, History } from "../MaterialInspector/CardKit.js";
+import { Esc, Knob, ColourField, Stops, SwitchRow, Toggle, Segments, Dropdown, Clamp, Pct, Fixed, SyncSiblings, Download, History, KeyReaches } from "../MaterialInspector/CardKit.js";
 import * as M from "./BrushModel.js";
 import { TOOLS, TOOL, CreateTools, SetToolValue, PatchTool, TOOL_STACKS, VisibleToolFields, ERASERS, STUDIOS, TOOL_COLOURS, PALETTE, ToolChanged, ToolChangedBySection, SectionGroups, ToolDefault } from "./ToolModel.js";
 import { ChannelStack, StackAction, StackUi, ParseStackBind, VisibleCardFields } from "../MaterialInspector/ChannelStack.js";
@@ -49,6 +52,14 @@ export function Mount(Host, Options = {}) {
   const Brush = () => BrushOf(St.ActiveId);
   const H = History(120);
   const Hub = { State: St, Brush, BrushOf };
+  const Listeners = new Set();
+  let Announcing = false, Quiet = false;
+  function Announce() {
+    if (Announcing || Quiet || !Listeners.size) return;
+    Announcing = true;
+    queueMicrotask(() => { Announcing = false; for (const Fn of Listeners) Fn(Brush(), St.Tool, St.Tools); });
+  }
+  Hub.Subscribe = (Fn) => { Listeners.add(Fn); return () => Listeners.delete(Fn); };
 
   // ---------------------------------------------------------------------------------------------- skeleton
   Host.innerHTML = `<div class="bs-shell" data-pad="${St.PadOpen ? "open" : "closed"}">
@@ -412,6 +423,7 @@ export function Mount(Host, Options = {}) {
   const Glyph = (Name, Size, Colour) => `<span class="bs-glyph" style="--c:${Colour}">${icon(Name, Size)}</span>`;
 
   function RenderHead() {
+    Announce();
     const Studio = STUDIOS[St.Studio], T = TOOL[St.Studio];
     const Pad1 = `<button type="button" class="icon-btn bs-padtoggle ${St.PadOpen ? "on" : ""}" data-act="pad-toggle" aria-pressed="${St.PadOpen}" title="${St.PadOpen ? "Hide" : "Show"} the drawing pad preview" aria-label="Drawing pad">${icon(St.PadOpen ? "eye" : "eye-off", 14)}</button>`;
     const Back = St.Studio !== St.Tool ? `<button type="button" class="mi-text-btn bs-back" data-act="studio-back" title="Back to the ${Esc(TOOL[St.Tool].Label)} studio">${icon("chevron", 9)}${Esc(STUDIOS[St.Tool].Title)}</button>` : "";
@@ -1035,7 +1047,8 @@ export function Mount(Host, Options = {}) {
     const Id = Keys[E.key.toLowerCase()];
     if (Id) { SetTool(Id); E.preventDefault(); }
   }
-  document.addEventListener("keydown", OnKey);
+  const KeyGate = (E) => { if (KeyReaches(E, Host, !!Options.scoped)) OnKey(E); };
+  document.addEventListener("keydown", KeyGate);
 
   // ---------------------------------------------------------------------------------------------- first paint
   St.Recent = [St.ActiveId];
@@ -1043,7 +1056,22 @@ export function Mount(Host, Options = {}) {
   Hub.Section = (Id) => { if (IsBrushStudio() || M.SECTIONS.some((S) => S.Id === Id)) { if (!IsBrushStudio()) St.Studio = "paint"; St.Section = Id; } else St.ToolSection[St.Studio] = Id; RenderHead(); RenderSections(); RenderSettings(); };
   Hub.SetView = (V) => Vp.SetView(V);
   Hub.Viewport = Vp;
-  Hub.Destroy = () => { document.removeEventListener("keydown", OnKey); Pad.Destroy(); };
+  Hub.Destroy = () => { document.removeEventListener("keydown", KeyGate); Pad.Destroy(); };
+  // Host → studio: follow the host's active tool and its colour / size / opacity without echoing them back.
+  Hub.Adopt = ({ tool, colour, size, opacity } = {}) => {
+    Quiet = true;
+    try {
+      if (tool && TOOL[tool] && tool !== St.Tool) SetTool(tool);
+      const B = Brush(), V = B.values;
+      let Next = B;
+      if (colour && M.HEX.test(colour) && colour.toLowerCase() !== String(V["colour.primary"]).toLowerCase()) Next = M.SetValue(Next, "colour.primary", colour.toLowerCase());
+      if (Number.isFinite(size) && Math.abs(size - V["prop.size"]) > 0.5) Next = M.SetValue(Next, "prop.size", Clamp(size, 0, 100));
+      if (Number.isFinite(opacity) && Math.abs(opacity - V["prop.opacity"]) > 0.5) Next = M.SetValue(Next, "prop.opacity", Clamp(opacity, 0, 100));
+      if (Next !== B) { St.Brushes[St.ActiveId] = Next; AfterBrushChange(); }
+    } finally {
+      Quiet = false;
+    }
+  };
   Hub.Render();
   return Hub;
 }

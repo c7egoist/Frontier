@@ -4,23 +4,25 @@
 @font-face { font-family: "DM Sans"; font-weight: 400; src: url("../Shared/Studio/Fonts/dm-sans-latin-400-normal.woff2") format("woff2"); font-display: swap; }
 @font-face { font-family: "DM Sans"; font-weight: 500; src: url("../Shared/Studio/Fonts/dm-sans-latin-500-normal.woff2") format("woff2"); font-display: swap; }
 
-:root { --amber: #ffb238; --green: #46d267; --blue: #4d9bff; --red: #ff6b5e; --dock: #121212; --seam: #262626; }
-* { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100%; }
-body { background: #090909; color: #f0f0f0; font-family: "DM Sans", system-ui, sans-serif; font-size: 13px; font-weight: 300; }
-button, input, select { font: inherit; color: inherit; }
-button { cursor: pointer; border: 1px solid #ffffff0d; background: #222; border-radius: 16px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 28px; padding: 5px 12px; }
-button:hover { background: #2e2e2e; }
-button:active { background: #383838; }
-button:disabled { opacity: 0.35; cursor: default; background: #222; }
-button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, label:focus-within { outline: 1px solid var(--amber); outline-offset: 2px; }
-svg { flex: none; }
-button svg, label svg { pointer-events: none; }
-small { font-size: 10px; color: #777; font-weight: 300; }
-h3 { font-weight: 300; margin: 0; }
-b { font-weight: 400; }
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { border-radius: 9px; background: #242424; }
+/* Page-level rules are scoped under .pz-scope (the standalone pages put it on <body>; Texture Studio puts it on each card
+   host) so docking a card never restyles the page around it. :where() keeps element-rule specificity at (0,0,1). */
+.pz-scope { --amber: #ffb238; --green: #46d267; --blue: #4d9bff; --red: #ff6b5e; --dock: #121212; --seam: #262626; color: #f0f0f0; font-family: "DM Sans", system-ui, sans-serif; font-size: 13px; font-weight: 300; }
+.pz-scope, :where(.pz-scope) * { box-sizing: border-box; }
+html:has(> body.pz-scope), body.pz-scope { margin: 0; min-height: 100%; }
+body.pz-scope { background: #090909; }
+:where(.pz-scope) :is(button, input, select) { font: inherit; color: inherit; }
+:where(.pz-scope) button { cursor: pointer; border: 1px solid #ffffff0d; background: #222; border-radius: 16px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 28px; padding: 5px 12px; }
+:where(.pz-scope) button:hover { background: #2e2e2e; }
+:where(.pz-scope) button:active { background: #383838; }
+:where(.pz-scope) button:disabled { opacity: 0.35; cursor: default; background: #222; }
+:where(.pz-scope) :is(button, input, select, summary):focus-visible, :where(.pz-scope) label:focus-within { outline: 1px solid var(--amber); outline-offset: 2px; }
+:where(.pz-scope) svg { flex: none; }
+:where(.pz-scope) :is(button, label) svg { pointer-events: none; }
+:where(.pz-scope) small { font-size: 10px; color: #777; font-weight: 300; }
+:where(.pz-scope) h3 { font-weight: 300; margin: 0; }
+:where(.pz-scope) b { font-weight: 400; }
+:where(.pz-scope) ::-webkit-scrollbar, .pz-scope::-webkit-scrollbar { width: 8px; height: 8px; }
+:where(.pz-scope) ::-webkit-scrollbar-thumb, .pz-scope::-webkit-scrollbar-thumb { border-radius: 9px; background: #242424; }
 
 /* ---------------------------------------------------------------- dock */
 .mi-dock { min-height: 100vh; display: flex; justify-content: center; padding: 28px 16px 40px; background: radial-gradient(ellipse at 50% -10%, #161616, #090909 60%); }
@@ -153,10 +155,10 @@ b { font-weight: 400; }
 .split-value input::-webkit-inner-spin-button, .split-value input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .split-value input:focus { outline: none; box-shadow: inset 0 0 0 1px var(--amber); }
 .split-value small { display: flex; justify-content: center; align-items: center; flex: 1; background: #1a1a1a; border-left: 1px solid #ffffff0d; color: #5c5c5c; font-size: 10px; }
-input[type="range"] { flex: 1; width: 100%; min-width: 24px; appearance: none; -webkit-appearance: none; border: 0; height: 22px; border-radius: 30px; background: linear-gradient(90deg, #4a4a4a 0 var(--fill, 50%), #232323 var(--fill, 50%) 100%); cursor: ew-resize; margin: 0; }
-input[type="range"]::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #e6e6e6; box-shadow: 0 1px 2px #0008; }
-input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; border: 0; border-radius: 50%; background: #e6e6e6; }
-input[type="range"]:focus-visible { outline: 1px solid var(--amber); outline-offset: 2px; }
+:where(.pz-scope) input[type="range"] { flex: 1; width: 100%; min-width: 24px; appearance: none; -webkit-appearance: none; border: 0; height: 22px; border-radius: 30px; background: linear-gradient(90deg, #4a4a4a 0 var(--fill, 50%), #232323 var(--fill, 50%) 100%); cursor: ew-resize; margin: 0; }
+:where(.pz-scope) input[type="range"]::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #e6e6e6; box-shadow: 0 1px 2px #0008; }
+:where(.pz-scope) input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; border: 0; border-radius: 50%; background: #e6e6e6; }
+:where(.pz-scope) input[type="range"]:focus-visible { outline: 1px solid var(--amber); outline-offset: 2px; }
 
 .mi-knob-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
 .mi-knob-grid .split-value { width: 64px; min-width: 64px; }

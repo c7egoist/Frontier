@@ -10,7 +10,7 @@
 import * as M from "./MaterialModel.js";
 import { ChannelStack } from "./ChannelStack.js";
 import { icon } from "./Icons.js";
-import { Esc, Fixed, Pct, Knob, ColourField, Stops, Toggle, StatTile, Dropdown, SyncSiblings as SyncKit } from "./CardKit.js";
+import { KeyReaches, Esc, Fixed, Pct, Knob, ColourField, Stops, Toggle, StatTile, Dropdown, SyncSiblings as SyncKit } from "./CardKit.js";
 
 const GLYPH = { value: "value", field: "field", ramp: "ramp", texture: "image", pattern: "pattern" };
 const MODEL_GLYPH = { surface: "surface", coat: "coat", flakes: "flakes", detail: "detail" };
@@ -21,6 +21,7 @@ const S = {
   P: null, LayerId: null, Channel: null, Query: "",
   Groups: {}, Folds: {}, AddOpen: false, Renaming: null,
   History: [], Future: [], Pending: null, Status: "", StatusTimer: 0,
+  Scoped: false,   // docked in a host page (Texture Studio): keys only when typed inside the card
   Docked: false,   // true when an outliner card owns the strata list (the strip is then left out of this card)
 };
 const Peers = new Set();   // outliner (or any other view) re-render hooks: Fn(Live)
@@ -679,7 +680,8 @@ function OnStorage(Event) {
 export function Mount(Host, Options = {}) {
   Root = Host;
   S.Docked = !!Options.docked;
-  const Wanted = Options.material || new URLSearchParams(location.search).get("material") || Store?.getItem(M.STORAGE_CURRENT) || M.CATALOG[0].id;
+  S.Scoped = !!Options.scoped;
+  const Wanted = Options.material || new URLSearchParams(globalThis.location?.search || "").get("material") || Store?.getItem(M.STORAGE_CURRENT) || M.CATALOG[0].id;
   Select(LoadStored(M.CATALOG.some((E) => E.id === Wanted) ? Wanted : M.CATALOG[0].id));
   Root.addEventListener("click", OnClick);
   Root.addEventListener("input", OnInput);
@@ -695,7 +697,7 @@ export function Mount(Host, Options = {}) {
     const Input = Drop.querySelector("input[type=file]");
     try { Input.files = E.dataTransfer.files; Input.dispatchEvent(new Event("change", { bubbles: true })); } catch { /* read-only FileList in some engines */ }
   });
-  document.addEventListener("keydown", OnKey);
+  document.addEventListener("keydown", (E) => { if (KeyReaches(E, Root, S.Scoped)) OnKey(E); });
   document.addEventListener("click", (E) => { if (S.AddOpen && E.target.isConnected && !Root.contains(E.target)) { S.AddOpen = false; Render(); } });
   globalThis.addEventListener?.("storage", OnStorage);
   Render();
@@ -708,6 +710,22 @@ const Hub = {
   State: S, Model: M, Render, Apply, Settle, Flash, Step, Layer, SwatchHtml,
   Subscribe(Fn) { Peers.add(Fn); return () => Peers.delete(Fn); },
   Load(Id) { Settle(); Select(LoadStored(Id)); Render(); Flash(`Loaded ${S.P.name}`); },
+  // Host hand-off: show a material the host already owns (Texture Studio's live params). History restarts; nothing is
+  // written to storage until the user edits. The host's tile pattern (canvas-backed) stays with the host.
+  Adopt(P) {
+    Settle();
+    const { pattern, patternChannelMask, ...Rest } = P || {};
+    let Next;
+    try { Next = structuredClone(Rest); } catch { Next = JSON.parse(JSON.stringify(Rest)); }
+    if (!Next?.Authoring?.Layers?.length) return false;
+    const Kept = S.LayerId;
+    S.P = Next;
+    S.LayerId = M.FindLayer(S.P, Kept) ? Kept : Layer().Identity;
+    if (!Layer().Channels.includes(S.Channel)) S.Channel = Layer().Channels.includes("colour") ? "colour" : Layer().Channels[0];
+    S.History = []; S.Future = []; S.Pending = null; S.AddOpen = false;
+    Render();
+    return true;
+  },
   SelectLayer(Id) {
     if (!M.FindLayer(S.P, Id)) return;
     if (S.LayerId !== Id) {
