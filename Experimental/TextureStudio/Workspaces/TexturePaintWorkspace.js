@@ -8,6 +8,7 @@
    - Drag-and-drop & Up/Down arrow Layer Stack reordering + Alt+Up/Down shortcuts + per-layer Masks. */
 
 import * as THREE from "three";
+import { CreateStudioRenderer, ReleaseStudioRenderer } from "../StudioRenderer.js";
 import { OrbitControls } from "../Vendor/orbit-controls.esm.min.js";
 import { OBJLoader } from "../Vendor/addons/OBJLoader.js";
 import { STLLoader } from "../Vendor/addons/STLLoader.js";
@@ -1037,7 +1038,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   SmoothScroll(rightScroll, rightInner);
 
   // ----------------------------------------------------------------- THREE.JS UNIFIED GPU STAGE
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = CreateStudioRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.18;
@@ -6064,33 +6065,36 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     }),
     dispose() {
       disposed = true;
-      cancelAnimationFrame(rafId);
-      headerUI.dispose();
-      layerStackUI.dispose?.();
-      closeToolPopup();
-      ro.disconnect();
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-      if (inspectorScope) ReleaseScope(inspectorScope);
-      orbit.dispose();
-      envTex.dispose();
-      fallbackAlbTex.dispose(); fallbackRoughTex.dispose();
-      fallbackMetalTex.dispose(); fallbackNormalTex.dispose();
-      fallbackEmissiveTex.dispose(); fallbackSpecColorTex.dispose(); fallbackSheenColorTex.dispose();
-      uvQuadMat.dispose(); uvQuadMesh.geometry.dispose();
-      stampGizmo3D.geometry.dispose(); stampGizmo3D.material.dispose();
-      shiftLine3D.geometry.dispose(); shiftLine3D.material.dispose();
-      clearGroupChildren(curveOverlayGroup);
-      clearGroupChildren(gradientHandlesGroup);
-      paintMat.dispose();
-      for (const s of state.undoStack) gpuPaint.disposeSnapshot(s);
-      for (const s of state.redoStack) gpuPaint.disposeSnapshot(s);
-      gpuPaint.dispose();
-      if (paintMesh) paintMesh.geometry.dispose();
-      if (wireOverlay) wireOverlay.geometry.dispose();
-      if (uvWireLines) uvWireLines.geometry.dispose();
-      renderer.dispose();
-      root.innerHTML = "";
+      try {
+        cancelAnimationFrame(rafId);
+        headerUI.dispose();
+        layerStackUI.dispose?.();
+        closeToolPopup();
+        ro.disconnect();
+        window.removeEventListener("keydown", onKeyDown);
+        window.removeEventListener("keyup", onKeyUp);
+        if (inspectorScope) ReleaseScope(inspectorScope);
+        orbit.dispose();
+        envTex.dispose();
+        fallbackAlbTex.dispose(); fallbackRoughTex.dispose();
+        fallbackMetalTex.dispose(); fallbackNormalTex.dispose();
+        fallbackEmissiveTex.dispose(); fallbackSpecColorTex.dispose(); fallbackSheenColorTex.dispose();
+        uvQuadMat.dispose(); uvQuadMesh.geometry.dispose();
+        stampGizmo3D.geometry.dispose(); stampGizmo3D.material.dispose();
+        shiftLine3D.geometry.dispose(); shiftLine3D.material.dispose();
+        clearGroupChildren(curveOverlayGroup);
+        clearGroupChildren(gradientHandlesGroup);
+        paintMat.dispose();
+        for (const s of state.undoStack) gpuPaint.disposeSnapshot(s);
+        for (const s of state.redoStack) gpuPaint.disposeSnapshot(s);
+        gpuPaint.dispose();
+        if (paintMesh) paintMesh.geometry.dispose();
+        if (wireOverlay) wireOverlay.geometry.dispose();
+        if (uvWireLines) uvWireLines.geometry.dispose();
+      } finally {
+        ReleaseStudioRenderer(renderer);
+        root.innerHTML = "";
+      }
     },
   };
 }

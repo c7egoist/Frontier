@@ -16,6 +16,7 @@ import { Toast } from "./StudioControls.js";
 import { SetActiveColourSlot, SetFallbackColourSlot } from "./ColourCodex.js";
 import { LoadUvBridgeTransfer } from "../Shared/UvTextureBridge.js";
 import { DockCards, UndockCards, DockedCard } from "./CardDock.js";
+import { WebglContextRefused, ReleaseStudioRenderersSince, StudioRendererMark } from "./StudioRenderer.js";
 
 const WORKSPACES = [
   { id: "material", label: "Material", mount: mountMaterialWorkspace },
@@ -181,9 +182,42 @@ const appBridge = {
 
 assetBrowser = createAssetBrowser(browserHost, appBridge);
 
-function activateWorkspace(id) {
+// A WebGL context freed by the previous workspace can take a moment to be returned by the browser,
+// so a context failure is retried automatically before the error panel asks the user.
+const WEBGL_RETRY_DELAYS_MS = [250, 1000];
+let mountRetryTimer = 0;
+
+function showMountError(target, err, attempt) {
+  const webgl = WebglContextRefused(err);
+  mainMount.innerHTML = "";
+  const panel = document.createElement("div");
+  panel.className = "ts-mount-error";
+  panel.style.cssText = "padding:28px;color:#ff8b78;font-family:monospace;display:flex;flex-direction:column;gap:12px;align-items:flex-start;";
+  const line = document.createElement("div");
+  line.className = "ts-mount-error-line";
+  line.textContent = `Workspace "${target.label}" error: ${err?.message || err}`;
+  panel.append(line);
+  if (webgl) {
+    const hint = document.createElement("div");
+    hint.style.color = "#c9ccd3";
+    hint.textContent = attempt < WEBGL_RETRY_DELAYS_MS.length
+      ? "The browser has not released a WebGL context yet. Retrying…"
+      : "The browser refused a WebGL context. Close other GPU-heavy tabs, then retry.";
+    panel.append(hint);
+  }
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.textContent = "Retry";
+  retry.style.cssText = "padding:6px 14px;border-radius:6px;border:1px solid #3a3d44;background:#1b1d22;color:#e8e9ec;cursor:pointer;font:inherit;";
+  retry.addEventListener("click", () => activateWorkspace(target.id, { force: true }));
+  panel.append(retry);
+  mainMount.append(panel);
+}
+
+function activateWorkspace(id, { force = false, attempt = 0 } = {}) {
   const target = WORKSPACES.find((w) => w.id === id) || WORKSPACES[0];
-  if (activeId === target.id && activeWorkspace) return;
+  if (activeId === target.id && activeWorkspace && !force) return;
+  clearTimeout(mountRetryTimer);
 
   if (activeWorkspace) {
     UndockCards();
@@ -207,13 +241,25 @@ function activateWorkspace(id) {
   SetActiveColourSlot(null);
   SetFallbackColourSlot(null);
   mainMount.innerHTML = "";
+  const rendererMark = StudioRendererMark();
   try {
     activeWorkspace = target.mount(mainMount, appBridge);
     // Project Zero cards replace the native side panels (outliner · viewport · inspector); see CardDock.js.
     DockCards(target.id, activeWorkspace, appBridge);
   } catch (err) {
     console.error(`Failed to mount workspace ${target.label}:`, err);
-    mainMount.innerHTML = `<div style="padding:28px;color:#ff8b78;font-family:monospace;">Workspace "${target.label}" error: ${err?.message || err}</div>`;
+    try {
+      activeWorkspace?.dispose?.();
+    } catch {}
+    activeWorkspace = null;
+    UndockCards();
+    ReleaseStudioRenderersSince(rendererMark);
+    showMountError(target, err, attempt);
+    if (WebglContextRefused(err) && attempt < WEBGL_RETRY_DELAYS_MS.length) {
+      mountRetryTimer = setTimeout(() => {
+        if (activeId === target.id && !activeWorkspace) activateWorkspace(target.id, { force: true, attempt: attempt + 1 });
+      }, WEBGL_RETRY_DELAYS_MS[attempt]);
+    }
   }
 
   assetBrowser?.setActiveWorkspace(target.id);

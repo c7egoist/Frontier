@@ -295,3 +295,20 @@ Screenshots: `Experimental/TextureStudio/Screenshots/{fill-linear-scene,fill-poi
 | `SmokeOutliners` | All suites green; the footer step now covers the mask button. |
 | Engine blend (synthetic cues) | On point A: rough 26, metal 255, emissive green (its own). On point B: rough 229, emissive blue (the point colour). Background: 128. |
 | Note | The headless viewport does not redraw after card edits, including a plain base-coat colour change, so the texel checks cover the result. |
+
+## 🛠️ Fix: "Workspace "Material" error: THREE.WebGLRenderer: Error creating WebGL context."
+
+> **TL;DR:** The Texture Studio was leaking WebGL contexts. `renderer.dispose()` frees three.js resources but not the context, so each Material ⇄ Paint ⇄ Bake switch, plus the icon baker's idle recycling, left a context alive until garbage collection. Eventually the browser refused a new one.
+
+| Area | Change |
+| :--- | :--- |
+| `StudioRenderer.js` (new) | `CreateStudioRenderer` first frees the icon baker's context, then retries twice with lighter attributes (no MSAA, default power preference). `ReleaseStudioRenderer` disposes, calls `forceContextLoss()` and detaches the canvas. |
+| Material / Paint / Bake workspaces | Create their renderer through the helper. `dispose()` runs in `try/finally`, so the context is released even if an earlier cleanup step throws. |
+| `MaterialIconBaker.js` | Uses the helper. Its session (and context) can be dropped on demand without losing queued bakes. |
+| `TextureStudio.js` | A mount that throws releases every renderer it created. On a context failure it retries after 250 ms and again after 1 s, then shows the error with a **Retry** button. |
+
+| Check | Result |
+| :--- | :--- |
+| `TextureStudioValidation.mjs` | 🟢 29/29. The new suite 29 runs 18 workspace switches (at most one workspace context alive), a refused first attempt that recovers inside the same mount, and a fully refused mount that recovers through the automatic retry with no leaked contexts. |
+| Negative control (no `forceContextLoss`) | 🔴 Fails as expected: 18 contexts created, 0 released. |
+| Browser | ⚠️ Not confirmed in a real browser (no GPU or browser in the sandbox). |

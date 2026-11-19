@@ -3258,4 +3258,97 @@ await suite("28. Baking Unified 2-Tier Header, GeometryIconBaker & Coherence Gua
   assert(bakingSrc.includes("GeometryCompiler"), "BakingWorkspace must expose GeometryCompiler handoff");
 });
 
+await suite("29. WebGL Context Lifecycle: Workspace Switches Release Contexts, Failed Creation Retries", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { LiveStudioRendererCount } = await import("./StudioRenderer.js");
+  const studio = globalThis.window.__frontierTextureStudio;
+  const doc = globalThis.document;
+
+  // Count real context creation and forced loss by wrapping every canvas the page creates.
+  let created = 0;
+  let lost = 0;
+  let refuse = 0;
+  const wrapCanvas = (el) => {
+    if (!el || el.__ctxWrapped || typeof el.getContext !== "function") return el;
+    const inner = el.getContext.bind(el);
+    el.__ctxWrapped = true;
+    el.getContext = (kind, attrs) => {
+      if (!(kind && String(kind).includes("webgl"))) return inner(kind, attrs);
+      if (refuse > 0) { refuse--; return null; }
+      const gl = inner(kind, attrs);
+      if (!gl) return gl;
+      created++;
+      const ext = gl.getExtension.bind(gl);
+      let gone = false;
+      gl.getExtension = (name) => name === "WEBGL_lose_context"
+        ? { loseContext() { if (!gone) { gone = true; lost++; } }, restoreContext() {} }
+        : ext(name);
+      return gl;
+    };
+    return el;
+  };
+  const origCreate = doc.createElement.bind(doc);
+  const origCreateNS = doc.createElementNS?.bind(doc);
+  doc.createElement = (tag, ...rest) => {
+    const el = origCreate(tag, ...rest);
+    return String(tag).toLowerCase() === "canvas" ? wrapCanvas(el) : el;
+  };
+  if (origCreateNS) {
+    doc.createElementNS = (ns, tag, ...rest) => {
+      const el = origCreateNS(ns, tag, ...rest);
+      return String(tag).toLowerCase() === "canvas" ? wrapCanvas(el) : el;
+    };
+  }
+  const settle = () => new Promise((r) => setTimeout(r, 30));
+  try {
+    // 29a. Repeated Material ⇄ Paint ⇄ Bake switching keeps at most one workspace context alive.
+    for (let cycle = 0; cycle < 6; cycle++) {
+      for (const ws of ["material", "paint", "bake"]) {
+        studio.switchWorkspace(ws);
+        await settle();
+        assert.equal(studio.getActiveId(), ws);
+        assert(studio.getSnapshot(), `Workspace ${ws} must mount on cycle ${cycle}`);
+        assert(LiveStudioRendererCount() <= 2, `Live studio renderers ${LiveStudioRendererCount()} after switching to ${ws}`);
+      }
+    }
+    assert(created >= 18, `Expected the switches to create contexts, got ${created}`);
+    assert(created - lost <= 2, `Contexts must be force-released on workspace switch: created ${created}, lost ${lost}`);
+
+    const steadyLive = created - lost;
+    // 29b. A refused first attempt is retried with lighter attributes inside the same mount.
+    studio.switchWorkspace("material");
+    await settle();
+    refuse = 1;
+    studio.switchWorkspace("paint");
+    await settle();
+    assert.equal(studio.getActiveId(), "paint");
+    assert(studio.getSnapshot(), "Paint must mount after one refused WebGL context");
+
+    // 29c. Every attempt refused: error panel with Retry, then the automatic retry mounts the workspace.
+    // three.js re-probes getContext after a refusal, so each of the three attempts consumes two calls.
+    refuse = 6;
+    studio.switchWorkspace("material");
+    await settle();
+    assert.equal(studio.getSnapshot(), null, "Material must not report a snapshot while its context is refused");
+    assert.equal(refuse, 0, "All three creation attempts must have been made");
+    const errLine = doc.querySelector(".ts-mount-error-line");
+    assert(errLine && /Error creating WebGL context/.test(errLine.textContent), "The refused mount must surface the WebGL error with a Retry panel");
+    await new Promise((r) => setTimeout(r, 400));
+    assert(studio.getSnapshot(), "The automatic retry must mount Material once a context is available");
+    // The only context allowed to outlive its mount is three.js's own probe from 29b (garbage-collected).
+    assert(created - lost <= steadyLive + 1, `No leaked contexts after the failed mount: created ${created}, lost ${lost}`);
+  } finally {
+    refuse = 0;
+    doc.createElement = origCreate;
+    if (origCreateNS) doc.createElementNS = origCreateNS;
+  }
+
+  for (const f of ["MaterialWorkspace.js", "TexturePaintWorkspace.js", "BakingWorkspace.js"]) {
+    const src = readFileSync(resolve(HERE, "Workspaces", f), "utf8");
+    assert(!src.includes("new THREE.WebGLRenderer"), `${f} must create its renderer through CreateStudioRenderer`);
+    assert(/finally \{\s*ReleaseStudioRenderer\(renderer\);/.test(src), `${f} dispose must release its context in a finally block`);
+  }
+  assert(!readFileSync(resolve(HERE, "MaterialIconBaker.js"), "utf8").includes("new THREE.WebGLRenderer"), "Icon baker must use CreateStudioRenderer");
+});
+
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

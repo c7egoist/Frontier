@@ -5,6 +5,7 @@
    real-time 3-point PMREM stage, recipe inspector, Frontier .material TOML export, and Texture Paint bridge. */
 
 import * as THREE from "three";
+import { CreateStudioRenderer, ReleaseStudioRenderer } from "../StudioRenderer.js";
 import { OrbitControls } from "../Vendor/orbit-controls.esm.min.js";
 import { RoundedBoxGeometry } from "../Vendor/addons/RoundedBoxGeometry.js";
 import { BuildThreeGeometryFromBridgeTransfer } from "../../Shared/UvTextureBridge.js";
@@ -381,7 +382,7 @@ export function mountMaterialWorkspace(root, appBridge) {
   SmoothScroll(rightScroll, rightHostInner);
 
   // ----------------------------------------------------------------- THREE.JS SCENE
-  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  const renderer = CreateStudioRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = state.exposure;
@@ -2258,30 +2259,33 @@ export function mountMaterialWorkspace(root, appBridge) {
     }),
     dispose() {
       disposed = true;
-      cancelAnimationFrame(rafId);
-      document.removeEventListener("fullscreenchange", onFsChange);
-      resizeObserver.disconnect();
-      if (inspectorScope) ReleaseScope(inspectorScope);
-      controls.dispose();
-      backdropTex?.dispose?.();
-      envTex.dispose();
-      if (customBridgeGeo) customBridgeGeo.dispose();
-      if (sampleMesh) sampleMesh.geometry.dispose();
-      if (activeMaterial) activeMaterial.dispose();
-      studioFloor.geometry.dispose();
-      studioFloor.material.dispose();
-      studioGrid.geometry.dispose();
-      studioGrid.material.dispose();
-      stand.geometry.dispose();
-      stand.material.dispose();
-      standBottom.geometry.dispose();
-      standBottom.material.dispose();
-      standRing.geometry.dispose();
-      standRing.material.dispose();
-      supportBall.geometry.dispose();
-      supportBall.material.dispose();
-      renderer.dispose();
-      root.innerHTML = "";
+      try {
+        cancelAnimationFrame(rafId);
+        document.removeEventListener("fullscreenchange", onFsChange);
+        resizeObserver.disconnect();
+        if (inspectorScope) ReleaseScope(inspectorScope);
+        controls.dispose();
+        backdropTex?.dispose?.();
+        envTex.dispose();
+        if (customBridgeGeo) customBridgeGeo.dispose();
+        if (sampleMesh) sampleMesh.geometry.dispose();
+        if (activeMaterial) activeMaterial.dispose();
+        studioFloor.geometry.dispose();
+        studioFloor.material.dispose();
+        studioGrid.geometry.dispose();
+        studioGrid.material.dispose();
+        stand.geometry.dispose();
+        stand.material.dispose();
+        standBottom.geometry.dispose();
+        standBottom.material.dispose();
+        standRing.geometry.dispose();
+        standRing.material.dispose();
+        supportBall.geometry.dispose();
+        supportBall.material.dispose();
+      } finally {
+        ReleaseStudioRenderer(renderer);
+        root.innerHTML = "";
+      }
       if (window.__TextureStudioMaterialApi === api) delete window.__TextureStudioMaterialApi;
     },
   };

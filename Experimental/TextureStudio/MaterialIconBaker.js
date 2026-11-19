@@ -8,6 +8,7 @@
 
 import * as THREE from "three";
 import { createBallGeometry, createMaterial, normalizeMaterial } from "./Engine/Materials/materials.js";
+import { CreateStudioRenderer, RegisterIdleContextReleaser, ReleaseStudioRenderer } from "./StudioRenderer.js";
 
 const ANALYTICAL_CACHE = new Map();
 const WEBGL_CACHE = new Map();
@@ -290,7 +291,7 @@ function ensureBakerSession(size = 112) {
     return null;
   }
   try {
-    const renderer = new THREE.WebGLRenderer({
+    const renderer = CreateStudioRenderer({
       alpha: true,
       antialias: true,
       preserveDrawingBuffer: true,
@@ -368,17 +369,25 @@ export function disposeMaterialIconBaker() {
   bakeQueue = [];
   queueRunning = false;
   PENDING_IDS.clear();
-  if (!bakerSession) return;
-  try {
-    bakerSession.mesh.material?.dispose?.();
-    bakerSession.sphereGeo.dispose();
-    bakerSession.pedGeo.dispose();
-    bakerSession.pedMat.dispose();
-    bakerSession.envRT.dispose();
-    bakerSession.renderer.dispose();
-  } catch {}
-  bakerSession = null;
+  releaseBakerSession();
 }
+
+// Drops only the WebGL session (and its context); queued bakes recreate it on their next step.
+function releaseBakerSession() {
+  if (!bakerSession) return;
+  const s = bakerSession;
+  bakerSession = null;
+  try {
+    s.mesh.material?.dispose?.();
+    s.sphereGeo.dispose();
+    s.pedGeo.dispose();
+    s.pedMat.dispose();
+    s.envRT.dispose();
+  } catch {}
+  ReleaseStudioRenderer(s.renderer);
+}
+
+RegisterIdleContextReleaser(releaseBakerSession);
 
 function renderOneWebglMaterial(mat) {
   const s = ensureBakerSession(112);

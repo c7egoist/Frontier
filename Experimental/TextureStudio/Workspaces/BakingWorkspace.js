@@ -8,6 +8,7 @@
    - Built-in High/Low studies + Custom Low/High .OBJ/.STL import + Texture Paint bridge + PNG & .fvol Export. */
 
 import * as THREE from "three";
+import { CreateStudioRenderer, ReleaseStudioRenderer } from "../StudioRenderer.js";
 import { OrbitControls } from "../Vendor/orbit-controls.esm.min.js";
 import { OBJLoader } from "../Vendor/addons/OBJLoader.js";
 import { STLLoader } from "../Vendor/addons/STLLoader.js";
@@ -363,7 +364,7 @@ export function mountBakingWorkspace(root, appBridge) {
   SmoothScroll(rightScroll, rightInner);
 
   // ----------------------------------------------------------------- THREE.JS PREVIEW SCENE
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = CreateStudioRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
@@ -1194,17 +1195,20 @@ export function mountBakingWorkspace(root, appBridge) {
     }),
     dispose() {
       disposed = true;
-      cancelAnimationFrame(rafId);
-      closeBakePopup();
-      window.removeEventListener("keydown", onBakeKeyDown);
-      ro.disconnect();
-      header.dispose();
-      if (inspectorScope) ReleaseScope(inspectorScope);
-      orbit.dispose();
-      gpuBaker.dispose();
-      if (bakedTex) bakedTex.dispose();
-      renderer.dispose();
-      root.innerHTML = "";
+      try {
+        cancelAnimationFrame(rafId);
+        closeBakePopup();
+        window.removeEventListener("keydown", onBakeKeyDown);
+        ro.disconnect();
+        header.dispose();
+        if (inspectorScope) ReleaseScope(inspectorScope);
+        orbit.dispose();
+        gpuBaker.dispose();
+        if (bakedTex) bakedTex.dispose();
+      } finally {
+        ReleaseStudioRenderer(renderer);
+        root.innerHTML = "";
+      }
     },
   };
 }
