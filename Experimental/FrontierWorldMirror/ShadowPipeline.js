@@ -18,6 +18,8 @@ export function EncodeRenderSettingsUniforms(Rs = {}) {
     sdf: 0,
     bvh: 1,
     off: 2,
+    voxel_sdf: 3,
+    ddgi: 4,
   };
   const ReflMap = {
     bvh: 1,
@@ -43,6 +45,10 @@ export function EncodeRenderSettingsUniforms(Rs = {}) {
     reflBounces: Math.max(1, Math.min(3, Math.round(Number(Rs.ReflectionBounces) || 2))),
     renderScale: [50, 75, 100, 125].includes(Number(Rs.RenderScale)) ? Number(Rs.RenderScale) : 100,
     antiAliasing: Rs.AntiAliasing !== false ? 1 : 0,
+    coneCount: Math.max(12, Math.min(24, Math.round(Number(Rs.ClipmapConeCount) || 16))),
+    aoContact: Math.max(0.02, Math.min(1.5, Number(Rs.AoContactDistance) || 0.25)),
+    aoChassis: Math.max(0.2, Math.min(6, Number(Rs.AoChassisDistance) || 2.2)),
+    aoRays: Math.max(12, Math.min(32, Math.max(12, Math.round(Number(Rs.AoRaysPerPixel) || 8)))),
   };
 }
 

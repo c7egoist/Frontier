@@ -25,6 +25,7 @@ import {
   SHADOW_ALGORITHMS,
 } from "./ShowcaseGalleryScene.js";
 import { WindInspector, WindBinding } from "./WindPanel.jsx";
+import { SharedRadianceFieldBaker } from "./RadianceFieldBaker.js";
 import TransformPanel from "./TransformPanel.jsx";
 import MaterialPanel from "./MaterialPanel.jsx";
 import { ColourSlotDropProps } from "./ColourCodex.js";
@@ -449,6 +450,36 @@ export function Tile({
     </button>
   );
 }
+// Live status of the async C++ GI bake (VoxelSdfClipmap / DynamicProbeCache) shared by every renderer.
+function RadianceFieldBakeStatus({ Engine }) {
+  const [, Bump] = useState(0);
+  useEffect(() => SharedRadianceFieldBaker.Subscribe(() => Bump((N) => N + 1)), []);
+  const Baker = SharedRadianceFieldBaker;
+  const Stats = Baker.FieldEngine === Engine ? Baker.Stats : null;
+  const Busy = Baker.Status.startsWith("baking");
+  const Pct = Math.round((Busy ? Baker.Progress : 1) * 100);
+  let Detail = "";
+  if (Stats && Engine === "voxel_sdf") {
+    Detail = `${Stats.Dims.map((D) => D.join("×")).join(" + ")} voxels · surface ${Stats.SurfaceVoxels.join(" / ")}`;
+  } else if (Stats && Engine === "ddgi") {
+    Detail = `${Stats.Cells} probes · ${Stats.GatedCells} backface-gated`;
+  }
+  return (
+    <div className="rs-desc-banner" style={{ display: "grid", gap: 6 }} data-radiance-field-status={Busy ? "baking" : "ready"}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <span>{Baker.Status === "idle" ? "Bake pending" : Baker.Status}</span>
+        <button type="button" className="mini" onClick={() => Baker.Invalidate()} disabled={Busy}>
+          Rebake
+        </button>
+      </div>
+      <div style={{ height: 3, borderRadius: 2, background: "rgba(255,255,255,0.08)" }}>
+        <div style={{ width: `${Pct}%`, height: "100%", borderRadius: 2, background: "#7be0ad", transition: "width .2s" }} />
+      </div>
+      {Detail ? <small style={{ opacity: 0.75 }}>{Detail}</small> : null}
+    </div>
+  );
+}
+
 function Metric({ Value, Unit, Caption }) {
   return (
     <>
@@ -1382,6 +1413,35 @@ export function Inspector({
       );
     };
 
+    const RsVec3 = (LabelText, Key, Val, Step) => {
+      const V = Array.isArray(Val) && Val.length === 3 ? Val : [0, 0, 0];
+      return (
+        <label className="field compact" data-native-property={LabelText}>
+          <span>{LabelText}</span>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4 }}>
+            {["X", "Y", "Z"].map((Axis, I) => (
+              <div className="split-value" key={Axis}>
+                <input
+                  aria-label={`${LabelText} ${Axis}`}
+                  type="number"
+                  step={Step}
+                  value={Number((+V[I]).toFixed(2))}
+                  onChange={(Ev) => {
+                    const N = +Ev.target.value;
+                    if (!Number.isFinite(N)) return;
+                    const Next = V.slice();
+                    Next[I] = N;
+                    Change(Key, Next);
+                  }}
+                />
+                <small>{Axis}</small>
+              </div>
+            ))}
+          </div>
+        </label>
+      );
+    };
+
     const RsSwitch = (LabelText, Key, Val) => (
       <label className="switch-row">
         <span>{LabelText}</span>
@@ -1519,9 +1579,49 @@ export function Inspector({
               (Id) => Change("GiAlgorithm", Id),
               ActiveGi.desc,
             )}
+            {(Rs.GiAlgorithm === "voxel_sdf" || Rs.GiAlgorithm === "ddgi") && (
+              <RadianceFieldBakeStatus Engine={Rs.GiAlgorithm} />
+            )}
+            {Rs.GiAlgorithm === "voxel_sdf" && (
+              <>
+                {RsVec3("Clip Center", "ClipmapCenter", Rs.ClipmapCenter, 0.05)}
+                {RsFieldSlider("Clip 0 Half Extent", "ClipmapHalfExtent0", Rs.ClipmapHalfExtent0, 0.5, 8, 0.1, "m", 1)}
+                {RsFieldSlider("Clip 1 Half Extent", "ClipmapHalfExtent1", Rs.ClipmapHalfExtent1, 1, 16, 0.1, "m", 1)}
+                {RsFieldSlider("Clip 0 Resolution", "ClipmapResolution0", Rs.ClipmapResolution0, 16, 64, 4, "vox", 0)}
+                {RsFieldSlider("Clip 1 Resolution", "ClipmapResolution1", Rs.ClipmapResolution1, 16, 64, 4, "vox", 0)}
+                {RsFieldSlider("Radiosity Bounces", "ClipmapRadiosityBounces", Rs.ClipmapRadiosityBounces, 0, 4, 1, "", 0)}
+                {RsFieldSlider("Cone Directions", "ClipmapConeCount", Rs.ClipmapConeCount, 12, 24, 1, "cones", 0)}
+                {RsSwitch("Inject Emissive", "ClipmapLightEmissive", Rs.ClipmapLightEmissive)}
+                {RsSwitch("Inject Sun", "ClipmapLightSun", Rs.ClipmapLightSun)}
+                {RsSwitch("Inject Area Lights", "ClipmapLightArea", Rs.ClipmapLightArea)}
+                {RsSwitch("Inject Point Lights", "ClipmapLightPoint", Rs.ClipmapLightPoint)}
+                {RsSwitch("Sky Fill", "ClipmapLightSkyFill", Rs.ClipmapLightSkyFill)}
+                {RsSwitch("7×7 Bilateral GI Filter", "SdfGiBilateral", Rs.SdfGiBilateral)}
+              </>
+            )}
+            {Rs.GiAlgorithm === "ddgi" && (
+              <>
+                {RsVec3("Probe Grid Min", "ProbeGridMinimum", Rs.ProbeGridMinimum, 0.05)}
+                {RsVec3("Probe Grid Max", "ProbeGridMaximum", Rs.ProbeGridMaximum, 0.05)}
+                {RsFieldSlider("Probes X", "ProbeCountX", Rs.ProbeCountX, 2, 16, 1, "", 0)}
+                {RsFieldSlider("Probes Y", "ProbeCountY", Rs.ProbeCountY, 2, 16, 1, "", 0)}
+                {RsFieldSlider("Probes Z", "ProbeCountZ", Rs.ProbeCountZ, 2, 12, 1, "", 0)}
+                {RsFieldSlider("Rays / Probe", "ProbeRayCount", Rs.ProbeRayCount, 16, 256, 16, "rays", 0)}
+                {RsFieldSlider("Bounce Passes", "ProbeBouncePasses", Rs.ProbeBouncePasses, 1, 4, 1, "", 0)}
+                {RsFieldSlider("Temporal Blend", "ProbeTemporalBlend", Rs.ProbeTemporalBlend, 0, 0.98, 0.01, "", 2)}
+              </>
+            )}
+            {(Rs.GiAlgorithm === "voxel_sdf" || Rs.GiAlgorithm === "ddgi") && (
+              <>
+                {RsFieldSlider("AO Contact Radius", "AoContactDistance", Rs.AoContactDistance, 0.02, 1.5, 0.01, "m", 2)}
+                {RsFieldSlider("AO Chassis Radius", "AoChassisDistance", Rs.AoChassisDistance, 0.2, 6, 0.1, "m", 1)}
+                {RsFieldSlider("AO Rays / Pixel", "AoRaysPerPixel", Rs.AoRaysPerPixel, 4, 32, 1, "rays", 0)}
+              </>
+            )}
             {Rs.GiAlgorithm !== "off" && (
               <>
-                {RsSelect("GI Quality", QUALITY_PRESETS, Rs.GiQuality, ApplyGiQuality)}
+                {(Rs.GiAlgorithm === "sdf" || Rs.GiAlgorithm === "bvh") &&
+                  RsSelect("GI Quality", QUALITY_PRESETS, Rs.GiQuality, ApplyGiQuality)}
                 {Rs.GiAlgorithm === "sdf" &&
                   RsFieldSlider("Cone GI Directions", "GiCones", Rs.GiCones, 4, 14, 1, "dirs", 0)}
                 {Rs.GiAlgorithm === "bvh" &&

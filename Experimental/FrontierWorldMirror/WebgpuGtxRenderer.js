@@ -21,6 +21,7 @@ import {
   EncodeRenderSettingsUniforms,
 } from "./ShadowPipeline.js";
 import { ExpandVehicleInstances } from "./VehicleBvhAssets.js";
+import { RADIANCE_FIELD_WGSL } from "./RadianceFieldShaders.js";
 import {
   BuildSkyViewLut,
   GetSkyViewCacheKey,
@@ -88,6 +89,7 @@ struct SceneUniforms {
   uSolarCfg        : vec4f, // x=halfRad, y=discIntensity, z=glareStrength (0 = Muted), w=enabled
   uSolarTrans      : vec4f, // xyz=solar-axis transmittance, w=corona scatterFactor
   uSolarTint       : vec4f, // xyz=effective solar tint
+  uGiCfg           : vec4f, // x=clipmap cone count, y=AO contact radius, z=AO chassis radius, w=AO rays (C++ GI engines 3/4)
 };
 
 @group(0) @binding(0) var<uniform> U : SceneUniforms;
@@ -102,6 +104,8 @@ struct SceneUniforms {
 @group(0) @binding(9) var uSkyViewTex    : texture_2d<f32>;
 @group(0) @binding(10) var uSkySampler   : sampler;
 @group(0) @binding(11) var uMoonAtlasTex : texture_2d<f32>;
+@group(0) @binding(12) var<storage, read> uRadianceField : array<vec4f>;
+var<private> rfFragPix : vec2f;
 
 const PI : f32 = 3.14159265359;
 const ATLAS_W : f32 = ${ATLAS_WIDTH}.0;
@@ -2285,10 +2289,29 @@ fn traceBvhReflection(startOrigin : vec3f, startNormal : vec3f, startDir : vec3f
   return min(totalRad, vec3f(60.0));
 }
 
+fn rfTraceDistance(o : vec3f, d : vec3f, maxD : f32) -> f32 {
+  let h = traceOpaqueSceneIgnoring(o, d, maxD, -1);
+  return select(-1.0, h.t, h.hit);
+}
+${RADIANCE_FIELD_WGSL}
+
 fn evaluateMultiModeGi(pos : vec3f, N : vec3f, selfPrimIdx : i32) -> GiAoOut {
   let giAlg = U.uSelection.z;
   let giInt = U.uRenderCfg1.y;
   let fillB = U.uRenderCfg1.z;
+  if (giAlg == 3 || giAlg == 4) {
+    // C++ engines: SdfGlobalIllumination (VoxelSdfClipmap cone GI) / DdgiRaytracing (DynamicProbeCache) + LinearCosine AO
+    var out : GiAoOut;
+    let Vv = normalize(U.uCamOriginAndExp.xyz - pos);
+    if (giAlg == 4) {
+      out.irr = rfProbeIrradiance(pos, N, Vv) * giInt;
+    } else {
+      out.irr = rfConeGi(pos, N, U.uSkyRadiance.xyz, i32(U.uGiCfg.x)) * giInt;
+    }
+    let ao = rfAmbientOcclusion(pos, N, rfFragPix, i32(U.uGiCfg.w), U.uGiCfg.y, U.uGiCfg.z);
+    out.ao = 0.35 + 0.65 * ao;
+    return out;
+  }
   if (giAlg == 2) {
     let skyW = clamp(N.z * 0.5 + 0.5, 0.0, 1.0);
     let dayF = clamp(U.uSunDir.z * 4.0 + 0.25, 0.0, 1.0);
@@ -2611,6 +2634,7 @@ fn encodeSelectionDepthAlpha(entityCode : i32, hitDist : f32) -> f32 {
 
 @fragment
 fn fsMain(@builtin(position) fragPos : vec4f) -> @location(0) vec4f {
+  rfFragPix = fragPos.xy;
   let res = U.uResAndFov.xy;
   let aspect = res.x / max(1.0, res.y);
   // WebGPU fragPos.y = 0 at TOP of viewport -> +Y NDC is UP!
@@ -2941,6 +2965,7 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
       { binding: 9, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
       { binding: 10, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
       { binding: 11, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
+      { binding: 12, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "read-only-storage" } },
     ],
   });
   const ScenePipelineLayout = Device.createPipelineLayout({
@@ -3075,7 +3100,7 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
   });
 
   const SceneUniformBuf = Device.createBuffer({
-    size: 624,
+    size: 640,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
   const SceneDataStorageBuf = Device.createBuffer({
@@ -3206,6 +3231,11 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
     ],
   });
 
+  // Packed C++ GI radiance field (RadianceFieldLayout.js); 24-vec4 empty header until the first bake lands.
+  let RadianceFieldBuf = Device.createBuffer({ size: 24 * 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  let RadianceFieldRef = null;
+  let RadianceFieldFlags = { Probe: false, Clip: false };
+
   let SceneBindGroup = null;
   const RebuildSceneBindGroup = () => {
     SceneBindGroup = Device.createBindGroup({
@@ -3224,6 +3254,7 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
         { binding: 9, resource: SkyViewTex.createView() },
         { binding: 10, resource: SkySampler },
         { binding: 11, resource: MoonAtlasTex.createView() },
+        { binding: 12, resource: { buffer: RadianceFieldBuf } },
       ],
     });
   };
@@ -3259,7 +3290,7 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
   let ForceTransBuf = null;
   let ForceTransCap = 0;
 
-  const SceneUniformScratch = new ArrayBuffer(624);
+  const SceneUniformScratch = new ArrayBuffer(640);
   const SceneUniformF32 = new Float32Array(SceneUniformScratch);
   const SceneUniformI32 = new Int32Array(SceneUniformScratch);
   const OutlineUniformI32 = new Int32Array(4);
@@ -3300,6 +3331,20 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
       ConfiguredCanvas = Canvas;
       CanvasCtx = Ctx;
       return true;
+    },
+
+    UploadRadianceField(Field) {
+      if (Field === RadianceFieldRef) return;
+      RadianceFieldRef = Field;
+      const Src = Field && Field.length >= 96 ? Field : new Float32Array(96);
+      const Bytes = Math.max(24 * 16, Src.byteLength);
+      if (RadianceFieldBuf.size < Bytes) {
+        try { RadianceFieldBuf.destroy(); } catch {}
+        RadianceFieldBuf = Device.createBuffer({ size: Bytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+        RebuildSceneBindGroup();
+      }
+      Device.queue.writeBuffer(RadianceFieldBuf, 0, Src.buffer, Src.byteOffset, Src.byteLength);
+      RadianceFieldFlags = { Probe: Src[1] > 0.5, Clip: Src[2] > 0.5 };
     },
 
     UploadAtlas(Pixels) {
@@ -3581,7 +3626,9 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
 
         SceneUniformI32[36] = SelectedCode;
         SceneUniformI32[37] = RsU.shadowAlg;
-        SceneUniformI32[38] = RsU.giAlg;
+        // C++ engines fall back to the ambient fill until their bake has been uploaded.
+        SceneUniformI32[38] =
+          (RsU.giAlg === 3 && !RadianceFieldFlags.Clip) || (RsU.giAlg === 4 && !RadianceFieldFlags.Probe) ? 2 : RsU.giAlg;
         SceneUniformI32[39] = RsU.reflAlg;
 
         SceneUniformI32[40] = RsU.pcssTaps;
@@ -3720,6 +3767,10 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
           SceneUniformF32[154] = SolTint[2];
           SceneUniformF32[155] = 0;
         }
+        SceneUniformF32[156] = RsU.coneCount ?? 16;
+        SceneUniformF32[157] = RsU.aoContact ?? 0.25;
+        SceneUniformF32[158] = RsU.aoChassis ?? 2.2;
+        SceneUniformF32[159] = RsU.aoRays ?? 12;
 
         Device.queue.writeBuffer(SceneUniformBuf, 0, SceneUniformScratch);
 

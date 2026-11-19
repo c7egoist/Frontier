@@ -19,6 +19,7 @@ import {
   SKY_VIEW_HEIGHT,
   SKY_VIEW_WIDTH,
 } from "./AtmosphereSky.js";
+import { CreateRadianceFieldSampler } from "./RadianceFieldLayout.js";
 
 //==========================================================================================================================================
 // HERMETIC BAND KERNEL FACTORY (Zero free outer variables -> 100% safe for Blob Web Worker serialization even under esbuild --minify!)
@@ -30,6 +31,7 @@ export function CreateGtxBandKernel(
   TilesPerPrim,
   SkyLutW = 192,
   SkyLutH = 108,
+  FieldSampler = null,
 ) {
   const PI = Math.PI;
 
@@ -687,6 +689,7 @@ export function CreateGtxBandKernel(
         let Wnz = Insts[Ib + 24] * Nlx + Insts[Ib + 25] * Nly + Insts[Ib + 26] * Nlz;
         const NL = Math.max(1e-6, Len3(Wnx, Wny, Wnz));
         Wnx /= NL; Wny /= NL; Wnz /= NL;
+        OutHit.gnx = Wnx; OutHit.gny = Wny; OutHit.gnz = Wnz;
         const RdDot = Wnx * Rdx + Wny * Rdy + Wnz * Rdz;
         if (RdDot > -0.02) {
           Wnx -= Rdx * (RdDot + 0.02);
@@ -1485,6 +1488,36 @@ export function CreateGtxBandKernel(
 
     // Render horizontal band [StartRow, EndRow) into compact band-local buffers (offset 0 = StartRow * Width)
     // or full-frame buffers when OutputIsBandLocal === false.
+    // LinearCosineLightIntegration.cpp combined diffuse AO: contact (ContactRadius) x chassis (ChassisRadius) cosine rays with
+    // interleaved-gradient-noise rotation; filtered later by the 2-step a-trous pass (ComposeGiAuxFrame).
+    EvaluateCppAmbientOcclusion(Prims, Veh, Px, Py, Pz, Nx, Ny, Nz, PixX, PixY, Rays, ContactR, ChassisR) {
+      const IgnDot = 0.06711056 * PixX + 0.00583715 * PixY;
+      const IgnFrac = 52.9829189 * (IgnDot - Math.floor(IgnDot));
+      const Rot = (IgnFrac - Math.floor(IgnFrac)) * 2.0 * PI;
+      const S = Nz >= 0 ? 1 : -1;
+      const A = -1 / (S + Nz);
+      const D = Nx * Ny * A;
+      const Tx = 1 + S * Nx * Nx * A, Ty = S * D, Tz = -S * Nx;
+      const Bx = D, By = S + Ny * Ny * A, Bz = -Ny;
+      const Ox = Px + Nx * 2e-3, Oy = Py + Ny * 2e-3, Oz = Pz + Nz * 2e-3;
+      let Contact = 0, Chassis = 0;
+      const H = this._SecHit;
+      for (let R = 0; R < Rays; ++R) {
+        const U1 = (R + 0.5) / Rays;
+        const Phi = R * 2.39996323 + Rot;
+        const SinT = Math.sqrt(U1), CosT = Math.sqrt(Math.max(0, 1 - U1));
+        const Lx = SinT * Math.cos(Phi), Ly = SinT * Math.sin(Phi);
+        const Dx = Tx * Lx + Bx * Ly + Nx * CosT, Dy = Ty * Lx + By * Ly + Ny * CosT, Dz = Tz * Lx + Bz * Ly + Nz * CosT;
+        this.TraceScene(Prims, Veh, Ox, Oy, Oz, Dx, Dy, Dz, ChassisR, -1, true, H);
+        if (!H.hit || H.t <= 1.5e-3) { Contact += 1; Chassis += 1; }
+        else {
+          if (H.t > ContactR) Contact += 1;
+          Chassis += Clamp(H.t / ChassisR, 0, 1);
+        }
+      }
+      return Clamp((Contact / Rays) * (0.25 + 0.75 * (Chassis / Rays)), 0, 1);
+    }
+
     RenderBand(Params, RgbaOut, DepthOut, EntityOut, OutputIsBandLocal = true) {
       const {
         CompiledScene,
@@ -1500,6 +1533,8 @@ export function CreateGtxBandKernel(
         SkyLut = null,
         MoonAtlas = null,
         TimeSec = 0,
+        RadianceField = null,
+        GiAux = null,
       } = Params;
 
       const { Prims, Lights } = this.PackScene(CompiledScene, AtlasPixels);
@@ -1511,7 +1546,17 @@ export function CreateGtxBandKernel(
       const ShadowRays = Clamp((Rs.ShadowRays ?? 4) | 0, 1, 8);
       const ShadowSoftness = Rs.ShadowSoftness ?? 1.0;
       const EmissiveShadowed = Rs.EmissiveShadowMode !== "unshadowed";
-      const GiAlg = Rs.GiAlgorithm === "off" ? 2 : Rs.GiAlgorithm === "bvh" ? 1 : 0;
+      // C++ engines: 3 = SdfGlobalIllumination (VoxelSdfClipmap cone GI), 4 = DdgiRaytracing (DynamicProbeCache).
+      // While the radiance field bake is pending they fall back to the ambient fill so the frame never goes black.
+      let GiAlg = ({ off: 2, bvh: 1, voxel_sdf: 3, ddgi: 4 })[Rs.GiAlgorithm] ?? 0;
+      const FieldReady = !!(FieldSampler && RadianceField && RadianceField.length > 96);
+      if (GiAlg === 3 && !(FieldReady && RadianceField[2] > 0.5)) GiAlg = 2;
+      if (GiAlg === 4 && !(FieldReady && RadianceField[1] > 0.5)) GiAlg = 2;
+      const CppGi = GiAlg === 3 || GiAlg === 4;
+      const ConeCount = Clamp((Rs.ClipmapConeCount ?? 16) | 0, 12, 24);
+      const AoRays = Clamp(Math.max(12, (Rs.AoRaysPerPixel ?? 8) | 0), 12, 32);
+      const AoContact = Rs.AoContactDistance ?? 0.25;
+      const AoChassis = Rs.AoChassisDistance ?? 2.2;
       const GiSamples = Clamp((Rs.GiSamples ?? 6) | 0, 2, 16);
       const GiIntensity = Rs.GiIntensity ?? 1.0;
       const FillBoost = Rs.FillBoost ?? 1.0;
@@ -1567,6 +1612,9 @@ export function CreateGtxBandKernel(
 
           const PixIdx = Py * Width + Px - RowBaseOffset;
           let LinR = 0, LinG = 0, LinB = 0;
+          // Diffuse-GI split for the main-thread C++ filters (bilateral GI + AO a-trous): Lin = Rest + Gi * GiW * (0.35 + 0.65 AO)
+          let AuxGiR = 0, AuxGiG = 0, AuxGiB = 0, AuxWR = 0, AuxWG = 0, AuxWB = 0, AuxAo = 1, AuxValid = 0;
+          let AuxNx = 0, AuxNy = 0, AuxNz = 0;
           let EntityCode = 0;
           let HitDist = 50.0;
 
@@ -1997,7 +2045,21 @@ export function CreateGtxBandKernel(
 
               // 3. Multi-mode GI + AO (Cone GI / 2-bounce BVH GI / Off + Starlight)
               const GiAo = this._GiOut;
-              if (GiAlg === 2) {
+              let SpecAoCpp = -1;
+              if (CppGi) {
+                if (GiAlg === 4) {
+                  FieldSampler.ProbeIrradiance(RadianceField, Hit.px, Hit.py, Hit.pz, Nx, Ny, Nz, Vx, Vy, Vz, GiAo);
+                } else {
+                  FieldSampler.ConeGi(RadianceField, Hit.px, Hit.py, Hit.pz, Nx, Ny, Nz, SkyRadiance[0], SkyRadiance[1], SkyRadiance[2], ConeCount, GiAo);
+                }
+                GiAo[0] *= GiIntensity; GiAo[1] *= GiIntensity; GiAo[2] *= GiIntensity;
+                const AoRaw = this.EvaluateCppAmbientOcclusion(Prims, VehicleBvhData, Hit.px, Hit.py, Hit.pz, Nx, Ny, Nz, Px, Py, AoRays, AoContact, AoChassis);
+                GiAo[3] = 0.35 + 0.65 * AoRaw;
+                // LinearCosine specular AO: clamp((NV + AO)^exp2(-16 a - 1) - 1 + AO)
+                const SpA = Math.max(0.025, Mat.roughness * Mat.roughness);
+                SpecAoCpp = Clamp(Math.pow(VdotN + AoRaw, Math.pow(2, -16 * SpA - 1)) - 1 + AoRaw, 0, 1);
+                AuxAo = AoRaw;
+              } else if (GiAlg === 2) {
                 const SkyW = Clamp(Nz * 0.5 + 0.5, 0.0, 1.0);
                 const Sz = Nz > 0.25 ? Nz : 0.25;
                 const SL = Len3(Nx * 0.35, Ny * 0.35, Sz);
@@ -2095,12 +2157,24 @@ export function CreateGtxBandKernel(
               LinR += (1.0 - FenvR) * Mat.baseR * GiAo[0] * KdScale;
               LinG += (1.0 - FenvG) * Mat.baseG * GiAo[1] * KdScale;
               LinB += (1.0 - FenvB) * Mat.baseB * GiAo[2] * KdScale;
+              let ShW = 0;
 
               if (Mat.sheenR + Mat.sheenG + Mat.sheenB > 0.003) {
-                const ShK = Math.pow(1.0 - VdotN, 3.0) * 0.45 * TotalAo;
+                ShW = Math.pow(1.0 - VdotN, 3.0) * 0.45;
+                const ShK = ShW * TotalAo;
                 LinR += Mat.sheenR * GiAo[0] * ShK;
                 LinG += Mat.sheenG * GiAo[1] * ShK;
                 LinB += Mat.sheenB * GiAo[2] * ShK;
+              }
+              if (CppGi) {
+                // Diffuse GI weight without AO (AO factor applied after the a-trous filter on the main thread)
+                const KdNoAo = (1.0 - Mat.metallic) * (1.0 - Mat.transmission) * Mat.ao;
+                AuxWR = (1.0 - FenvR) * Mat.baseR * KdNoAo + Mat.sheenR * ShW * Mat.ao;
+                AuxWG = (1.0 - FenvG) * Mat.baseG * KdNoAo + Mat.sheenG * ShW * Mat.ao;
+                AuxWB = (1.0 - FenvB) * Mat.baseB * KdNoAo + Mat.sheenB * ShW * Mat.ao;
+                AuxGiR = GiAo[0]; AuxGiG = GiAo[1]; AuxGiB = GiAo[2];
+                AuxValid = 1;
+                AuxNx = Nx; AuxNy = Ny; AuxNz = Nz;
               }
 
               // 4. Roughness-Gated Specular Reflection + Light Quad Mirror Glint
@@ -2162,7 +2236,8 @@ export function CreateGtxBandKernel(
               }
 
               const EnvEnergy = 1.0 - Mat.roughness * 0.78;
-              const EScale = EnvEnergy * EnvEnergy * Mix(0.28, 1.0, Math.max(Mat.metallic, RaySharpness)) * TotalAo;
+              const SpecOcc = SpecAoCpp >= 0 ? SpecAoCpp * Mat.ao : TotalAo;
+              const EScale = EnvEnergy * EnvEnergy * Mix(0.28, 1.0, Math.max(Mat.metallic, RaySharpness)) * SpecOcc;
               LinR += SpecEnvR * FenvR * EScale;
               LinG += SpecEnvG * FenvG * EScale;
               LinB += SpecEnvB * FenvB * EScale;
@@ -2203,6 +2278,20 @@ export function CreateGtxBandKernel(
           DepthOut[PixIdx] = HitDist;
           EntityOut[PixIdx] = EntityCode;
 
+          if (GiAux) {
+            const A3 = PixIdx * 3;
+            const DiffAo = 0.35 + 0.65 * AuxAo;
+            GiAux.Rest[A3] = LinR - AuxGiR * AuxWR * DiffAo;
+            GiAux.Rest[A3 + 1] = LinG - AuxGiG * AuxWG * DiffAo;
+            GiAux.Rest[A3 + 2] = LinB - AuxGiB * AuxWB * DiffAo;
+            GiAux.Gi[A3] = AuxGiR; GiAux.Gi[A3 + 1] = AuxGiG; GiAux.Gi[A3 + 2] = AuxGiB;
+            GiAux.GiW[A3] = AuxWR; GiAux.GiW[A3 + 1] = AuxWG; GiAux.GiW[A3 + 2] = AuxWB;
+            GiAux.Ao[PixIdx] = AuxAo;
+            const A4 = PixIdx * 4;
+            GiAux.Geo[A4] = AuxNx; GiAux.Geo[A4 + 1] = AuxNy; GiAux.Geo[A4 + 2] = AuxNz; GiAux.Geo[A4 + 3] = AuxValid;
+            GiAux.Pos[A3] = Rox + Rdx * HitDist; GiAux.Pos[A3 + 1] = Roy + Rdy * HitDist; GiAux.Pos[A3 + 2] = Roz + Rdz * HitDist;
+          }
+
           let Sr, Sg, Sb;
           if (ViewModeCode === 2) {
             Sr = Clamp(LinR, 0, 1);
@@ -2223,7 +2312,110 @@ export function CreateGtxBandKernel(
     }
   }
 
-  return { GtxBandEngine, Clamp, Mix };
+  //==================================================================================================================================
+  // C++ post filters on the full frame: AO 2-step a-trous (LinearCosineLightIntegration) + 7x7 joint bilateral diffuse GI
+  // (TieredWorldRenderSequence::ApplyDiffuseGiBilateralFilter, SDF GI only), then composite + ACES/sRGB into RgbaOut.
+  //==================================================================================================================================
+  function ComposeGiAuxFrame(W, H, Aux, CamOrigin, Exposure, ViewModeCode, Bilateral, RgbaOut) {
+    const N = W * H;
+    const Geo = Aux.Geo, Pos = Aux.Pos;
+    let Ping = Aux.Ao.slice();
+    let Pong = new Float32Array(N);
+    const K1 = [1.0, 0.6];
+    for (const Step of [1, 2]) {
+      for (let Y = 0; Y < H; ++Y) {
+        for (let X = 0; X < W; ++X) {
+          const C = Y * W + X;
+          if (Geo[C * 4 + 3] < 0.5) { Pong[C] = 1; continue; }
+          const Cnx = Geo[C * 4], Cny = Geo[C * 4 + 1], Cnz = Geo[C * 4 + 2];
+          const Cpx = Pos[C * 3], Cpy = Pos[C * 3 + 1], Cpz = Pos[C * 3 + 2];
+          let Sa = 0, Sw = 0;
+          for (let Ky = -1; Ky <= 1; ++Ky) {
+            const Ny = Clamp(Y + Ky * Step, 0, H - 1);
+            for (let Kx = -1; Kx <= 1; ++Kx) {
+              const Nx = Clamp(X + Kx * Step, 0, W - 1);
+              const O = Ny * W + Nx;
+              if (Geo[O * 4 + 3] < 0.5) continue;
+              const Pd = Math.abs(Cnx * (Pos[O * 3] - Cpx) + Cny * (Pos[O * 3 + 1] - Cpy) + Cnz * (Pos[O * 3 + 2] - Cpz));
+              const Nd = Math.max(0, Cnx * Geo[O * 4] + Cny * Geo[O * 4 + 1] + Cnz * Geo[O * 4 + 2]);
+              if (Nd <= 0) continue;
+              const N2 = Nd * Nd, N4 = N2 * N2, N8 = N4 * N4, N16 = N8 * N8;
+              const Wt = K1[Kx < 0 ? -Kx : Kx] * K1[Ky < 0 ? -Ky : Ky] * Math.exp(-Pd * 80) * N16 * N16;
+              Sa += Ping[O] * Wt; Sw += Wt;
+            }
+          }
+          Pong[C] = Sw > 1e-6 ? Sa / Sw : Ping[C];
+        }
+      }
+      const T = Ping; Ping = Pong; Pong = T;
+    }
+    const Ao = Ping;
+    let Gi = Aux.Gi;
+    if (Bilateral) {
+      const Out = Gi.slice();
+      const Depth = new Float32Array(N);
+      for (let I = 0; I < N; ++I) {
+        Depth[I] = Math.hypot(Pos[I * 3] - CamOrigin[0], Pos[I * 3 + 1] - CamOrigin[1], Pos[I * 3 + 2] - CamOrigin[2]);
+      }
+      const Sig2 = 2 * 2.1 * 2.1;
+      const SpatialW = new Float32Array(49);
+      for (let Dy = -3; Dy <= 3; ++Dy) for (let Dx = -3; Dx <= 3; ++Dx) SpatialW[(Dy + 3) * 7 + Dx + 3] = Math.exp(-(Dx * Dx + Dy * Dy) / Sig2);
+      for (let Y = 0; Y < H; ++Y) {
+        for (let X = 0; X < W; ++X) {
+          const C = Y * W + X;
+          if (Geo[C * 4 + 3] < 0.5) continue;
+          const Cd = Depth[C];
+          const InvDepthSig = 1 / Math.max(1e-4, 0.08 * Cd);
+          const Cnx = Geo[C * 4], Cny = Geo[C * 4 + 1], Cnz = Geo[C * 4 + 2];
+          let R = 0, G = 0, B = 0, Sw = 0;
+          for (let Dy = -3; Dy <= 3; ++Dy) {
+            const Ny = Clamp(Y + Dy, 0, H - 1);
+            for (let Dx = -3; Dx <= 3; ++Dx) {
+              const Nx = Clamp(X + Dx, 0, W - 1);
+              const O = Ny * W + Nx;
+              if (Geo[O * 4 + 3] < 0.5) continue;
+              const Nd = Cnx * Geo[O * 4] + Cny * Geo[O * 4 + 1] + Cnz * Geo[O * 4 + 2];
+              if (Nd <= 0) continue;
+              const Dd = Cd - Depth[O];
+              const N2 = Nd * Nd, N4 = N2 * N2, N8 = N4 * N4;
+              const Wt = SpatialW[(Dy + 3) * 7 + Dx + 3] * N8 * N8 * N8 * Math.exp(-(Dd * Dd) * InvDepthSig);
+              R += Gi[O * 3] * Wt; G += Gi[O * 3 + 1] * Wt; B += Gi[O * 3 + 2] * Wt; Sw += Wt;
+            }
+          }
+          if (Sw > 1e-5) { Out[C * 3] = R / Sw; Out[C * 3 + 1] = G / Sw; Out[C * 3 + 2] = B / Sw; }
+        }
+      }
+      Gi = Out;
+    }
+    for (let I = 0; I < N; ++I) {
+      const F = 0.35 + 0.65 * Ao[I];
+      const R = Aux.Rest[I * 3] + Gi[I * 3] * Aux.GiW[I * 3] * F;
+      const G = Aux.Rest[I * 3 + 1] + Gi[I * 3 + 1] * Aux.GiW[I * 3 + 1] * F;
+      const B = Aux.Rest[I * 3 + 2] + Gi[I * 3 + 2] * Aux.GiW[I * 3 + 2] * F;
+      let Sr, Sg, Sb;
+      if (ViewModeCode === 2) {
+        Sr = Clamp(R, 0, 1); Sg = Clamp(G, 0, 1); Sb = Clamp(B, 0, 1);
+      } else {
+        Sr = Math.pow(AcesFilmChannel(Math.max(0, R) * Exposure), 1.0 / 2.2);
+        Sg = Math.pow(AcesFilmChannel(Math.max(0, G) * Exposure), 1.0 / 2.2);
+        Sb = Math.pow(AcesFilmChannel(Math.max(0, B) * Exposure), 1.0 / 2.2);
+      }
+      if (RgbaOut[I * 4 + 3] === 0) continue;
+      RgbaOut[I * 4] = (Sr * 255 + 0.5) | 0;
+      RgbaOut[I * 4 + 1] = (Sg * 255 + 0.5) | 0;
+      RgbaOut[I * 4 + 2] = (Sb * 255 + 0.5) | 0;
+    }
+    return RgbaOut;
+  }
+
+  function AllocateGiAux(Pix) {
+    return {
+      Rest: new Float32Array(Pix * 3), Gi: new Float32Array(Pix * 3), GiW: new Float32Array(Pix * 3),
+      Ao: new Float32Array(Pix), Geo: new Float32Array(Pix * 4), Pos: new Float32Array(Pix * 3),
+    };
+  }
+
+  return { GtxBandEngine, Clamp, Mix, ComposeGiAuxFrame, AllocateGiAux };
 }
 
 const LocalKernel = CreateGtxBandKernel(
@@ -2233,6 +2425,7 @@ const LocalKernel = CreateGtxBandKernel(
   TILES_PER_PRIM,
   SKY_VIEW_WIDTH,
   SKY_VIEW_HEIGHT,
+  CreateRadianceFieldSampler(),
 );
 
 //==========================================================================================================================================
@@ -2278,6 +2471,26 @@ export class CpuGtxRenderer {
     this._SkyLutFloat = new Float32Array(SKY_VIEW_WIDTH * SKY_VIEW_HEIGHT * 4);
     this._LastSkyLutKey = "";
     this._SyncedSkyLutKey = "";
+    this._SyncedField = null;
+  }
+
+  // C++ engines need the full-frame post filters (AO a-trous always, bilateral for SDF GI) before the RGBA swap.
+  _WantsGiAux(Params) {
+    const Rs = Params?.CompiledScene?.RenderSettings || {};
+    const F = Params?.RadianceField;
+    if (!F || F.length <= 96) return false;
+    if (Rs.GiAlgorithm === "voxel_sdf") return F[2] > 0.5;
+    if (Rs.GiAlgorithm === "ddgi") return F[1] > 0.5;
+    return false;
+  }
+
+  _ComposeGiAux(Params, Aux, Rgba, Width, Height) {
+    const Scene = Params.CompiledScene;
+    const Rs = Scene.RenderSettings || {};
+    LocalKernel.ComposeGiAuxFrame(
+      Width, Height, Aux, Scene.CameraOrigin, Scene.ExposureGain, Params.ViewModeCode | 0,
+      Rs.GiAlgorithm === "voxel_sdf" && Rs.SdfGiBilateral !== false, Rgba,
+    );
   }
 
   _EnsureSkyLut(CompiledScene) {
@@ -2391,13 +2604,15 @@ export class CpuGtxRenderer {
     this._EnsureBackBuffers(Width, Height);
     this._EnsureSkyLut(Params.CompiledScene);
     const VehicleBvhData = Params.VehicleBvhData || this._BuildVehicleBvhData(Params.CompiledScene, Params.VehicleBvhAssets);
+    const GiAux = this._WantsGiAux(Params) ? LocalKernel.AllocateGiAux(Width * Height) : null;
     this._LocalEngine.RenderBand(
-      { ...Params, VehicleBvhData, SkyLut: this._SkyLutFloat, StartRow: 0, EndRow: Height },
+      { ...Params, VehicleBvhData, SkyLut: this._SkyLutFloat, StartRow: 0, EndRow: Height, GiAux },
       this._BackRgba,
       this._BackDepth,
       this._BackEntity,
       false,
     );
+    if (GiAux) this._ComposeGiAux(Params, GiAux, this._BackRgba, Width, Height);
     this._SwapBackToFront(Width, Height);
     return true;
   }
@@ -2413,7 +2628,9 @@ export class CpuGtxRenderer {
       const WorkerCount = Math.min(10, Math.max(4, Hw));
       const Source = [
         `"use strict";`,
-        `const Kernel = (${CreateGtxBandKernel.toString()})(${ATLAS_WIDTH}, ${ATLAS_COLS}, ${ATLAS_TILE_SIZE}, ${TILES_PER_PRIM}, ${SKY_VIEW_WIDTH}, ${SKY_VIEW_HEIGHT});`,
+        `const FieldSampler = (${CreateRadianceFieldSampler.toString()})();`,
+        `const Kernel = (${CreateGtxBandKernel.toString()})(${ATLAS_WIDTH}, ${ATLAS_COLS}, ${ATLAS_TILE_SIZE}, ${TILES_PER_PRIM}, ${SKY_VIEW_WIDTH}, ${SKY_VIEW_HEIGHT}, FieldSampler);`,
+        `let CachedField = null;`,
         `const Engine = new Kernel.GtxBandEngine();`,
         `let CachedAtlas = null;`,
         `let CachedMoonAtlas = null;`,
@@ -2433,6 +2650,10 @@ export class CpuGtxRenderer {
         `    CachedMoonAtlas = { width: Msg.Width, height: Msg.Height, ready: Msg.Ready, pixels: new Uint8Array(Msg.PixelsBuffer) };`,
         `    return;`,
         `  }`,
+        `  if (Msg.Kind === "radianceField") {`,
+        `    CachedField = Msg.FieldBuffer ? new Float32Array(Msg.FieldBuffer) : null;`,
+        `    return;`,
+        `  }`,
         `  if (Msg.Kind === "skyLut") {`,
         `    CachedSkyLut = new Float32Array(Msg.SkyLutBuffer);`,
         `    return;`,
@@ -2448,7 +2669,7 @@ export class CpuGtxRenderer {
         `    return;`,
         `  }`,
         `  if (Msg.Kind === "band") {`,
-        `    const { JobId, CompiledScene, Width, Height, StartRow, EndRow, ViewModeCode, ShowGrid, TimeSec } = Msg;`,
+        `    const { JobId, CompiledScene, Width, Height, StartRow, EndRow, ViewModeCode, ShowGrid, TimeSec, WantAux } = Msg;`,
         `    const Rows = Math.max(0, EndRow - StartRow);`,
         `    const Pix = Width * Rows;`,
         `    const Rgba = new Uint8ClampedArray(Pix * 4);`,
@@ -2457,8 +2678,11 @@ export class CpuGtxRenderer {
         `    const VehicleBvhData = (CachedVehCount > 0 && CachedVehTris && CachedVehNodes && CachedVehInsts)`,
         `      ? { nodes: CachedVehNodes, tris: CachedVehTris, insts: CachedVehInsts, instCount: CachedVehCount }`,
         `      : null;`,
-        `    Engine.RenderBand({ CompiledScene, AtlasPixels: CachedAtlas, MoonAtlas: CachedMoonAtlas, SkyLut: CachedSkyLut, VehicleBvhData, Width, Height, StartRow, EndRow, ViewModeCode, ShowGrid, TimeSec }, Rgba, Depth, Entity, true);`,
-        `    self.postMessage({ Kind: "bandDone", JobId, Width, Height, StartRow, EndRow, RgbaBuffer: Rgba.buffer, DepthBuffer: Depth.buffer, EntityBuffer: Entity.buffer }, [Rgba.buffer, Depth.buffer, Entity.buffer]);`,
+        `    const GiAux = WantAux && CachedField ? Kernel.AllocateGiAux(Pix) : null;`,
+        `    Engine.RenderBand({ CompiledScene, AtlasPixels: CachedAtlas, MoonAtlas: CachedMoonAtlas, SkyLut: CachedSkyLut, VehicleBvhData, Width, Height, StartRow, EndRow, ViewModeCode, ShowGrid, TimeSec, RadianceField: CachedField, GiAux }, Rgba, Depth, Entity, true);`,
+        `    const Transfer = [Rgba.buffer, Depth.buffer, Entity.buffer];`,
+        `    if (GiAux) for (const K of Object.keys(GiAux)) Transfer.push(GiAux[K].buffer);`,
+        `    self.postMessage({ Kind: "bandDone", JobId, Width, Height, StartRow, EndRow, RgbaBuffer: Rgba.buffer, DepthBuffer: Depth.buffer, EntityBuffer: Entity.buffer, GiAux }, Transfer);`,
         `  }`,
         `};`,
       ].join("\n");
@@ -2479,6 +2703,7 @@ export class CpuGtxRenderer {
       this._SyncedMoonVersion = -1;
       this._SyncedVehicleTris = false;
       this._SyncedSkyLutKey = "";
+      this._SyncedField = null;
       return true;
     } catch {
       this._Workers = [];
@@ -2491,14 +2716,26 @@ export class CpuGtxRenderer {
     const Job = this._ActiveJob;
     if (!Job || Msg.JobId !== Job.JobId) return;
 
-    const { Width, StartRow, RgbaBuffer, DepthBuffer, EntityBuffer } = Msg;
+    const { Width, StartRow, RgbaBuffer, DepthBuffer, EntityBuffer, GiAux } = Msg;
     const PixOffset = StartRow * Width;
     Job.Rgba.set(new Uint8ClampedArray(RgbaBuffer), PixOffset * 4);
     Job.Depth.set(new Float32Array(DepthBuffer), PixOffset);
     Job.Entity.set(new Uint16Array(EntityBuffer), PixOffset);
+    if (Job.Aux && GiAux) {
+      Job.Aux.Rest.set(GiAux.Rest, PixOffset * 3);
+      Job.Aux.Gi.set(GiAux.Gi, PixOffset * 3);
+      Job.Aux.GiW.set(GiAux.GiW, PixOffset * 3);
+      Job.Aux.Ao.set(GiAux.Ao, PixOffset);
+      Job.Aux.Geo.set(GiAux.Geo, PixOffset * 4);
+      Job.Aux.Pos.set(GiAux.Pos, PixOffset * 3);
+      Job.AuxBands += 1;
+    }
 
     Job.DoneBands += 1;
     if (Job.DoneBands < Job.TotalBands) return;
+    if (Job.Aux && Job.AuxBands === Job.TotalBands) {
+      this._ComposeGiAux(Job.Params, Job.Aux, Job.Rgba, Job.Width, Job.Height);
+    }
 
     // 100% OF BANDS COMPLETE -> ATOMIC SINGLE-SWAP TO FRONT BUFFER!
     const ElapsedMs = Math.max(0.5, performance.now() - Job.StartedAt);
@@ -2585,6 +2822,16 @@ export class CpuGtxRenderer {
       }
     }
 
+    const RadianceField = Params.RadianceField || null;
+    if (RadianceField !== this._SyncedField) {
+      this._SyncedField = RadianceField;
+      for (let I = 0; I < this._Workers.length; ++I) {
+        const Copy = RadianceField ? RadianceField.slice() : null;
+        this._Workers[I].postMessage({ Kind: "radianceField", FieldBuffer: Copy ? Copy.buffer : null }, Copy ? [Copy.buffer] : []);
+      }
+    }
+    const WantAux = this._WantsGiAux(Params);
+
     const WorkerCount = Math.min(this._Workers.length, Height);
     const JobId = ++this._JobCounter;
     const N = Width * Height;
@@ -2592,6 +2839,9 @@ export class CpuGtxRenderer {
       JobId,
       Width,
       Height,
+      Params,
+      Aux: WantAux ? LocalKernel.AllocateGiAux(N) : null,
+      AuxBands: 0,
       TotalBands: WorkerCount,
       DoneBands: 0,
       Rgba: new Uint8ClampedArray(N * 4),
@@ -2615,6 +2865,7 @@ export class CpuGtxRenderer {
         ViewModeCode,
         ShowGrid,
         TimeSec,
+        WantAux,
       });
     }
   }

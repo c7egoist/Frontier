@@ -1317,7 +1317,8 @@ assert.ok(
   const NightScene = CompileLiveGtxScene(ShowcaseInitialRows, NightValues, {}, "PERSP");
   assert.ok(NightScene.SunDir[2] < -0.5, `Midnight SunDir.z is deeply below horizon (${NightScene.SunDir[2].toFixed(3)})`);
   assert.ok(
-    NightScene.SkyRadiance[0] < 0.02 && NightScene.SkyRadiance[1] < 0.02 && NightScene.SkyRadiance[2] < 0.03,
+    // C++ SynchronizeWorldAtmosphere floors SkyRadiance at (0.015, 0.020, 0.032); at midnight the zenith LUT sits on that floor.
+    NightScene.SkyRadiance[0] <= 0.0151 && NightScene.SkyRadiance[1] <= 0.0201 && NightScene.SkyRadiance[2] <= 0.0321,
     `Night SkyRadiance is truly dark (${NightScene.SkyRadiance.map((v) => v.toFixed(4)).join(",")})`,
   );
   const NightLut = BuildSkyViewLut(NightScene.SunDir, NightScene.Atmosphere);
@@ -1396,7 +1397,8 @@ assert.ok(
     SumDark += (CpuNight.OffscreenImg.data[i] + CpuNight.OffscreenImg.data[i + 1] + CpuNight.OffscreenImg.data[i + 2]) / (3 * 255);
   }
   const AvgDark = SumDark / (120 * 80);
-  assert.ok(AvgDark < 0.03, `Unlit night scene average brightness is genuinely dark (${AvgDark.toFixed(4)})`);
+  // Bound follows the C++ night sky floor (0.015, 0.020, 0.032) that now feeds the ambient fill (was 0.03 with the old ~0.002 sky).
+  assert.ok(AvgDark < 0.04, `Unlit night scene average brightness is genuinely dark (${AvgDark.toFixed(4)})`);
 
   // Add an emissive primitive at night with an occluder between it and the floor -> verifies direct emissive GI + shadow
   const EmissiveRows = [
@@ -1621,8 +1623,8 @@ assert.ok(
   );
   assert.deepStrictEqual(
     GI_ALGORITHMS.map((a) => a.id),
-    ["sdf", "bvh", "off"],
-    "GI exposes Cone GI, BVH Raytraced GI, and Off",
+    ["voxel_sdf", "ddgi", "sdf", "bvh", "off"],
+    "GI exposes C++ SDF Cone GI (voxel clipmap), C++ DDGI, analytic Cone GI, BVH Raytraced GI, and Off",
   );
   assert.deepStrictEqual(
     REFLECTION_ALGORITHMS.map((a) => a.id),
@@ -1736,6 +1738,73 @@ assert.ok(
   assert.ok(FSun[3] > FMoon[3] * 2.0, `Daytime sunlight strongly illuminates the scene above moonlight (sun=${FSun[3].toFixed(4)} vs moon=${FMoon[3].toFixed(4)})`);
 }
 
+// ============================================================================
+// Suite 20: C++ GI engines — VoxelSdfClipmap cone GI + DynamicProbeCache DDGI + LinearCosine AO across CPU / WGSL / GLSL
+// ============================================================================
+{
+  const { CanonicalGiFieldSettings, CanonicalRenderSettings: Crs } = await import("./ShowcaseGalleryScene.js");
+  const { BakeRadianceFieldSync, DescribeRadianceFieldRequest } = await import("./RadianceFieldBaker.js");
+  const { CreateRadianceFieldSampler, RADIANCE_FIELD_TEXTURE_WIDTH } = await import("./RadianceFieldLayout.js");
+  const { EncodeRenderSettingsUniforms } = await import("./ShadowPipeline.js");
+  assert.strictEqual(Crs.GiAlgorithm, "voxel_sdf", "Default GI engine is the C++ default SdfGlobalIllumination");
+  assert.deepStrictEqual(
+    [CanonicalGiFieldSettings.ProbeCountX, CanonicalGiFieldSettings.ProbeCountY, CanonicalGiFieldSettings.ProbeCountZ, CanonicalGiFieldSettings.ProbeRayCount],
+    [7, 6, 4, 64],
+    "DDGI lattice matches C++ ShowcaseGalleryScene (7x6x4, 64 rays)",
+  );
+  assert.strictEqual(EncodeRenderSettingsUniforms({ GiAlgorithm: "voxel_sdf" }).giAlg, 3, "voxel_sdf encodes to giAlg 3");
+  assert.strictEqual(EncodeRenderSettingsUniforms({ GiAlgorithm: "ddgi" }).giAlg, 4, "ddgi encodes to giAlg 4");
+
+  const SceneFor = (GiAlgorithm, Extra = {}) => {
+    const Vals = { ...ShowcaseInitialValues, "render-settings": { ...Crs, GiAlgorithm, ...Extra } };
+    return CompileLiveGtxScene(ShowcaseInitialRows, Vals, {}, "PERSP");
+  };
+  // Camera / exposure changes must not invalidate the bake (orbiting never re-bakes)
+  const KeyA = DescribeRadianceFieldRequest(SceneFor("voxel_sdf")).Key;
+  const KeyB = DescribeRadianceFieldRequest({ ...SceneFor("voxel_sdf"), CameraOrigin: [9, 9, 9], ExposureGain: 3 }).Key;
+  assert.strictEqual(KeyA, KeyB, "Radiance field key ignores camera and exposure");
+  assert.notStrictEqual(KeyA, DescribeRadianceFieldRequest(SceneFor("voxel_sdf", { ClipmapRadiosityBounces: 1 })).Key, "Radiance field key tracks clipmap settings");
+  assert.strictEqual(DescribeRadianceFieldRequest(SceneFor("sdf")), null, "Legacy engines need no radiance field");
+
+  const Sampler = CreateRadianceFieldSampler();
+  const RenderFloor = (Sc, Field) => {
+    const Atl = new MaterialAtlasSynchronizer();
+    Atl.UpdatePrimitives(Sc.Primitives);
+    const Cpu = new CpuGtxRenderer();
+    Cpu.RenderFullFrame({ CompiledScene: Sc, AtlasPixels: Atl.Pixels, Width: 96, Height: 64, ViewModeCode: 0, ShowGrid: false, RadianceField: Field });
+    let Sum = 0;
+    for (let I = 0; I < Cpu.OffscreenImg.data.length; I += 4) Sum += Cpu.OffscreenImg.data[I] + Cpu.OffscreenImg.data[I + 1] + Cpu.OffscreenImg.data[I + 2];
+    return Sum / (Cpu.OffscreenImg.data.length * 0.75 * 255);
+  };
+
+  for (const Engine of ["ddgi", "voxel_sdf"]) {
+    const Sc = SceneFor(Engine);
+    const Atl = new MaterialAtlasSynchronizer();
+    Atl.UpdatePrimitives(Sc.Primitives);
+    const Out = BakeRadianceFieldSync(Sc, Atl.Pixels, null);
+    const F = Out.Field;
+    assert.strictEqual(F.length % (RADIANCE_FIELD_TEXTURE_WIDTH * 4), 0, `${Engine} field packs into whole ${RADIANCE_FIELD_TEXTURE_WIDTH}-wide RGBA32F rows`);
+    assert.ok(F.every(Number.isFinite), `${Engine} field is finite`);
+    assert.strictEqual(Engine === "ddgi" ? F[1] : F[2], 1, `${Engine} header flag set`);
+    const G = [0, 0, 0];
+    if (Engine === "ddgi") Sampler.ProbeIrradiance(F, 1, 0.5, 0.01, 0, 0, 1, 0, 0, 1, G);
+    else Sampler.ConeGi(F, 1, 0.5, 0.01, 0, 0, 1, ...Sc.SkyRadiance, 16, G);
+    assert.ok(G.every((V) => V > 0.005 && V < 18), `${Engine} irradiance at the gallery floor is plausible (${G.map((V) => V.toFixed(3))})`);
+    const Lit = RenderFloor(Sc, F);
+    const Fallback = RenderFloor(Sc, null);
+    assert.ok(Number.isFinite(Lit) && Lit > 0.05, `${Engine} CPU frame renders (${Lit.toFixed(3)})`);
+    assert.ok(Math.abs(Lit - Fallback) > 0.002, `${Engine} field changes the CPU frame vs the pending-bake ambient fallback (${Lit.toFixed(3)} vs ${Fallback.toFixed(3)})`);
+  }
+
+  const WgslSrc = fs.readFileSync(path.join(Folder, "WebgpuGtxRenderer.js"), "utf8");
+  const GlslSrc = fs.readFileSync(path.join(Folder, "GtxWorldViewport.jsx"), "utf8");
+  assert.ok(GTX_WGSL_SCENE_SHADER.includes("fn rfConeGi(") && GTX_WGSL_SCENE_SHADER.includes("fn rfProbeIrradiance(") && GTX_WGSL_SCENE_SHADER.includes("fn rfAmbientOcclusion("), "WGSL scene shader carries cone GI, DDGI and AO ports");
+  assert.ok(GTX_WGSL_SCENE_SHADER.includes("@binding(12) var<storage, read> uRadianceField"), "WGSL binds the radiance field at binding 12");
+  assert.ok(WgslSrc.includes("{ binding: 12, visibility: GPUShaderStage.FRAGMENT, buffer: { type: \"read-only-storage\" } }"), "WebGPU bind group layout exposes binding 12");
+  assert.ok(GlslSrc.includes("${RADIANCE_FIELD_GLSL}") && GlslSrc.includes("uniform highp sampler2D uRadianceField"), "GLSL scene shader carries the radiance field port");
+  assert.ok(GlslSrc.includes("uGiAlg == 3 || uGiAlg == 4") && WgslSrc.includes("giAlg == 3 || giAlg == 4"), "Both GPU shaders branch on the C++ GI engines");
+}
+
 console.log(
-  "[WorldMirrorValidation] ALL 19 SUITES PASSED: C++ AtmosphericSkySequence + CelestialEphemerisSolver parity, Blank ControlVehicle level, ShadowAlgorithmLab Parity (PCF/PCSS/SMRT/BVH, LTC Area Lights, Cone & 2-Bounce BVH GI, BVH Reflections, No SDF Shadows/Reflections), Sun+Moon+Starlight Illumination, Moon Atlas, Physical Sky/Clouds, RenderSettings, ControlVehicle BVH, and ProjectBrowser verified!",
+  "[WorldMirrorValidation] ALL 20 SUITES PASSED: C++ VoxelSdfClipmap + DynamicProbeCache GI, C++ AtmosphericSkySequence + CelestialEphemerisSolver parity, Blank ControlVehicle level, ShadowAlgorithmLab Parity (PCF/PCSS/SMRT/BVH, LTC Area Lights, Cone & 2-Bounce BVH GI, BVH Reflections, No SDF Shadows/Reflections), Sun+Moon+Starlight Illumination, Moon Atlas, Physical Sky/Clouds, RenderSettings, ControlVehicle BVH, and ProjectBrowser verified!",
 );

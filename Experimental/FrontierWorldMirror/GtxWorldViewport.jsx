@@ -83,6 +83,9 @@ import {
   GetCachedVehicleBvhAssets,
   LoadVehicleBvhAssets,
 } from "./VehicleBvhAssets.js";
+import { SharedRadianceFieldBaker } from "./RadianceFieldBaker.js";
+import { RADIANCE_FIELD_GLSL } from "./RadianceFieldShaders.js";
+import { RADIANCE_FIELD_TEXTURE_WIDTH } from "./RadianceFieldLayout.js";
 import {
   BuildAreaShadowMatrix,
   BuildPrimModelMatrix,
@@ -185,6 +188,8 @@ uniform sampler2D uSceneData;
 // RenderSettings & Shadow Map uniforms (zero SDF shadows)
 uniform int       uShadowAlg;
 uniform int       uGiAlg;
+uniform highp sampler2D uRadianceField; // packed C++ GI field (RadianceFieldLayout.js), RGBA32F, unit 9
+uniform vec4      uGiCfg;               // x=cone count, y=AO contact, z=AO chassis, w=AO rays
 uniform int       uReflAlg;
 uniform int       uPcssTaps;
 uniform int       uSmrtRays;
@@ -2240,7 +2245,20 @@ vec3 traceBvhReflection(vec3 startOrigin, vec3 startNormal, vec3 startDir, int m
   return min(totalRad, vec3(60.0));
 }
 
+float rfTraceDistance(vec3 o, vec3 d, float maxD) {
+  HitInfo h = traceOpaqueSceneIgnoring(o, d, maxD, -1);
+  return h.hit ? h.t : -1.0;
+}
+${RADIANCE_FIELD_GLSL}
+
 void evaluateMultiModeGi(vec3 pos, vec3 N, int selfPrimIdx, out vec3 giIrr, out float sceneAo) {
+  if (uGiAlg == 3 || uGiAlg == 4) {
+    // C++ engines: SdfGlobalIllumination (VoxelSdfClipmap cone GI) / DdgiRaytracing (DynamicProbeCache) + LinearCosine AO
+    vec3 Vv = normalize(uCamOrigin - pos);
+    giIrr = (uGiAlg == 4 ? rfProbeIrradiance(pos, N, Vv) : rfConeGi(pos, N, uSkyRadiance, int(uGiCfg.x))) * uGiIntensity;
+    sceneAo = 0.35 + 0.65 * rfAmbientOcclusion(pos, N, gl_FragCoord.xy, int(uGiCfg.w), uGiCfg.y, uGiCfg.z);
+    return;
+  }
   if (uGiAlg == 2) {
     float skyW = clamp(N.z * 0.5 + 0.5, 0.0, 1.0);
     float dayF = clamp(uSunDir.z * 4.0 + 0.25, 0.0, 1.0);
@@ -3074,6 +3092,20 @@ export default function GtxWorldViewport({
   const VehicleBvhRef = useRef(GetCachedVehicleBvhAssets());
   const VehicleBvhDirtyRef = useRef(true);
   const [LiveDragPreview, SetLiveDragPreview] = useState(null);
+  // C++ GI engines (voxel_sdf / ddgi): packed radiance field from the async baker, shared by CPU / WebGPU / WebGL.
+  const RadianceFieldVersionRef = useRef(-1);
+
+  useEffect(
+    () =>
+      SharedRadianceFieldBaker.Subscribe((Baker) => {
+        if (Baker.Epoch === RadianceFieldVersionRef.current) return;
+        RadianceFieldVersionRef.current = Baker.Epoch;
+        SceneDataDirtyRef.current = true;
+        SceneDirtyRef.current = true;
+        RequestRedrawRef.current?.(true);
+      }),
+    [],
+  );
 
   useEffect(() => {
     let Cancelled = false;
@@ -3596,6 +3628,9 @@ export default function GtxWorldViewport({
         AtlasVersionRef.current += 1;
         SceneDirtyRef.current = true;
       }
+      Gpu.UploadRadianceField(
+        SharedRadianceFieldBaker.Request(ActiveScene, AtlasSync.Pixels, AtlasVersionRef.current, VehicleBvhRef.current),
+      );
 
       const PCount = Math.min(MAX_PRIMS, ActiveScene.Primitives.length);
       const LCount = Math.min(MAX_LIGHTS, ActiveScene.AreaLights.length);
@@ -3940,6 +3975,15 @@ export default function GtxWorldViewport({
     const InitMoon = GetMoonAtlasSnapshot();
     Gl.texImage2D(Gl.TEXTURE_2D, 0, Gl.RGBA8, MOON_ATLAS_W, MOON_ATLAS_H, 0, Gl.RGBA, Gl.UNSIGNED_BYTE, InitMoon.pixels);
 
+    // C++ GI radiance field: RGBA32F, texelFetch only (no filtering), empty header until the first bake lands.
+    const RadianceFieldTex = Gl.createTexture();
+    Gl.bindTexture(Gl.TEXTURE_2D, RadianceFieldTex);
+    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MIN_FILTER, Gl.NEAREST);
+    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MAG_FILTER, Gl.NEAREST);
+    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_S, Gl.CLAMP_TO_EDGE);
+    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_T, Gl.CLAMP_TO_EDGE);
+    Gl.texImage2D(Gl.TEXTURE_2D, 0, Gl.RGBA32F, RADIANCE_FIELD_TEXTURE_WIDTH, 1, 0, Gl.RGBA, Gl.FLOAT, new Float32Array(RADIANCE_FIELD_TEXTURE_WIDTH * 4));
+
     AtlasSyncRef.current?.InvalidateAll();
     SceneDataDirtyRef.current = true;
     VehicleBvhDirtyRef.current = true;
@@ -3987,6 +4031,9 @@ export default function GtxWorldViewport({
       LastSkyLutKey: "",
       LastSkyW: SKY_VIEW_WIDTH,
       MoonAtlasTex,
+      RadianceFieldTex,
+      RadianceFieldSynced: null,
+      RadianceFieldFlags: { Probe: false, Clip: false },
       SyncedMoonVersion: InitMoon.version,
       VehicleInstCount: 0,
       SunShadowVP: new Float32Array(16),
@@ -4084,6 +4131,7 @@ export default function GtxWorldViewport({
         State.Gl.deleteTexture(State.BvhInstTex);
         State.Gl.deleteTexture(State.SkyViewTex);
         State.Gl.deleteTexture(State.MoonAtlasTex);
+        State.Gl.deleteTexture(State.RadianceFieldTex);
         State.Gl.deleteVertexArray(State.EmptyVao);
         State.Gl.deleteTexture(State.AtlasTex);
         State.Gl.deleteTexture(State.SceneDataTex);
@@ -4171,6 +4219,8 @@ export default function GtxWorldViewport({
               uSkyRadiance: Loc("uSkyRadiance"),
               uSkyViewTex: Loc("uSkyViewTex"),
               uMoonAtlasTex: Loc("uMoonAtlasTex"),
+              uRadianceField: Loc("uRadianceField"),
+              uGiCfg: Loc("uGiCfg"),
               uAtmoCfg0: Loc("uAtmoCfg0"),
               uAtmoCfg1: Loc("uAtmoCfg1"),
               uCloudCfg0: Loc("uCloudCfg0"),
@@ -4618,8 +4668,27 @@ export default function GtxWorldViewport({
           Gl.uniform4f(U.uStarCfg0, St.enabled ? 1.0 : 0.0, St.brightness ?? 1.0, St.limMag ?? 5.5, St.pointSize ?? 1.0);
           Gl.uniform4f(U.uStarCfg1, St.twinkle !== false ? 1.0 : 0.0, St.twinkleDepth ?? 30, St.twinkleRate ?? 1.2, St.rotationRad ?? 0.0);
 
+          {
+            const Field = SharedRadianceFieldBaker.Request(
+              ActiveScene, AtlasSyncRef.current?.Pixels, AtlasVersionRef.current, VehicleBvhRef.current,
+            );
+            Gl.activeTexture(Gl.TEXTURE9);
+            Gl.bindTexture(Gl.TEXTURE_2D, CurState.RadianceFieldTex);
+            if (Field && Field !== CurState.RadianceFieldSynced) {
+              CurState.RadianceFieldSynced = Field;
+              const Rows = Field.length / 4 / RADIANCE_FIELD_TEXTURE_WIDTH;
+              Gl.texImage2D(Gl.TEXTURE_2D, 0, Gl.RGBA32F, RADIANCE_FIELD_TEXTURE_WIDTH, Rows, 0, Gl.RGBA, Gl.FLOAT, Field);
+              CurState.RadianceFieldFlags = { Probe: Field[1] > 0.5, Clip: Field[2] > 0.5 };
+            }
+            Gl.uniform1i(U.uRadianceField, 9);
+            Gl.uniform4f(U.uGiCfg, RsU.coneCount ?? 16, RsU.aoContact ?? 0.25, RsU.aoChassis ?? 2.2, RsU.aoRays ?? 12);
+          }
+          const Flags = CurState.RadianceFieldFlags;
           Gl.uniform1i(U.uShadowAlg, RsU.shadowAlg);
-          Gl.uniform1i(U.uGiAlg, RsU.giAlg);
+          Gl.uniform1i(
+            U.uGiAlg,
+            (RsU.giAlg === 3 && !Flags.Clip) || (RsU.giAlg === 4 && !Flags.Probe) ? 2 : RsU.giAlg,
+          );
           Gl.uniform1i(U.uReflAlg, RsU.reflAlg);
           Gl.uniform1i(U.uPcssTaps, RsU.pcssTaps);
           Gl.uniform1i(U.uSmrtRays, RsU.smrtRays);
@@ -4929,11 +4998,15 @@ export default function GtxWorldViewport({
         (!IsInteractive && (Cpu.BufW !== TargetRayW || Cpu.BufH !== TargetRayH))
       ) {
         SceneDirtyRef.current = false;
+        const RadianceField = SharedRadianceFieldBaker.Request(
+          ActiveScene, AtlasSync.Pixels, AtlasVersionRef.current, VehicleBvhRef.current,
+        );
         Cpu.RequestAtomicFrame(
           {
             CompiledScene: ActiveScene,
             AtlasPixels: AtlasSync.Pixels,
             AtlasVersion: AtlasVersionRef.current,
+            RadianceField,
             MoonAtlas: GetMoonAtlasSnapshot(),
             VehicleBvhAssets: VehicleBvhRef.current,
             Width: TargetRayW,

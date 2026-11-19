@@ -27,9 +27,12 @@ import {
   TraceVehicleBvhCpu,
 } from "./VehicleBvhAssets.js";
 import {
+  BuildSkyViewLut,
   ComputeSolarTransmittance,
   DEFAULT_SOLAR_INTENSITY,
+  GetSkyViewCacheKey,
   MOON_PRESET_TINTS,
+  SampleSkyViewInto,
 } from "./AtmosphereSky.js";
 import { Solar } from "./Solar.mjs";
 import { ConvertAzimuthElevationToWorldAxis } from "./CelestialEphemerisSolver.js";
@@ -102,10 +105,40 @@ export const SHADOW_ALGORITHMS = [
 ];
 
 export const GI_ALGORITHMS = [
-  { id: "sdf", label: "SDF Cone GI", desc: "ShadowAlgorithmLab Cone GI: multi-bounce radiosity + solid-angle diffuse GI" },
+  { id: "voxel_sdf", label: "SDF Cone GI · Voxel Clipmap", desc: "C++ SdfGlobalIllumination: VoxelSdfClipmap surface cache + radiosity bounces + 16 deterministic cones + 7×7 bilateral" },
+  { id: "ddgi", label: "DDGI · Dynamic Probe Cache", desc: "C++ DdgiRaytracing: DynamicProbeCache 8×8 octahedral irradiance + 16×16 Chebyshev depth moments + backface gating" },
+  { id: "sdf", label: "Analytic Cone GI", desc: "ShadowAlgorithmLab Cone GI: multi-bounce radiosity + solid-angle diffuse GI" },
   { id: "bvh", label: "BVH Raytraced GI", desc: "ShadowAlgorithmLab BVH GI: 2-bounce cosine-hemisphere multi-light path tracing" },
   { id: "off", label: "Off (Ambient Fill)", desc: "Direct lighting + calibrated sky/moon/star ambient fill only" },
 ];
+
+// C++ ShowcaseGalleryScene GI configuration (DynamicProbeCacheConfiguration + VoxelSdfClipmap + LinearCosine AO)
+export const CanonicalGiFieldSettings = Object.freeze({
+  ProbeGridMinimum: [-2.02, -1.2, -0.58],
+  ProbeGridMaximum: [2.02, 2.15, 1.75],
+  ProbeCountX: 7,
+  ProbeCountY: 6,
+  ProbeCountZ: 4,
+  ProbeRayCount: 64,
+  ProbeBouncePasses: 2,
+  ProbeTemporalBlend: 0,
+  ClipmapCenter: [0, 0.45, 0.55],
+  ClipmapHalfExtent0: 2.8,
+  ClipmapHalfExtent1: 5.6,
+  ClipmapResolution0: 48,
+  ClipmapResolution1: 48,
+  ClipmapRadiosityBounces: 2,
+  ClipmapConeCount: 16,
+  ClipmapLightEmissive: true,
+  ClipmapLightPoint: true,
+  ClipmapLightSun: true,
+  ClipmapLightArea: true,
+  ClipmapLightSkyFill: true,
+  SdfGiBilateral: true,
+  AoContactDistance: 0.25,
+  AoChassisDistance: 2.2,
+  AoRaysPerPixel: 8,
+});
 
 export const REFLECTION_ALGORITHMS = [
   { id: "bvh", label: "BVH Raytraced Refl", desc: "ShadowAlgorithmLab BVH Reflections: multi-bounce Fresnel raytraced reflections" },
@@ -132,12 +165,14 @@ export const CanonicalRenderSettings = {
   ShadowSoftness: 1.0,
   EmissiveShadowMode: "shadowed",
 
-  GiAlgorithm: "sdf",
+  GiAlgorithm: "voxel_sdf",
   GiQuality: 1,
   GiSamples: 6,
   GiCones: 6,
   GiIntensity: 1.25,
   FillBoost: 1.15,
+
+  ...CanonicalGiFieldSettings,
 
   ReflectionAlgorithm: "bvh",
   ReflectionQuality: 1,
@@ -177,6 +212,45 @@ export function ResolveRenderSettings(Values = {}) {
   Merged.GiCones = Math.max(4, Math.min(14, Math.round(Number(Merged.GiCones) || 6)));
   Merged.GiIntensity = Math.max(0, Math.min(2.5, Number(Merged.GiIntensity) ?? 1.25));
   Merged.FillBoost = Math.max(0.2, Math.min(2.5, Number(Merged.FillBoost) ?? 1.15));
+  const Vec3Or = (V, D) =>
+    Array.isArray(V) && V.length >= 3 && V.every((C) => Number.isFinite(Number(C)))
+      ? [Number(V[0]), Number(V[1]), Number(V[2])]
+      : D.slice();
+  const IntIn = (V, Lo, Hi, D) => {
+    const N = Math.round(Number(V));
+    return Number.isFinite(N) ? Math.max(Lo, Math.min(Hi, N)) : D;
+  };
+  const NumIn = (V, Lo, Hi, D) => {
+    const N = Number(V);
+    return Number.isFinite(N) ? Math.max(Lo, Math.min(Hi, N)) : D;
+  };
+  const G = CanonicalGiFieldSettings;
+  Merged.ProbeGridMinimum = Vec3Or(Merged.ProbeGridMinimum, G.ProbeGridMinimum);
+  Merged.ProbeGridMaximum = Vec3Or(Merged.ProbeGridMaximum, G.ProbeGridMaximum);
+  for (let Ax = 0; Ax < 3; ++Ax) {
+    if (Merged.ProbeGridMaximum[Ax] < Merged.ProbeGridMinimum[Ax] + 0.1) {
+      Merged.ProbeGridMaximum[Ax] = Merged.ProbeGridMinimum[Ax] + 0.1;
+    }
+  }
+  Merged.ProbeCountX = IntIn(Merged.ProbeCountX, 2, 16, G.ProbeCountX);
+  Merged.ProbeCountY = IntIn(Merged.ProbeCountY, 2, 16, G.ProbeCountY);
+  Merged.ProbeCountZ = IntIn(Merged.ProbeCountZ, 2, 16, G.ProbeCountZ);
+  Merged.ProbeRayCount = IntIn(Merged.ProbeRayCount, 32, 256, G.ProbeRayCount);
+  Merged.ProbeBouncePasses = IntIn(Merged.ProbeBouncePasses, 1, 4, G.ProbeBouncePasses);
+  Merged.ProbeTemporalBlend = NumIn(Merged.ProbeTemporalBlend, 0, 0.95, G.ProbeTemporalBlend);
+  Merged.ClipmapCenter = Vec3Or(Merged.ClipmapCenter, G.ClipmapCenter);
+  Merged.ClipmapHalfExtent0 = NumIn(Merged.ClipmapHalfExtent0, 0.5, 12, G.ClipmapHalfExtent0);
+  Merged.ClipmapHalfExtent1 = NumIn(Merged.ClipmapHalfExtent1, Merged.ClipmapHalfExtent0, 24, Math.max(Merged.ClipmapHalfExtent0, G.ClipmapHalfExtent1));
+  Merged.ClipmapResolution0 = IntIn(Merged.ClipmapResolution0, 0, 64, G.ClipmapResolution0);
+  Merged.ClipmapResolution1 = IntIn(Merged.ClipmapResolution1, 0, 64, G.ClipmapResolution1);
+  Merged.ClipmapRadiosityBounces = IntIn(Merged.ClipmapRadiosityBounces, 0, 4, G.ClipmapRadiosityBounces);
+  Merged.ClipmapConeCount = IntIn(Merged.ClipmapConeCount, 12, 24, G.ClipmapConeCount);
+  for (const Key of ["ClipmapLightEmissive", "ClipmapLightPoint", "ClipmapLightSun", "ClipmapLightArea", "ClipmapLightSkyFill", "SdfGiBilateral"]) {
+    Merged[Key] = Merged[Key] !== false;
+  }
+  Merged.AoContactDistance = NumIn(Merged.AoContactDistance, 0.02, 1.5, G.AoContactDistance);
+  Merged.AoChassisDistance = NumIn(Merged.AoChassisDistance, 0.2, 6, G.AoChassisDistance);
+  Merged.AoRaysPerPixel = IntIn(Merged.AoRaysPerPixel, 1, 32, G.AoRaysPerPixel);
   Merged.ReflectionRays = Math.max(1, Math.min(8, Math.round(Number(Merged.ReflectionRays) || 2)));
   Merged.ReflectionBounces = Math.max(1, Math.min(3, Math.round(Number(Merged.ReflectionBounces) || 2)));
   Merged.ExposureGain = Math.max(0.2, Math.min(3.5, Number(Merged.ExposureGain) || CanonicalEditorCamera.ExposureGain));
@@ -743,6 +817,23 @@ export function RowEffectivelyVisible(Row, Rows, Hidden) {
   return true;
 }
 
+const ZenithSkyCache = { Key: "", Lut: null, Rgb: [0.015, 0.02, 0.032] };
+
+// C++ parity: SampleSkyView(Lut, {0,0,1}) floored at the night ambient used by SynchronizeWorldAtmosphere.
+export function ResolveZenithSkyRadiance(SunDir, Atmosphere) {
+  const Floor = [0.015, 0.020, 0.032];
+  if (!Atmosphere) return Floor.slice();
+  const Key = GetSkyViewCacheKey(SunDir, Atmosphere);
+  if (Key !== ZenithSkyCache.Key) {
+    ZenithSkyCache.Lut = BuildSkyViewLut(SunDir, Atmosphere, ZenithSkyCache.Lut);
+    const Out = [0, 0, 0];
+    SampleSkyViewInto(ZenithSkyCache.Lut, 0, 0, 1, Out);
+    ZenithSkyCache.Rgb = [Math.max(Floor[0], Out[0]), Math.max(Floor[1], Out[1]), Math.max(Floor[2], Out[2])];
+    ZenithSkyCache.Key = Key;
+  }
+  return ZenithSkyCache.Rgb.slice();
+}
+
 function ShapeKindCode(Row) {
   const Explicit = Row.PrimitiveShape;
   if (Explicit === "sphere" || Row.Icon === "editor-sphere") return 1;
@@ -872,9 +963,6 @@ export function CompileLiveGtxScene(
   const SunDir = NormalizeVec3(RawSunDir, [0.42, -0.55, 0.72]);
   const SunIntensity = Math.max(0, Number(SunRec.Intensity ?? 5.4));
   const GainScale = SunIntensity / 5.4;
-  const BaseSunIrr = Array.isArray(SunRec.SolarIrradiance)
-    ? SunRec.SolarIrradiance
-    : [5.4, 5.1, 4.65];
   const SunTintRgb =
     SunRec["Colour source"] === 1
       ? (() => {
@@ -890,21 +978,24 @@ export function CompileLiveGtxScene(
         ? HexToLinearRgb(SunRec["Sun Tint"], [1, 1, 1])
         : [1, 1, 1];
   const SunElevDeg = (Math.asin(Math.max(-1, Math.min(1, SunDir[2]))) * 180) / Math.PI;
-  const SunHorizonFade = Math.max(0, Math.min(1, (SunElevDeg + 1.5) / 4.5));
   const SunTrans = Atmosphere.enabled ? ComputeSolarTransmittance(SunDir, Atmosphere) : [1, 1, 1];
-  const RefNoonTrans = [0.82, 0.87, 0.92];
-  const SunIrradiance = SunVisible
-    ? [
-        BaseSunIrr[0] * GainScale * SunTintRgb[0] * (SunTrans[0] / RefNoonTrans[0]) * SunHorizonFade,
-        BaseSunIrr[1] * GainScale * SunTintRgb[1] * (SunTrans[1] / RefNoonTrans[1]) * SunHorizonFade,
-        BaseSunIrr[2] * GainScale * SunTintRgb[2] * (SunTrans[2] / RefNoonTrans[2]) * SunHorizonFade,
-      ]
-    : [0, 0, 0];
   const AngularDiamDeg = Math.max(0.1, Number(SunRec["Angular Diameter"] ?? 2.06));
-  const SunAngularRadiusRad = Math.max(0.002, (AngularDiamDeg * 0.5 * Math.PI) / 180);
+  // C++ TieredWorldRenderSequence::SynchronizeWorldAtmosphere: AngularRadius = clamp(diam/2, 0.002, 0.25) rad
+  const SunAngularRadiusRad = Math.max(0.002, Math.min(0.25, (AngularDiamDeg * 0.5 * Math.PI) / 180));
   // C++ SolarCelestialConfiguration: SolarIntensityMultiplier 22 drives sky LUT + disc; mirror Intensity 5.4 maps onto it
   const SolarIntensityMultiplier = SunVisible ? DEFAULT_SOLAR_INTENSITY * GainScale : 0;
   Atmosphere.solarIntensity = SolarIntensityMultiplier;
+  // SynchronizeWorldAtmosphere: SunIrradiance = Tint * Transmittance(LUT) * (Multiplier * 2.5 * 0.044 * SunVis),
+  // SunVis = clamp((ElevationDeg + 4) / 10, 0, 1). Hand-tuned SolarIrradiance rows are no longer consulted.
+  const SunVisFactor = Math.max(0, Math.min(1, (SunElevDeg + 4.0) / 10.0));
+  const SunScalar = SolarIntensityMultiplier * 2.5 * 0.044 * SunVisFactor;
+  const SunIrradiance = SunVisible
+    ? [
+        SunTintRgb[0] * SunTrans[0] * SunScalar,
+        SunTintRgb[1] * SunTrans[1] * SunScalar,
+        SunTintRgb[2] * SunTrans[2] * SunScalar,
+      ]
+    : [0, 0, 0];
   const SolarDisc = {
     Enabled: SunVisible && SolarIntensityMultiplier > 0,
     HalfRad: SunAngularRadiusRad,
@@ -914,16 +1005,8 @@ export function CompileLiveGtxScene(
     Transmittance: SunTrans,
     Tint: SunTintRgb,
   };
-  const SkyDayVis = Math.max(0, Math.min(1, (SunElevDeg + 6.0) / 14.0));
-  const BaseSkyRad = Array.isArray(SunRec.SkyRadiance)
-    ? SunRec.SkyRadiance
-    : [0.16, 0.23, 0.36];
-  const SkyScale = 0.008 + 0.992 * SkyDayVis * SkyDayVis;
-  const SkyRadiance = [
-    BaseSkyRad[0] * SkyScale,
-    BaseSkyRad[1] * SkyScale,
-    BaseSkyRad[2] * SkyScale,
-  ];
+  // SynchronizeWorldAtmosphere: SkyRadiance = max((0.015, 0.020, 0.032), SkyView LUT sampled at the zenith)
+  const SkyRadiance = ResolveZenithSkyRadiance(SunDir, Atmosphere);
 
   const MoonRow = Rows.find((Row) => Row.Panel === "moon");
   const MoonRec = (MoonRow && Values?.[MoonRow.Id]) || Values?.moon || {};
