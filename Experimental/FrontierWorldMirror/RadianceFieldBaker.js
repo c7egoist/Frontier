@@ -8,7 +8,7 @@
 //==========================================================================================================================================
 
 import { ATLAS_COLS, ATLAS_TILE_SIZE, ATLAS_WIDTH, TILES_PER_PRIM } from "./MaterialAtlasCompiler.js";
-import { CreateGtxBandKernel } from "./CpuGtxFallbackRenderer.js";
+import { CreateGtxBandKernel } from "./GtxReferenceTracer.js";
 import { SKY_VIEW_HEIGHT, SKY_VIEW_WIDTH } from "./AtmosphereSky.js";
 import { BuildVehicleTlasAndInstances } from "./VehicleBvhAssets.js";
 import { CreateRadianceFieldScene } from "./RadianceFieldScene.js";
@@ -65,7 +65,7 @@ export function DescribeRadianceFieldRequest(CompiledScene, AtlasVersion = 0) {
   return { Engine, Cfg, Sun, Sky: CompiledScene.SkyRadiance, Key };
 }
 
-function BuildVehicleData(CompiledScene, VehicleBvhAssets) {
+function BuildVehicleBvhSet(CompiledScene, VehicleBvhAssets) {
   if (!VehicleBvhAssets || !CompiledScene?.Vehicles?.length) return null;
   const Built = BuildVehicleTlasAndInstances(CompiledScene.Vehicles, VehicleBvhAssets);
   if (!Built.instanceCount) return null;
@@ -73,9 +73,9 @@ function BuildVehicleData(CompiledScene, VehicleBvhAssets) {
 }
 
 // Hermetic bake entry (also used verbatim inside the worker).
-function RunRadianceFieldBake(Factories, Request, CompiledScene, AtlasPixels, VehicleData, Previous, Progress) {
+function RunRadianceFieldBake(Factories, Request, CompiledScene, AtlasPixels, VehicleBvhSet, Previous, Progress) {
   const Engine = new Factories.Kernel.GtxBandEngine();
-  const Query = Factories.CreateRadianceFieldScene(Engine, CompiledScene, AtlasPixels, VehicleData);
+  const Query = Factories.CreateRadianceFieldScene(Engine, CompiledScene, AtlasPixels, VehicleBvhSet);
   const T0 = Date.now();
   let Probe = null, Clip = null;
   if (Request.Engine === "ddgi") {
@@ -117,7 +117,7 @@ export function BakeRadianceFieldSync(CompiledScene, AtlasPixels, VehicleBvhAsse
   const Request = DescribeRadianceFieldRequest(CompiledScene, AtlasVersion);
   if (!Request) return null;
   CachedLocalFactories = CachedLocalFactories || LocalFactories();
-  const Out = RunRadianceFieldBake(CachedLocalFactories, Request, CompiledScene, AtlasPixels, BuildVehicleData(CompiledScene, VehicleBvhAssets), Previous, null);
+  const Out = RunRadianceFieldBake(CachedLocalFactories, Request, CompiledScene, AtlasPixels, BuildVehicleBvhSet(CompiledScene, VehicleBvhAssets), Previous, null);
   return { ...Out, Key: Request.Key, Engine: Request.Engine };
 }
 
@@ -194,7 +194,7 @@ export class RadianceFieldBaker {
         `  try {`,
         `    const Progress = (Stage, Frac) => self.postMessage({ Phase: "progress", Key: M.Key, Stage, Frac });`,
         `    const Atlas = M.AtlasBuffer ? new Uint8Array(M.AtlasBuffer) : null;`,
-        `    const Out = RunRadianceFieldBake(Factories, M.Request, M.CompiledScene, Atlas, M.VehicleData, M.Previous, Progress);`,
+        `    const Out = RunRadianceFieldBake(Factories, M.Request, M.CompiledScene, Atlas, M.VehicleBvhSet, M.Previous, Progress);`,
         `    self.postMessage({ Phase: "done", Key: M.Key, Field: Out.Field, Stats: Out.Stats, ProbeState: Out.ProbeState }, [Out.Field.buffer]);`,
         `  } catch (Err) {`,
         `    self.postMessage({ Phase: "error", Key: M.Key, Message: String(Err && Err.stack || Err) });`,
@@ -224,19 +224,19 @@ export class RadianceFieldBaker {
     this.Status = `baking ${Req.Engine === "ddgi" ? "DynamicProbeCache" : "VoxelSdfClipmap"}`;
     this.Progress = 0;
     this._Emit();
-    const VehicleData = BuildVehicleData(CompiledScene, VehicleBvhAssets);
+    const VehicleBvhSet = BuildVehicleBvhSet(CompiledScene, VehicleBvhAssets);
     const Previous = Req.Engine === "ddgi" ? this._ProbeState : null;
     if (this._EnsureWorker()) {
       const Atlas = AtlasPixels ? AtlasPixels.slice() : null;
-      const Veh = VehicleData
-        ? { nodes: VehicleData.nodes.slice(), tris: VehicleData.tris.slice(), insts: VehicleData.insts.slice(), instCount: VehicleData.instCount }
+      const Veh = VehicleBvhSet
+        ? { nodes: VehicleBvhSet.nodes.slice(), tris: VehicleBvhSet.tris.slice(), insts: VehicleBvhSet.insts.slice(), instCount: VehicleBvhSet.instCount }
         : null;
       const Transfer = [];
       if (Atlas) Transfer.push(Atlas.buffer);
       if (Veh) Transfer.push(Veh.nodes.buffer, Veh.tris.buffer, Veh.insts.buffer);
       const SceneLite = { ...CompiledScene, ForceOverlay: null };
       this._Worker.postMessage(
-        { Key: Req.Key, Request: Req, CompiledScene: SceneLite, AtlasBuffer: Atlas ? Atlas.buffer : null, VehicleData: Veh, Previous },
+        { Key: Req.Key, Request: Req, CompiledScene: SceneLite, AtlasBuffer: Atlas ? Atlas.buffer : null, VehicleBvhSet: Veh, Previous },
         Transfer,
       );
       return;
@@ -245,7 +245,7 @@ export class RadianceFieldBaker {
     setTimeout(() => {
       try {
         CachedLocalFactories = CachedLocalFactories || LocalFactories();
-        const Out = RunRadianceFieldBake(CachedLocalFactories, Req, CompiledScene, AtlasPixels, VehicleData, Previous, null);
+        const Out = RunRadianceFieldBake(CachedLocalFactories, Req, CompiledScene, AtlasPixels, VehicleBvhSet, Previous, null);
         this._ReceiveBakeMessage({ Phase: "done", Key: Req.Key, Field: Out.Field, Stats: Out.Stats, ProbeState: Out.ProbeState });
       } catch (Err) {
         this._ReceiveBakeMessage({ Phase: "error", Key: Req.Key, Message: String(Err?.stack || Err) });

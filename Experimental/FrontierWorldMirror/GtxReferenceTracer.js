@@ -1,9 +1,9 @@
 //==========================================================================================================================================
-// FILE: CpuGtxFallbackRenderer.js
-// PURPOSE: Zero-Main-Thread Multi-Worker Atomic Double-Buffered Tier 1 GTX + Depth-Aware 2px Silhouette Outline + 13-Handle Slate GizmoPRO.
-//          1:1 analytical port of GTX_FRAGMENT_SHADER (C1-smooth solid-angle GI/AO, soft-cone penumbra, 20-channel Material Atlas,
-//          roughness-gated reflections, Crown-Glass Abbe dispersion, and Z-sorted Slate GizmoPRO).
-//          NEVER blits partial scanlines: background Web Workers render horizontal bands in parallel and swap ONLY complete atomic frames.
+// FILE: GtxReferenceTracer.js
+// PURPOSE: The analytical CPU port of the GTX shading model: the hermetic band kernel (CreateGtxBandKernel, also serialised into the
+//          radiance-field bake worker) plus a synchronous single-thread tracer used for shape thumbnails and as the headless
+//          validation reference for the WGSL / GLSL shaders. The viewport itself is GPU-only (WebGPU, then WebGL2); there is no
+//          CPU display path.
 //==========================================================================================================================================
 
 import {
@@ -2429,27 +2429,22 @@ const LocalKernel = CreateGtxBandKernel(
 );
 
 //==========================================================================================================================================
-// MULTI-WORKER ATOMIC DOUBLE-BUFFERED RENDERER (0.0 ms UI-thread raytracing, 0 partial scanlines ever blitted!)
+// SYNCHRONOUS REFERENCE TRACER (thumbnails + headless shader validation; staged back buffer, atomic swap)
 //==========================================================================================================================================
-export class CpuGtxRenderer {
+export class GtxReferenceTracer {
   constructor() {
     this._LocalEngine = new LocalKernel.GtxBandEngine();
 
-    // Front Display Buffer (ONLY ever populated by 100% completed frames!)
+    // Front buffer (ONLY ever populated by 100% completed frames)
     this.BufW = 0;
     this.BufH = 0;
     this.DepthBuf = null;
     this.EntityBuf = null;
-    this.OffscreenCanvas = null;
-    this.OffscreenCtx = null;
     this.OffscreenImg = null;
-    this.OutlineImg = null;
     this.FrontRevision = 0;
-    this._BakedRevision = -1;
-    this._BakedSelectedCode = -1;
     this.HasFrontFrame = false;
 
-    // Synchronous Staging Back-Buffer (for headless validation / no-Worker environments)
+    // Staging back buffer
     this._BackW = 0;
     this._BackH = 0;
     this._BackRgba = null;
@@ -2458,20 +2453,9 @@ export class CpuGtxRenderer {
     this.NextRow = 0;
     this.Complete = false;
 
-    // Parallel Web Worker Pool
-    this._Workers = null;
-    this._WorkerBlobUrl = null;
-    this._JobCounter = 0;
-    this._ActiveJob = null;
-    this._QueuedJob = null;
-    this._SyncedAtlasVersion = -1;
-    this._SyncedMoonVersion = -1;
-    this._SyncedVehicleTris = false;
     this._VehInstBuf = new Float32Array(128 * 40);
     this._SkyLutFloat = new Float32Array(SKY_VIEW_WIDTH * SKY_VIEW_HEIGHT * 4);
     this._LastSkyLutKey = "";
-    this._SyncedSkyLutKey = "";
-    this._SyncedField = null;
   }
 
   // C++ engines need the full-frame post filters (AO a-trous always, bilateral for SDF GI) before the RGBA swap.
@@ -2523,22 +2507,7 @@ export class CpuGtxRenderer {
     const N = W * H;
     this.DepthBuf = new Float32Array(N);
     this.EntityBuf = new Uint16Array(N);
-    if (typeof document !== "undefined") {
-      if (!this.OffscreenCanvas) {
-        this.OffscreenCanvas = document.createElement("canvas");
-        this.OffscreenCtx = this.OffscreenCanvas.getContext("2d");
-      }
-      this.OffscreenCanvas.width = W;
-      this.OffscreenCanvas.height = H;
-    }
-    if (this.OffscreenCtx) {
-      this.OffscreenImg = this.OffscreenCtx.createImageData(W, H);
-      this.OutlineImg = this.OffscreenCtx.createImageData(W, H);
-    } else {
-      this.OffscreenImg = { width: W, height: H, data: new Uint8ClampedArray(N * 4) };
-      this.OutlineImg = { width: W, height: H, data: new Uint8ClampedArray(N * 4) };
-    }
-    this._BakedRevision = -1;
+    this.OffscreenImg = { width: W, height: H, data: new Uint8ClampedArray(N * 4) };
   }
 
   _EnsureBackBuffers(W, H) {
@@ -2616,444 +2585,4 @@ export class CpuGtxRenderer {
     this._SwapBackToFront(Width, Height);
     return true;
   }
-
-  _EnsureWorkerPool() {
-    if (this._Workers !== null) return this._Workers.length > 0;
-    if (typeof Worker === "undefined" || typeof Blob === "undefined" || typeof URL === "undefined") {
-      this._Workers = [];
-      return false;
-    }
-    try {
-      const Hw = (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 8;
-      const WorkerCount = Math.min(10, Math.max(4, Hw));
-      const Source = [
-        `"use strict";`,
-        `const FieldSampler = (${CreateRadianceFieldSampler.toString()})();`,
-        `const Kernel = (${CreateGtxBandKernel.toString()})(${ATLAS_WIDTH}, ${ATLAS_COLS}, ${ATLAS_TILE_SIZE}, ${TILES_PER_PRIM}, ${SKY_VIEW_WIDTH}, ${SKY_VIEW_HEIGHT}, FieldSampler);`,
-        `let CachedField = null;`,
-        `const Engine = new Kernel.GtxBandEngine();`,
-        `let CachedAtlas = null;`,
-        `let CachedMoonAtlas = null;`,
-        `let CachedSkyLut = null;`,
-        `let CachedVehTris = null;`,
-        `let CachedVehNodes = null;`,
-        `let CachedVehInsts = null;`,
-        `let CachedVehCount = 0;`,
-        `self.onmessage = (Ev) => {`,
-        `  const Msg = Ev.data;`,
-        `  if (!Msg) return;`,
-        `  if (Msg.Kind === "atlas") {`,
-        `    CachedAtlas = new Uint8Array(Msg.AtlasBuffer);`,
-        `    return;`,
-        `  }`,
-        `  if (Msg.Kind === "moonAtlas") {`,
-        `    CachedMoonAtlas = { width: Msg.Width, height: Msg.Height, ready: Msg.Ready, pixels: new Uint8Array(Msg.PixelsBuffer) };`,
-        `    return;`,
-        `  }`,
-        `  if (Msg.Kind === "radianceField") {`,
-        `    CachedField = Msg.FieldBuffer ? new Float32Array(Msg.FieldBuffer) : null;`,
-        `    return;`,
-        `  }`,
-        `  if (Msg.Kind === "skyLut") {`,
-        `    CachedSkyLut = new Float32Array(Msg.SkyLutBuffer);`,
-        `    return;`,
-        `  }`,
-        `  if (Msg.Kind === "vehTris") {`,
-        `    CachedVehTris = new Float32Array(Msg.TrisBuffer);`,
-        `    return;`,
-        `  }`,
-        `  if (Msg.Kind === "vehScene") {`,
-        `    CachedVehNodes = new Float32Array(Msg.NodesBuffer);`,
-        `    CachedVehInsts = new Float32Array(Msg.InstsBuffer);`,
-        `    CachedVehCount = Msg.InstCount | 0;`,
-        `    return;`,
-        `  }`,
-        `  if (Msg.Kind === "band") {`,
-        `    const { JobId, CompiledScene, Width, Height, StartRow, EndRow, ViewModeCode, ShowGrid, TimeSec, WantAux } = Msg;`,
-        `    const Rows = Math.max(0, EndRow - StartRow);`,
-        `    const Pix = Width * Rows;`,
-        `    const Rgba = new Uint8ClampedArray(Pix * 4);`,
-        `    const Depth = new Float32Array(Pix);`,
-        `    const Entity = new Uint16Array(Pix);`,
-        `    const VehicleBvhData = (CachedVehCount > 0 && CachedVehTris && CachedVehNodes && CachedVehInsts)`,
-        `      ? { nodes: CachedVehNodes, tris: CachedVehTris, insts: CachedVehInsts, instCount: CachedVehCount }`,
-        `      : null;`,
-        `    const GiAux = WantAux && CachedField ? Kernel.AllocateGiAux(Pix) : null;`,
-        `    Engine.RenderBand({ CompiledScene, AtlasPixels: CachedAtlas, MoonAtlas: CachedMoonAtlas, SkyLut: CachedSkyLut, VehicleBvhData, Width, Height, StartRow, EndRow, ViewModeCode, ShowGrid, TimeSec, RadianceField: CachedField, GiAux }, Rgba, Depth, Entity, true);`,
-        `    const Transfer = [Rgba.buffer, Depth.buffer, Entity.buffer];`,
-        `    if (GiAux) for (const K of Object.keys(GiAux)) Transfer.push(GiAux[K].buffer);`,
-        `    self.postMessage({ Kind: "bandDone", JobId, Width, Height, StartRow, EndRow, RgbaBuffer: Rgba.buffer, DepthBuffer: Depth.buffer, EntityBuffer: Entity.buffer, GiAux }, Transfer);`,
-        `  }`,
-        `};`,
-      ].join("\n");
-
-      const BlobObj = new Blob([Source], { type: "text/javascript" });
-      this._WorkerBlobUrl = URL.createObjectURL(BlobObj);
-      this._Workers = [];
-      for (let I = 0; I < WorkerCount; ++I) {
-        const Wk = new Worker(this._WorkerBlobUrl);
-        Wk.onmessage = (Ev) => this._HandleWorkerMessage(Ev.data);
-        Wk.onerror = () => {
-          this.DisposeWorkers();
-          this._Workers = [];
-        };
-        this._Workers.push(Wk);
-      }
-      this._SyncedAtlasVersion = -1;
-      this._SyncedMoonVersion = -1;
-      this._SyncedVehicleTris = false;
-      this._SyncedSkyLutKey = "";
-      this._SyncedField = null;
-      return true;
-    } catch {
-      this._Workers = [];
-      return false;
-    }
-  }
-
-  _HandleWorkerMessage(Msg) {
-    if (!Msg || Msg.Kind !== "bandDone") return;
-    const Job = this._ActiveJob;
-    if (!Job || Msg.JobId !== Job.JobId) return;
-
-    const { Width, StartRow, RgbaBuffer, DepthBuffer, EntityBuffer, GiAux } = Msg;
-    const PixOffset = StartRow * Width;
-    Job.Rgba.set(new Uint8ClampedArray(RgbaBuffer), PixOffset * 4);
-    Job.Depth.set(new Float32Array(DepthBuffer), PixOffset);
-    Job.Entity.set(new Uint16Array(EntityBuffer), PixOffset);
-    if (Job.Aux && GiAux) {
-      Job.Aux.Rest.set(GiAux.Rest, PixOffset * 3);
-      Job.Aux.Gi.set(GiAux.Gi, PixOffset * 3);
-      Job.Aux.GiW.set(GiAux.GiW, PixOffset * 3);
-      Job.Aux.Ao.set(GiAux.Ao, PixOffset);
-      Job.Aux.Geo.set(GiAux.Geo, PixOffset * 4);
-      Job.Aux.Pos.set(GiAux.Pos, PixOffset * 3);
-      Job.AuxBands += 1;
-    }
-
-    Job.DoneBands += 1;
-    if (Job.DoneBands < Job.TotalBands) return;
-    if (Job.Aux && Job.AuxBands === Job.TotalBands) {
-      this._ComposeGiAux(Job.Params, Job.Aux, Job.Rgba, Job.Width, Job.Height);
-    }
-
-    // 100% OF BANDS COMPLETE -> ATOMIC SINGLE-SWAP TO FRONT BUFFER!
-    const ElapsedMs = Math.max(0.5, performance.now() - Job.StartedAt);
-    this._EnsureFrontBuffers(Job.Width, Job.Height);
-    this.OffscreenImg.data.set(Job.Rgba);
-    this.DepthBuf.set(Job.Depth);
-    this.EntityBuf.set(Job.Entity);
-    this.FrontRevision += 1;
-    this.HasFrontFrame = true;
-    this.Complete = true;
-
-    const Callback = Job.OnFrameReady;
-    this._ActiveJob = null;
-
-    if (Callback) Callback(ElapsedMs);
-
-    if (this._QueuedJob) {
-      const Next = this._QueuedJob;
-      this._QueuedJob = null;
-      this._DispatchWorkerJob(Next.Params, Next.OnFrameReady);
-    }
-  }
-
-  _DispatchWorkerJob(Params, OnFrameReady) {
-    const {
-      CompiledScene,
-      AtlasPixels,
-      AtlasVersion = 0,
-      MoonAtlas = null,
-      VehicleBvhAssets = null,
-      Width,
-      Height,
-      ViewModeCode,
-      ShowGrid,
-      TimeSec = 0,
-    } = Params;
-
-    if (MoonAtlas?.pixels && this._SyncedMoonVersion !== MoonAtlas.version) {
-      this._SyncedMoonVersion = MoonAtlas.version;
-      for (let I = 0; I < this._Workers.length; ++I) {
-        const Copy = MoonAtlas.pixels.slice();
-        this._Workers[I].postMessage(
-          { Kind: "moonAtlas", Width: MoonAtlas.width, Height: MoonAtlas.height, Ready: MoonAtlas.ready, PixelsBuffer: Copy.buffer },
-          [Copy.buffer],
-        );
-      }
-    }
-
-    const SkyKey = this._EnsureSkyLut(CompiledScene);
-    if (SkyKey !== this._SyncedSkyLutKey) {
-      this._SyncedSkyLutKey = SkyKey;
-      for (let I = 0; I < this._Workers.length; ++I) {
-        const Copy = this._SkyLutFloat.slice();
-        this._Workers[I].postMessage({ Kind: "skyLut", SkyLutBuffer: Copy.buffer }, [Copy.buffer]);
-      }
-    }
-
-    if (AtlasPixels && this._SyncedAtlasVersion !== AtlasVersion) {
-      this._SyncedAtlasVersion = AtlasVersion;
-      for (let I = 0; I < this._Workers.length; ++I) {
-        const Copy = AtlasPixels.slice();
-        this._Workers[I].postMessage({ Kind: "atlas", AtlasBuffer: Copy.buffer }, [Copy.buffer]);
-      }
-    }
-
-    if (VehicleBvhAssets) {
-      if (!this._SyncedVehicleTris) {
-        this._SyncedVehicleTris = true;
-        for (let I = 0; I < this._Workers.length; ++I) {
-          const TriCopy = VehicleBvhAssets.triTexData.slice();
-          this._Workers[I].postMessage({ Kind: "vehTris", TrisBuffer: TriCopy.buffer }, [TriCopy.buffer]);
-        }
-      }
-      const BuiltVeh = this._BuildVehicleBvhData(CompiledScene, VehicleBvhAssets);
-      const InstCount = BuiltVeh ? BuiltVeh.instCount : 0;
-      const InstSlice = BuiltVeh ? BuiltVeh.insts : new Float32Array(4);
-      for (let I = 0; I < this._Workers.length; ++I) {
-        const NodeCopy = VehicleBvhAssets.nodeTexData.slice();
-        const InstCopy = InstSlice.slice();
-        this._Workers[I].postMessage(
-          { Kind: "vehScene", NodesBuffer: NodeCopy.buffer, InstsBuffer: InstCopy.buffer, InstCount },
-          [NodeCopy.buffer, InstCopy.buffer],
-        );
-      }
-    }
-
-    const RadianceField = Params.RadianceField || null;
-    if (RadianceField !== this._SyncedField) {
-      this._SyncedField = RadianceField;
-      for (let I = 0; I < this._Workers.length; ++I) {
-        const Copy = RadianceField ? RadianceField.slice() : null;
-        this._Workers[I].postMessage({ Kind: "radianceField", FieldBuffer: Copy ? Copy.buffer : null }, Copy ? [Copy.buffer] : []);
-      }
-    }
-    const WantAux = this._WantsGiAux(Params);
-
-    const WorkerCount = Math.min(this._Workers.length, Height);
-    const JobId = ++this._JobCounter;
-    const N = Width * Height;
-    this._ActiveJob = {
-      JobId,
-      Width,
-      Height,
-      Params,
-      Aux: WantAux ? LocalKernel.AllocateGiAux(N) : null,
-      AuxBands: 0,
-      TotalBands: WorkerCount,
-      DoneBands: 0,
-      Rgba: new Uint8ClampedArray(N * 4),
-      Depth: new Float32Array(N),
-      Entity: new Uint16Array(N),
-      StartedAt: performance.now(),
-      OnFrameReady,
-    };
-
-    for (let I = 0; I < WorkerCount; ++I) {
-      const StartRow = Math.floor((I * Height) / WorkerCount);
-      const EndRow = Math.floor(((I + 1) * Height) / WorkerCount);
-      this._Workers[I].postMessage({
-        Kind: "band",
-        JobId,
-        CompiledScene,
-        Width,
-        Height,
-        StartRow,
-        EndRow,
-        ViewModeCode,
-        ShowGrid,
-        TimeSec,
-        WantAux,
-      });
-    }
-  }
-
-  // Non-blocking atomic full-frame request: coalesces rapid camera inputs so only the newest pose renders next!
-  RequestAtomicFrame(Params, OnFrameReady) {
-    if (this._EnsureWorkerPool()) {
-      if (this._ActiveJob) {
-        this._QueuedJob = { Params, OnFrameReady };
-        return;
-      }
-      this._DispatchWorkerJob(Params, OnFrameReady);
-      return;
-    }
-    const T0 = typeof performance !== "undefined" ? performance.now() : 0;
-    this.RenderFullFrame(Params);
-    const Elapsed = typeof performance !== "undefined" ? Math.max(1, performance.now() - T0) : 8;
-    OnFrameReady?.(Elapsed);
-  }
-
-  DisposeWorkers() {
-    if (this._Workers) {
-      for (const Wk of this._Workers) {
-        try {
-          Wk.terminate();
-        } catch {}
-      }
-    }
-    if (this._WorkerBlobUrl && typeof URL !== "undefined") {
-      try {
-        URL.revokeObjectURL(this._WorkerBlobUrl);
-      } catch {}
-      this._WorkerBlobUrl = null;
-    }
-    this._ActiveJob = null;
-    this._QueuedJob = null;
-    this._Workers = null;
-  }
-
-  CompositeToCanvas(Ctx, CanvasW, CanvasH, SelectedCode, BuiltGizmo, ViewProj, HighlightedHandle) {
-    if (!this.HasFrontFrame || !this.OffscreenImg || !this.OffscreenCtx) return;
-    const W = this.BufW;
-    const H = this.BufH;
-
-    // Cache baked 2px outer silhouette outline on OffscreenCanvas so 60Hz gizmo hover costs 0.15ms!
-    if (this._BakedRevision !== this.FrontRevision || this._BakedSelectedCode !== SelectedCode) {
-      this._BakedRevision = this.FrontRevision;
-      this._BakedSelectedCode = SelectedCode;
-
-      if (SelectedCode > 0 && this.OutlineImg) {
-        this.OutlineImg.data.set(this.OffscreenImg.data);
-        const Out = this.OutlineImg.data;
-        const Ent = this.EntityBuf;
-        const Dep = this.DepthBuf;
-        const OffX = [1, -1, 0, 0, 1, -1, 1, -1, 2, -2, 0, 0];
-        const OffY = [0, 0, 1, -1, 1, 1, -1, -1, 0, 0, 2, -2];
-        const ClampIdx = LocalKernel.Clamp;
-        const MixCh = LocalKernel.Mix;
-
-        for (let Y = 0; Y < H; ++Y) {
-          const RowOff = Y * W;
-          for (let X = 0; X < W; ++X) {
-            const Idx = RowOff + X;
-            const CenterSel = Ent[Idx] === SelectedCode;
-            const D0 = Dep[Idx];
-            let Edge = 0.0;
-            for (let K = 0; K < 12; ++K) {
-              const Qx = ClampIdx(X + OffX[K], 0, W - 1);
-              const Qy = ClampIdx(Y + OffY[K], 0, H - 1);
-              const QIdx = Qy * W + Qx;
-              const NeighSel = Ent[QIdx] === SelectedCode;
-              const Dq = Dep[QIdx];
-              if (!CenterSel && NeighSel && Dq <= D0 + 0.12) {
-                const Wk = K < 4 ? 1.0 : K < 8 ? 0.88 : 0.62;
-                if (Wk > Edge) Edge = Wk;
-              } else if (CenterSel && !NeighSel && K < 4 && D0 <= Dq + 0.12) {
-                if (0.35 > Edge) Edge = 0.35;
-              }
-            }
-            if (Edge > 0.0) {
-              const Alpha = Edge * 0.94;
-              const O4 = Idx * 4;
-              Out[O4] = (MixCh(Out[O4], 246, Alpha) + 0.5) | 0;
-              Out[O4 + 1] = (MixCh(Out[O4 + 1], 198, Alpha) + 0.5) | 0;
-              Out[O4 + 2] = (MixCh(Out[O4 + 2], 107, Alpha) + 0.5) | 0;
-            }
-          }
-        }
-        this.OffscreenCtx.putImageData(this.OutlineImg, 0, 0);
-      } else {
-        this.OffscreenCtx.putImageData(this.OffscreenImg, 0, 0);
-      }
-    }
-
-    Ctx.imageSmoothingEnabled = true;
-    Ctx.imageSmoothingQuality = "high";
-    Ctx.drawImage(this.OffscreenCanvas, 0, 0, CanvasW, CanvasH);
-
-    if (BuiltGizmo && ViewProj) {
-      DrawSlateGizmo2D(Ctx, CanvasW, CanvasH, BuiltGizmo, ViewProj, HighlightedHandle);
-    }
-  }
-}
-
-function ProjectVertex(Buf, Base, M, W, H, Out) {
-  const X = Buf[Base], Y = Buf[Base + 1], Z = Buf[Base + 2];
-  const Cx = M[0] * X + M[4] * Y + M[8] * Z + M[12];
-  const Cy = M[1] * X + M[5] * Y + M[9] * Z + M[13];
-  const Cz = M[2] * X + M[6] * Y + M[10] * Z + M[14];
-  const Cw = M[3] * X + M[7] * Y + M[11] * Z + M[15];
-  if (Cw <= 0.04) return false;
-  const InvW = 1.0 / Cw;
-  Out[0] = (Cx * InvW * 0.5 + 0.5) * W;
-  Out[1] = (0.5 - Cy * InvW * 0.5) * H;
-  Out[2] = Cz * InvW;
-  return true;
-}
-
-export function DrawSlateGizmo2D(Ctx, CanvasW, CanvasH, BuiltGizmo, ViewProj, HighlightedHandle) {
-  const Tris = [];
-  const P0 = [0, 0, 0], P1 = [0, 0, 0], P2 = [0, 0, 0];
-  const ClampV = LocalKernel.Clamp;
-  const MixV = LocalKernel.Mix;
-
-  const PushBuffer = (Buf, VertCount, IsTranslucent) => {
-    for (let V = 0; V + 2 < VertCount; V += 3) {
-      const B0 = V * 12, B1 = (V + 1) * 12, B2 = (V + 2) * 12;
-      if (!ProjectVertex(Buf, B0, ViewProj, CanvasW, CanvasH, P0)) continue;
-      if (!ProjectVertex(Buf, B1, ViewProj, CanvasW, CanvasH, P1)) continue;
-      if (!ProjectVertex(Buf, B2, ViewProj, CanvasW, CanvasH, P2)) continue;
-
-      const Nx = (Buf[B0 + 3] + Buf[B1 + 3] + Buf[B2 + 3]) / 3;
-      const Ny = (Buf[B0 + 4] + Buf[B1 + 4] + Buf[B2 + 4]) / 3;
-      const Nz = (Buf[B0 + 5] + Buf[B1 + 5] + Buf[B2 + 5]) / 3;
-      const NLen = Math.max(1e-5, Math.sqrt(Nx * Nx + Ny * Ny + Nz * Nz));
-
-      let Cr = Buf[B0 + 6], Cg = Buf[B0 + 7], Cb = Buf[B0 + 8], Ca = Buf[B0 + 9];
-      const HandleId = Buf[B0 + 10];
-      const Unlit = Buf[B0 + 11];
-
-      if (Math.abs(HandleId - HighlightedHandle) < 0.25 && HighlightedHandle > 0.5) {
-        Cr = MixV(Cr * 1.24 + 0.10, 1.0, 0.22);
-        Cg = MixV(Cg * 1.24 + 0.10, 0.98, 0.22);
-        Cb = MixV(Cb * 1.24 + 0.10, 0.88, 0.22);
-        Ca = Math.min(1.0, Ca * 1.45 + 0.14);
-      }
-
-      if (Unlit <= 0.5) {
-        const Key = Math.max((Nx * 0.46 - Ny * 0.52 + Nz * 0.72) / NLen, 0.0);
-        const Fill = Math.max((-Nx * 0.55 + Ny * 0.62 + Nz * 0.56) / NLen, 0.0);
-        const Shade = 0.56 + 0.34 * Key + 0.14 * Fill;
-        Cr *= Shade; Cg *= Shade; Cb *= Shade;
-      }
-
-      const R8 = ClampV((Cr * 255 + 0.5) | 0, 0, 255);
-      const G8 = ClampV((Cg * 255 + 0.5) | 0, 0, 255);
-      const B8 = ClampV((Cb * 255 + 0.5) | 0, 0, 255);
-      const A = ClampV(Ca, 0, 1);
-
-      Tris.push({
-        x0: P0[0], y0: P0[1],
-        x1: P1[0], y1: P1[1],
-        x2: P2[0], y2: P2[1],
-        depth: (P0[2] + P1[2] + P2[2]) / 3 + (IsTranslucent ? 0.002 : 0),
-        style: `rgba(${R8},${G8},${B8},${A.toFixed(3)})`,
-      });
-    }
-  };
-
-  PushBuffer(BuiltGizmo.OpaqueBuffer, BuiltGizmo.OpaqueVertexCount, false);
-  PushBuffer(BuiltGizmo.TranslucentBuffer, BuiltGizmo.TranslucentVertexCount, true);
-
-  Tris.sort((A, B) => B.depth - A.depth);
-
-  Ctx.save();
-  Ctx.lineJoin = "round";
-  Ctx.lineWidth = 0.65;
-  for (let I = 0; I < Tris.length; ++I) {
-    const T = Tris[I];
-    Ctx.fillStyle = T.style;
-    Ctx.strokeStyle = T.style;
-    Ctx.beginPath();
-    Ctx.moveTo(T.x0, T.y0);
-    Ctx.lineTo(T.x1, T.y1);
-    Ctx.lineTo(T.x2, T.y2);
-    Ctx.closePath();
-    Ctx.fill();
-    Ctx.stroke();
-  }
-  Ctx.restore();
 }

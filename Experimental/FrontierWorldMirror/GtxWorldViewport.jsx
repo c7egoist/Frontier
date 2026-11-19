@@ -67,7 +67,6 @@ import {
   SolveGizmoDrag,
 } from "./TransformGizmo3D.js";
 import { CreateWebgpuGtxRenderer } from "./WebgpuGtxRenderer.js";
-import { CpuGtxRenderer, DrawSlateGizmo2D } from "./CpuGtxFallbackRenderer.js";
 import {
   ApplyUnrealDolly,
   ApplyUnrealMouseLook,
@@ -85,7 +84,7 @@ import {
 } from "./VehicleBvhAssets.js";
 import { SharedRadianceFieldBaker } from "./RadianceFieldBaker.js";
 import { RADIANCE_FIELD_GLSL } from "./RadianceFieldShaders.js";
-import { RADIANCE_FIELD_TEXTURE_WIDTH } from "./RadianceFieldLayout.js";
+import { BuildRadianceVolumes, RADIANCE_FIELD_TEXTURE_WIDTH } from "./RadianceFieldLayout.js";
 import {
   BuildAreaShadowMatrix,
   BuildPrimModelMatrix,
@@ -96,15 +95,17 @@ import {
 
 export { RowEffectivelyVisible as PreviewVisible };
 
-// Remember within this tab session if Chromium has domain-blocked WebGPU or WebGL2 so remounts never spam context loss
+// GPU-only viewport: "webgpu" | "webgl2" | "gpu-lost" (no rasteriser left; an overlay offers a retry). Remember within this tab
+// session when WebGPU failed so remounts go straight to WebGL2, and when a GPU loss forced the C++ GI engines into safe mode.
 let SessionWebGpuBlocked = false;
-let SessionWebGlBlocked = false;
+let SessionGiSafeMode = false;
+const GPU_LOSS_RECOVERY_LIMIT = 2;
 
 function PreferInitialBackend() {
   if (typeof navigator !== "undefined" && navigator.gpu && !SessionWebGpuBlocked) {
     return "webgpu";
   }
-  return SessionWebGlBlocked ? "cpu-gtx" : "webgl2";
+  return "webgl2";
 }
 
 const MAX_PRIMS = 384;
@@ -189,6 +190,8 @@ uniform sampler2D uSceneData;
 uniform int       uShadowAlg;
 uniform int       uGiAlg;
 uniform highp sampler2D uRadianceField; // packed C++ GI field (RadianceFieldLayout.js), RGBA32F, unit 9
+uniform mediump sampler3D uRfDistTex; // clipmap distance tiers, R16F trilinear, unit 10
+uniform mediump sampler3D uRfRadTex; // stacked cascade radiance mips, RGBA16F trilinear, unit 11
 uniform vec4      uGiCfg;               // x=cone count, y=AO contact, z=AO chassis, w=AO rays
 uniform int       uReflAlg;
 uniform int       uPcssTaps;
@@ -3048,7 +3051,6 @@ export default function GtxWorldViewport({
   const CanvasRef = useRef(null);
   const WebgpuRef = useRef(null);
   const GlStateRef = useRef(null);
-  const CpuRendererRef = useRef(null);
   const DragRef = useRef(null);
   const KeysRef = useRef(new Set());
   const AtlasSyncRef = useRef(null);
@@ -3065,8 +3067,6 @@ export default function GtxWorldViewport({
   const LastCommittedCamRef = useRef(null);
   const ViewportHoveredRef = useRef(false);
   const IsWasdFlyingRef = useRef(false);
-  const InteractiveUntilRef = useRef(0);
-  const SettleTimerRef = useRef(0);
   const CommitTimerRef = useRef(0);
   const SpeedHudTimerRef = useRef(0);
   const LastInspectorCommitMsRef = useRef(0);
@@ -3081,6 +3081,14 @@ export default function GtxWorldViewport({
 
   const [CanvasInstance, SetCanvasInstance] = useState(0);
   const [ShaderError, SetShaderError] = useState(null);
+  const [GpuLossNote, SetGpuLossNote] = useState("");
+  const [GiSafeMode, SetGiSafeModeState] = useState(SessionGiSafeMode);
+  const GpuLossCountRef = useRef(0);
+  // A GPU loss while the C++ GI engines are live drops them to the ambient fill for the session (badge click re-arms them).
+  const EnterGiSafeMode = useCallback(() => {
+    SessionGiSafeMode = true;
+    SetGiSafeModeState(true);
+  }, []);
   const [GlEpoch, SetGlEpoch] = useState(0);
   const [WgpuEpoch, SetWgpuEpoch] = useState(0);
   const [HoveredHandle, SetHoveredHandle] = useState(GizmoHandle.None);
@@ -3233,7 +3241,7 @@ export default function GtxWorldViewport({
     let RafId = 0;
     let LastMs = typeof performance !== "undefined" ? performance.now() : 0;
     let LastHudMs = LastMs;
-    const IntervalMs = RenderBackend === "cpu-gtx" ? 90 : 33;
+    const IntervalMs = 33;
     const Tick = (NowMs) => {
       if (NowMs - LastMs >= IntervalMs) {
         const Dt = Math.min(0.08, Math.max(0.001, (NowMs - LastMs) * 0.001));
@@ -3275,7 +3283,7 @@ export default function GtxWorldViewport({
   ]);
 
   useEffect(() => {
-    if (!CompiledScene.HasAnimatedSky || RenderBackend === "cpu-gtx") return undefined;
+    if (!CompiledScene.HasAnimatedSky || RenderBackend === "gpu-lost") return undefined;
     let RafId = 0;
     let LastMs = typeof performance !== "undefined" ? performance.now() : 0;
     const Tick = (NowMs) => {
@@ -3292,7 +3300,7 @@ export default function GtxWorldViewport({
   }, [CompiledScene.HasAnimatedSky, RenderBackend]);
 
   useEffect(() => {
-    if (!CompiledScene.HasSpinningFans || RenderBackend === "cpu-gtx") return undefined;
+    if (!CompiledScene.HasSpinningFans || RenderBackend === "gpu-lost") return undefined;
     let RafId = 0;
     let LastMs = typeof performance !== "undefined" ? performance.now() : 0;
     const Tick = (NowMs) => {
@@ -3440,49 +3448,33 @@ export default function GtxWorldViewport({
     [CameraCallback, EffectiveProjection, Selected],
   );
 
-  const BumpInteractiveSettle = useCallback((WindowMs = 380) => {
-    // Hardware WebGL2 renders full native resolution on every single 120Hz frame — ZERO post-move settle redraw!
-    if (RenderBackendRef.current !== "cpu-gtx") return;
-    InteractiveUntilRef.current = performance.now() + WindowMs;
-    if (SettleTimerRef.current) window.clearTimeout(SettleTimerRef.current);
-    SettleTimerRef.current = window.setTimeout(() => {
-      SettleTimerRef.current = 0;
-      if (RenderBackendRef.current === "cpu-gtx") {
-        SceneDirtyRef.current = true;
-        RequestRedrawRef.current?.(true);
-      }
-    }, WindowMs + 16);
-  }, []);
-
   const ApplyLiveCameraUpdate = useCallback(
     (NextCam, CommitImmediate = false) => {
       LiveCamRef.current = NextCam;
       SceneDirtyRef.current = true;
-      BumpInteractiveSettle(380);
       RequestRedrawRef.current?.(true);
       CommitLiveCameraToEditor(CommitImmediate);
     },
-    [BumpInteractiveSettle, CommitLiveCameraToEditor],
+    [CommitLiveCameraToEditor],
   );
 
   // Clean up timers and Web Worker pool on unmount
   useEffect(() => {
     return () => {
-      if (SettleTimerRef.current) window.clearTimeout(SettleTimerRef.current);
       if (CommitTimerRef.current) window.clearTimeout(CommitTimerRef.current);
       if (SpeedHudTimerRef.current) window.clearTimeout(SpeedHudTimerRef.current);
-      CpuRendererRef.current?.DisposeWorkers();
     };
   }, []);
 
-  // Automatically restore hardware WebGL2 GPU when tab returns to foreground after background context eviction!
+  // Restore the GPU rasteriser when the tab returns to the foreground after a background context eviction.
   useEffect(() => {
     const OnVisibility = () => {
-      if (document.visibilityState === "visible" && PendingGpuRestoreRef.current && !SessionWebGlBlocked) {
+      if (document.visibilityState === "visible" && PendingGpuRestoreRef.current) {
         PendingGpuRestoreRef.current = false;
         SetShaderError(null);
+        SetGpuLossNote("");
         SetCanvasInstance((K) => K + 1);
-        SetRenderBackend("webgl2");
+        SetRenderBackend(PreferInitialBackend());
       }
     };
     document.addEventListener("visibilitychange", OnVisibility);
@@ -3542,20 +3534,37 @@ export default function GtxWorldViewport({
     if (!Canvas) return;
 
     let Cancelled = false;
-    const FallbackFromWebGpu = (Reason) => {
-      if (Cancelled) return;
-      SessionWebGpuBlocked = true;
+    const DropWebGpu = () => {
       if (WebgpuRef.current) {
         WebgpuRef.current.Destroy();
         WebgpuRef.current = null;
       }
-      const NextBackend = SessionWebGlBlocked ? "cpu-gtx" : "webgl2";
-      SendViewportDiag({ backend: NextBackend, from: "webgpu", reason: Reason });
-      SetRenderBackend(NextBackend);
+    };
+    // Init failures (no adapter, WGSL compile errors, canvas attach) move this session to WebGL2.
+    const FallbackFromWebGpu = (Reason) => {
+      if (Cancelled) return;
+      SessionWebGpuBlocked = true;
+      DropWebGpu();
+      SendViewportDiag({ backend: "webgl2", from: "webgpu", reason: Reason });
+      SetRenderBackend("webgl2");
+    };
+    // Device loss (driver reset / watchdog): rebuild the device on a fresh canvas with the C++ GI engines in safe mode,
+    // and only hand over to WebGL2 after repeated losses.
+    const RecoverFromDeviceLoss = (Reason) => {
+      if (Cancelled) return;
+      DropWebGpu();
+      GpuLossCountRef.current += 1;
+      EnterGiSafeMode();
+      if (GpuLossCountRef.current > GPU_LOSS_RECOVERY_LIMIT) {
+        FallbackFromWebGpu(`device-lost:${Reason}`);
+        return;
+      }
+      SendViewportDiag({ backend: "webgpu", reason: `device-lost-recover:${Reason}`, attempt: GpuLossCountRef.current });
+      SetCanvasInstance((K) => K + 1);
     };
 
     CreateWebgpuGtxRenderer((LostReason) => {
-      FallbackFromWebGpu(`device-lost:${LostReason}`);
+      RecoverFromDeviceLoss(LostReason);
     }).then((Res) => {
       if (Cancelled) {
         if (Res.Ok) Res.Destroy();
@@ -3629,7 +3638,9 @@ export default function GtxWorldViewport({
         SceneDirtyRef.current = true;
       }
       Gpu.UploadRadianceField(
-        SharedRadianceFieldBaker.Request(ActiveScene, AtlasSync.Pixels, AtlasVersionRef.current, VehicleBvhRef.current),
+        SessionGiSafeMode
+          ? null
+          : SharedRadianceFieldBaker.Request(ActiveScene, AtlasSync.Pixels, AtlasVersionRef.current, VehicleBvhRef.current),
       );
 
       const PCount = Math.min(MAX_PRIMS, ActiveScene.Primitives.length);
@@ -3802,9 +3813,9 @@ export default function GtxWorldViewport({
       Gl = Canvas.getContext("webgl2", BaseAttribs);
     }
     if (!Gl || Gl.isContextLost()) {
-      SessionWebGlBlocked = true;
-      SendViewportDiag({ backend: "cpu-gtx", reason: "getContext-null-or-lost" });
-      SetRenderBackend("cpu-gtx");
+      SendViewportDiag({ backend: "gpu-lost", reason: "getContext-null-or-lost" });
+      SetGpuLossNote("This browser tab could not create a WebGPU or WebGL2 context.");
+      SetRenderBackend("gpu-lost");
       return null;
     }
 
@@ -3983,6 +3994,22 @@ export default function GtxWorldViewport({
     Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_S, Gl.CLAMP_TO_EDGE);
     Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_T, Gl.CLAMP_TO_EDGE);
     Gl.texImage2D(Gl.TEXTURE_2D, 0, Gl.RGBA32F, RADIANCE_FIELD_TEXTURE_WIDTH, 1, 0, Gl.RGBA, Gl.FLOAT, new Float32Array(RADIANCE_FIELD_TEXTURE_WIDTH * 4));
+    // Half-float 3D volumes (BuildRadianceVolumes): half floats are linearly filterable in core WebGL2.
+    const MakeVolume = (InternalFormat, Format, Dims, Pixels) => {
+      const Tex = Gl.createTexture();
+      Gl.bindTexture(Gl.TEXTURE_3D, Tex);
+      Gl.texParameteri(Gl.TEXTURE_3D, Gl.TEXTURE_MIN_FILTER, Gl.LINEAR);
+      Gl.texParameteri(Gl.TEXTURE_3D, Gl.TEXTURE_MAG_FILTER, Gl.LINEAR);
+      Gl.texParameteri(Gl.TEXTURE_3D, Gl.TEXTURE_WRAP_S, Gl.CLAMP_TO_EDGE);
+      Gl.texParameteri(Gl.TEXTURE_3D, Gl.TEXTURE_WRAP_T, Gl.CLAMP_TO_EDGE);
+      Gl.texParameteri(Gl.TEXTURE_3D, Gl.TEXTURE_WRAP_R, Gl.CLAMP_TO_EDGE);
+      Gl.pixelStorei(Gl.UNPACK_ALIGNMENT, 1);
+      Gl.texImage3D(Gl.TEXTURE_3D, 0, InternalFormat, Dims[0], Dims[1], Dims[2], 0, Format, Gl.HALF_FLOAT, Pixels);
+      Gl.pixelStorei(Gl.UNPACK_ALIGNMENT, 4);
+      return Tex;
+    };
+    const RfDistTex = MakeVolume(Gl.R16F, Gl.RED, [1, 1, 1], new Uint16Array(1));
+    const RfRadTex = MakeVolume(Gl.RGBA16F, Gl.RGBA, [1, 1, 1], new Uint16Array(4));
 
     AtlasSyncRef.current?.InvalidateAll();
     SceneDataDirtyRef.current = true;
@@ -4032,6 +4059,9 @@ export default function GtxWorldViewport({
       LastSkyW: SKY_VIEW_WIDTH,
       MoonAtlasTex,
       RadianceFieldTex,
+      RfDistTex,
+      RfRadTex,
+      MakeVolume,
       RadianceFieldSynced: null,
       RadianceFieldFlags: { Probe: false, Clip: false },
       SyncedMoonVersion: InitMoon.version,
@@ -4056,12 +4086,11 @@ export default function GtxWorldViewport({
     const MountedAt = performance.now();
     let RemountTimer = 0;
 
-    const SwitchToCpuGtx = (BlockSession, Reason) => {
-      if (BlockSession) SessionWebGlBlocked = true;
+    const ParkGpuLost = (Note, Reason) => {
       GlStateRef.current = null;
-      SetShaderError(null);
-      SendViewportDiag({ backend: "cpu-gtx", reason: Reason, blocked: BlockSession ? 1 : 0 });
-      SetRenderBackend("cpu-gtx");
+      SendViewportDiag({ backend: "gpu-lost", reason: Reason });
+      SetGpuLossNote(Note);
+      SetRenderBackend("gpu-lost");
     };
 
     const HandleContextLost = (Ev) => {
@@ -4072,22 +4101,23 @@ export default function GtxWorldViewport({
       // Background tab / multi-iframe LRU eviction: temporarily park on CPU and auto-restore WebGL2 on visibility!
       if (document.visibilityState !== "visible") {
         PendingGpuRestoreRef.current = true;
-        SwitchToCpuGtx(false, `hidden-evict-${AliveMs}ms`);
+        ParkGpuLost("The GPU context was evicted while this tab was hidden.", `hidden-evict-${AliveMs}ms`);
         return;
       }
 
+      EnterGiSafeMode();
       if (AliveMs < 1800) {
         FastCrashCountRef.current += 1;
-        if (FastCrashCountRef.current >= 2) {
-          SwitchToCpuGtx(true, `fast-context-loss-${AliveMs}ms`);
+        if (FastCrashCountRef.current >= 3) {
+          ParkGpuLost("The GPU driver keeps resetting the WebGL2 context.", `fast-context-loss-${AliveMs}ms`);
           return;
         }
       } else {
         FastCrashCountRef.current = 0;
       }
 
-      if (EvictionCountRef.current >= 2) {
-        SwitchToCpuGtx(false, `repeated-evict-${AliveMs}ms`);
+      if (EvictionCountRef.current >= 3) {
+        ParkGpuLost("The GPU context was lost repeatedly.", `repeated-evict-${AliveMs}ms`);
         return;
       }
 
@@ -4106,7 +4136,8 @@ export default function GtxWorldViewport({
         SetGlEpoch((N) => N + 1);
       }
     } catch (InitErr) {
-      SwitchToCpuGtx(true, `init-throw:${String(InitErr?.message || InitErr).slice(0, 80)}`);
+      console.error("[Frontier GTX] WebGL2 init error:", InitErr);
+      ParkGpuLost(`WebGL2 init failed: ${String(InitErr?.message || InitErr).slice(0, 160)}`, "init-throw");
     }
 
     return () => {
@@ -4132,6 +4163,8 @@ export default function GtxWorldViewport({
         State.Gl.deleteTexture(State.SkyViewTex);
         State.Gl.deleteTexture(State.MoonAtlasTex);
         State.Gl.deleteTexture(State.RadianceFieldTex);
+        State.Gl.deleteTexture(State.RfDistTex);
+        State.Gl.deleteTexture(State.RfRadTex);
         State.Gl.deleteVertexArray(State.EmptyVao);
         State.Gl.deleteTexture(State.AtlasTex);
         State.Gl.deleteTexture(State.SceneDataTex);
@@ -4148,7 +4181,7 @@ export default function GtxWorldViewport({
       }
       GlStateRef.current = null;
     };
-  }, [RenderBackend, CanvasInstance, InitGlResources]);
+  }, [RenderBackend, CanvasInstance, InitGlResources, EnterGiSafeMode]);
 
   // Stable WebGL2 120Hz Render Pipeline (depends ONLY on [RenderBackend, GlEpoch] -> zero ResizeObserver/rAF churn!)
   useEffect(() => {
@@ -4220,6 +4253,8 @@ export default function GtxWorldViewport({
               uSkyViewTex: Loc("uSkyViewTex"),
               uMoonAtlasTex: Loc("uMoonAtlasTex"),
               uRadianceField: Loc("uRadianceField"),
+              uRfDistTex: Loc("uRfDistTex"),
+              uRfRadTex: Loc("uRfRadTex"),
               uGiCfg: Loc("uGiCfg"),
               uAtmoCfg0: Loc("uAtmoCfg0"),
               uAtmoCfg1: Loc("uAtmoCfg1"),
@@ -4294,9 +4329,9 @@ export default function GtxWorldViewport({
             const Msg = String(Err?.message || Err);
             console.error("[Frontier GTX] WebGL2 shader link error:", Err);
             SetShaderError(Msg);
-            SendViewportDiag({ backend: "cpu-gtx", reason: `link-err:${Msg.slice(0, 120)}` });
+            SendViewportDiag({ backend: "gpu-lost", reason: `link-err:${Msg.slice(0, 120)}` });
             GlStateRef.current = null;
-            SetRenderBackend("cpu-gtx");
+            SetRenderBackend("gpu-lost");
             return;
           }
         }
@@ -4669,21 +4704,36 @@ export default function GtxWorldViewport({
           Gl.uniform4f(U.uStarCfg1, St.twinkle !== false ? 1.0 : 0.0, St.twinkleDepth ?? 30, St.twinkleRate ?? 1.2, St.rotationRad ?? 0.0);
 
           {
-            const Field = SharedRadianceFieldBaker.Request(
-              ActiveScene, AtlasSyncRef.current?.Pixels, AtlasVersionRef.current, VehicleBvhRef.current,
-            );
+            const Field = SessionGiSafeMode
+              ? null
+              : SharedRadianceFieldBaker.Request(
+                  ActiveScene, AtlasSyncRef.current?.Pixels, AtlasVersionRef.current, VehicleBvhRef.current,
+                );
             Gl.activeTexture(Gl.TEXTURE9);
             Gl.bindTexture(Gl.TEXTURE_2D, CurState.RadianceFieldTex);
             if (Field && Field !== CurState.RadianceFieldSynced) {
               CurState.RadianceFieldSynced = Field;
               const Rows = Field.length / 4 / RADIANCE_FIELD_TEXTURE_WIDTH;
               Gl.texImage2D(Gl.TEXTURE_2D, 0, Gl.RGBA32F, RADIANCE_FIELD_TEXTURE_WIDTH, Rows, 0, Gl.RGBA, Gl.FLOAT, Field);
-              CurState.RadianceFieldFlags = { Probe: Field[1] > 0.5, Clip: Field[2] > 0.5 };
+              const Volumes = BuildRadianceVolumes(Field);
+              if (Volumes) {
+                Gl.deleteTexture(CurState.RfDistTex);
+                Gl.deleteTexture(CurState.RfRadTex);
+                CurState.RfDistTex = CurState.MakeVolume(Gl.R16F, Gl.RED, Volumes.DistDims, Volumes.Dist);
+                CurState.RfRadTex = CurState.MakeVolume(Gl.RGBA16F, Gl.RGBA, Volumes.RadDims, Volumes.Rad);
+              }
+              CurState.RadianceFieldFlags = { Probe: Field[1] > 0.5, Clip: Field[2] > 0.5 && !!Volumes };
             }
             Gl.uniform1i(U.uRadianceField, 9);
+            Gl.activeTexture(Gl.TEXTURE10);
+            Gl.bindTexture(Gl.TEXTURE_3D, CurState.RfDistTex);
+            Gl.uniform1i(U.uRfDistTex, 10);
+            Gl.activeTexture(Gl.TEXTURE11);
+            Gl.bindTexture(Gl.TEXTURE_3D, CurState.RfRadTex);
+            Gl.uniform1i(U.uRfRadTex, 11);
             Gl.uniform4f(U.uGiCfg, RsU.coneCount ?? 16, RsU.aoContact ?? 0.25, RsU.aoChassis ?? 2.2, RsU.aoRays ?? 12);
           }
-          const Flags = CurState.RadianceFieldFlags;
+          const Flags = SessionGiSafeMode ? { Probe: false, Clip: false } : CurState.RadianceFieldFlags;
           Gl.uniform1i(U.uShadowAlg, RsU.shadowAlg);
           Gl.uniform1i(
             U.uGiAlg,
@@ -4901,219 +4951,6 @@ export default function GtxWorldViewport({
       ResizeObs.disconnect();
     };
   }, [RenderBackend, GlEpoch, SampleViewportFps]);
-
-  // Multi-Worker Atomic Double-Buffered Tier 1 GTX Fallback (depends ONLY on [RenderBackend] -> zero ResizeObserver churn!)
-  useEffect(() => {
-    if (RenderBackend !== "cpu-gtx") return;
-    const Canvas = CanvasRef.current;
-    if (!Canvas) return;
-    const Ctx2d = Canvas.getContext("2d", { alpha: false });
-    if (!Ctx2d) return;
-
-    if (!CpuRendererRef.current) {
-      CpuRendererRef.current = new CpuGtxRenderer();
-    }
-    const Cpu = CpuRendererRef.current;
-
-    let Disposed = false;
-    let RafId = 0;
-    let LastObsW = 0;
-    let LastObsH = 0;
-
-    const CompositePresent = () => {
-      if (Disposed || !CanvasRef.current || RenderBackendRef.current !== "cpu-gtx") return;
-      const Props = RenderPropsRef.current;
-      const BaseScene = CompiledSceneRef.current;
-      const ActiveScene =
-        Props.EffectiveProjection === "PERSP" && LiveCamRef.current
-          ? {
-              ...BaseScene,
-              CameraOrigin: LiveCamRef.current.Position,
-              CameraTarget: LiveCamRef.current.Target,
-            }
-          : BaseScene;
-
-      const Rect = Canvas.getBoundingClientRect();
-      const Dpr = Math.min(window.devicePixelRatio || 1, 1.25);
-      const Width = Math.max(320, Math.min(1120, Math.round((Rect.width || 900) * Dpr)));
-      const Height = Math.max(200, Math.min(680, Math.round((Rect.height || 520) * Dpr)));
-      if (Canvas.width !== Width || Canvas.height !== Height) {
-        Canvas.width = Width;
-        Canvas.height = Height;
-        SceneDirtyRef.current = true;
-      }
-      const Aspect = Width / Math.max(1, Height);
-
-      const AtlasSync = AtlasSyncRef.current;
-      if (AtlasSync.UpdatePrimitives(ActiveScene.Primitives)) {
-        AtlasSync.Dirty = false;
-        AtlasVersionRef.current += 1;
-        SceneDirtyRef.current = true;
-      }
-
-      const PCount = Math.min(MAX_PRIMS, ActiveScene.Primitives.length);
-      let SelectedCode = 0;
-      const PrimIdx = ActiveScene.Primitives
-        .slice(0, PCount)
-        .findIndex((P) => (P.OwnerId || P.Id) === Props.Selected);
-      if (PrimIdx >= 0) {
-        SelectedCode = ActiveScene.Primitives[PrimIdx].PickCode || 1 + PrimIdx;
-      } else {
-        const VehIdx = (ActiveScene.Vehicles || []).findIndex(
-          (V) => (V.OwnerId || V.Id) === Props.Selected,
-        );
-        if (VehIdx >= 0) {
-          SelectedCode = ActiveScene.Vehicles[VehIdx].PickCode || 500 + VehIdx;
-        } else {
-          const LightIdx = ActiveScene.AreaLights
-            .slice(0, MAX_LIGHTS)
-            .findIndex((L) => L.Id === Props.Selected);
-          if (LightIdx >= 0) {
-            SelectedCode = ActiveScene.AreaLights[LightIdx].PickCode || 112 + LightIdx;
-          }
-        }
-      }
-
-      const EffectiveViewMode =
-        Props.Debug > 0 && Props.Debug <= 15
-          ? 10 + Props.Debug
-          : VIEW_MODE_CODES[Props.ViewMode] ?? 0;
-
-      const IsInteractive =
-        DragRef.current !== null ||
-        IsWasdFlyingRef.current ||
-        performance.now() < InteractiveUntilRef.current;
-      const HwThreads =
-        (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 8;
-      const TargetRayW = IsInteractive
-        ? HwThreads >= 8
-          ? 304
-          : 216
-        : Math.min(480, Math.max(340, Math.round((Rect.width || 800) * 0.56)));
-      const TargetRayH = Math.max(122, Math.round(TargetRayW / Math.max(0.5, Aspect)));
-
-      if (
-        SceneDirtyRef.current ||
-        !Cpu.HasFrontFrame ||
-        (!IsInteractive && (Cpu.BufW !== TargetRayW || Cpu.BufH !== TargetRayH))
-      ) {
-        SceneDirtyRef.current = false;
-        const RadianceField = SharedRadianceFieldBaker.Request(
-          ActiveScene, AtlasSync.Pixels, AtlasVersionRef.current, VehicleBvhRef.current,
-        );
-        Cpu.RequestAtomicFrame(
-          {
-            CompiledScene: ActiveScene,
-            AtlasPixels: AtlasSync.Pixels,
-            AtlasVersion: AtlasVersionRef.current,
-            RadianceField,
-            MoonAtlas: GetMoonAtlasSnapshot(),
-            VehicleBvhAssets: VehicleBvhRef.current,
-            Width: TargetRayW,
-            Height: TargetRayH,
-            ViewModeCode: EffectiveViewMode,
-            ShowGrid: Props.EffectiveGrid ? 1 : 0,
-            TimeSec: ForceTimeRef.current,
-          },
-          () => {
-            if (!Disposed) StepDraw(false);
-          },
-        );
-      }
-
-      let BuiltGizmo = null;
-      let ViewProj = null;
-      const Highlighted =
-        Props.ActiveHandle !== GizmoHandle.None ? Props.ActiveHandle : Props.HoveredHandle;
-
-      const { CameraOrigin, CameraTarget, WorldUp } = ActiveScene;
-      const Fwd = NormalizeVec3([
-        CameraTarget[0] - CameraOrigin[0],
-        CameraTarget[1] - CameraOrigin[1],
-        CameraTarget[2] - CameraOrigin[2],
-      ]);
-      const Cross = (A, B) => [
-        A[1] * B[2] - A[2] * B[1],
-        A[2] * B[0] - A[0] * B[2],
-        A[0] * B[1] - A[1] * B[0],
-      ];
-      const Right = NormalizeVec3(Cross(Fwd, WorldUp), [1, 0, 0]);
-      const Up = NormalizeVec3(Cross(Right, Fwd), [0, 0, 1]);
-      const CamState = {
-        Projection: ActiveScene.OrthoHalfHeight > 0 ? "Orthographic" : "Perspective",
-        Position: CameraOrigin,
-        FovDegrees: (ActiveScene.VerticalFovRad * 180) / Math.PI,
-        OrthoHalfHeight: ActiveScene.OrthoHalfHeight,
-      };
-      ViewProj = BuildColumnMajorViewProj(
-        { Right, Up, Forward: Fwd },
-        CamState,
-        Aspect,
-      );
-
-      if (Props.EffectiveGizmo && Props.SelectedGizmoTarget) {
-        const WorldRadius =
-          DragRef.current?.Kind === "gizmo" && DragRef.current.GizmoDrag?.ActiveWorldRadius
-            ? DragRef.current.GizmoDrag.ActiveWorldRadius
-            : ComputeGizmoWorldRadius(Props.SelectedGizmoTarget.Position, CamState, Aspect);
-        BuiltGizmo = BuildSlateGizmoGeometry(
-          Props.SelectedGizmoTarget.Position,
-          Fwd,
-          WorldRadius,
-        );
-        BuiltGizmoRef.current = BuiltGizmo;
-      } else {
-        BuiltGizmoRef.current = null;
-      }
-
-      Cpu.CompositeToCanvas(
-        Ctx2d,
-        Width,
-        Height,
-        SelectedCode,
-        null,
-        null,
-        0,
-      );
-
-      if (ActiveScene.ForceOverlay && ViewProj) {
-        DrawSlateGizmo2D(Ctx2d, Width, Height, ActiveScene.ForceOverlay, ViewProj, 0);
-      }
-      if (BuiltGizmo && ViewProj) {
-        DrawSlateGizmo2D(Ctx2d, Width, Height, BuiltGizmo, ViewProj, Highlighted);
-      }
-
-      SampleViewportFps();
-    };
-
-    const StepDraw = (ForceInvalidate = false) => {
-      if (ForceInvalidate) SceneDirtyRef.current = true;
-      if (RafId) return;
-      RafId = requestAnimationFrame(() => {
-        RafId = 0;
-        CompositePresent();
-      });
-    };
-
-    RequestRedrawRef.current = StepDraw;
-    StepDraw(false);
-    const ResizeObs = new ResizeObserver((Entries) => {
-      const Cr = Entries?.[0]?.contentRect;
-      const W = Math.round(Cr?.width || 0);
-      const H = Math.round(Cr?.height || 0);
-      if (W === LastObsW && H === LastObsH) return;
-      LastObsW = W;
-      LastObsH = H;
-      StepDraw(true);
-    });
-    ResizeObs.observe(Canvas);
-    return () => {
-      Disposed = true;
-      if (RequestRedrawRef.current === StepDraw) RequestRedrawRef.current = null;
-      if (RafId) cancelAnimationFrame(RafId);
-      ResizeObs.disconnect();
-    };
-  }, [RenderBackend, SampleViewportFps]);
 
   // Authentic Unreal Engine 5 WASDQE + Sprint + F-Focus 60Hz Camera Loop
   useEffect(() => {
@@ -5393,7 +5230,6 @@ export default function GtxWorldViewport({
     if (Drag.Kind === "gizmo") {
       const Ray = ComputePointerRay(Event);
       if (!Ray) return;
-      BumpInteractiveSettle(170);
       const Solved = SolveGizmoDrag(
         Drag.GizmoDrag,
         Ray.RayOrigin,
@@ -5442,7 +5278,6 @@ export default function GtxWorldViewport({
     if (Drag?.Kind === "gizmo") {
       SetActiveHandle(GizmoHandle.None);
       SetGizmoReadout("");
-      BumpInteractiveSettle(80);
       return;
     }
     if (
@@ -5456,7 +5291,6 @@ export default function GtxWorldViewport({
     }
     if (Drag && Drag.Moved) {
       CommitLiveCameraToEditor(true);
-      BumpInteractiveSettle(80);
       return;
     }
     if (Drag && !Drag.Moved && Event.button === 0 && CanvasRef.current) {
@@ -5521,15 +5355,23 @@ export default function GtxWorldViewport({
     return () => Canvas.removeEventListener("wheel", Handler);
   }, [RenderBackend, CanvasInstance]);
 
-  const HandleRetryWebGlGpu = () => {
+  const HandleRetryGpu = () => {
     SessionWebGpuBlocked = false;
-    SessionWebGlBlocked = false;
     PendingGpuRestoreRef.current = false;
     FastCrashCountRef.current = 0;
     EvictionCountRef.current = 0;
+    GpuLossCountRef.current = 0;
     SetShaderError(null);
+    SetGpuLossNote("");
     SetCanvasInstance((K) => K + 1);
-    SetRenderBackend(typeof navigator !== "undefined" && navigator.gpu ? "webgpu" : "webgl2");
+    SetRenderBackend(PreferInitialBackend());
+  };
+
+  const HandleRearmGi = () => {
+    SessionGiSafeMode = false;
+    SetGiSafeModeState(false);
+    SceneDirtyRef.current = true;
+    RequestRedrawRef.current?.(true);
   };
 
   const ComputeViewportUvAndLiveScene = (Ev) => {
@@ -5870,31 +5712,69 @@ export default function GtxWorldViewport({
         </div>
       )}
       {RenderBackend === "webgpu" || RenderBackend === "webgl2" ? (
-        <span
-          className="gtx-camera-home"
-          style={{
-            right: 122,
-            pointerEvents: "none",
-            borderColor: "rgba(74, 222, 128, 0.35)",
-            color: "#86efac",
-          }}
-        >
-          {RenderBackend === "webgpu" ? "GPU · WebGPU" : "GPU · WebGL2"}
-        </span>
-      ) : (
         <button
           type="button"
           className="gtx-camera-home"
           style={{
             right: 122,
-            borderColor: "rgba(251, 191, 36, 0.55)",
-            color: "#fcd34d",
+            pointerEvents: GiSafeMode ? "auto" : "none",
+            borderColor: GiSafeMode ? "rgba(251, 191, 36, 0.55)" : "rgba(74, 222, 128, 0.35)",
+            color: GiSafeMode ? "#fcd34d" : "#86efac",
           }}
-          title="WebGL2 was blocked or evicted in this tab — click to retry hardware WebGL2 GPU"
-          onClick={HandleRetryWebGlGpu}
+          title={GiSafeMode ? "A GPU reset parked the C++ GI engines on the ambient fill; click to re-enable them" : undefined}
+          onClick={GiSafeMode ? HandleRearmGi : undefined}
         >
-          CPU Fallback · Retry WebGL2 GPU
+          {RenderBackend === "webgpu" ? "GPU · WebGPU" : "GPU · WebGL2"}
+          {GiSafeMode ? " · GI safe mode" : ""}
         </button>
+      ) : (
+        <button
+          type="button"
+          className="gtx-camera-home"
+          style={{ right: 122, borderColor: "rgba(251, 191, 36, 0.55)", color: "#fcd34d" }}
+          title="Recreate the GPU context"
+          onClick={HandleRetryGpu}
+        >
+          GPU lost · Retry
+        </button>
+      )}
+      {RenderBackend === "gpu-lost" && (
+        <div
+          role="alert"
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 12,
+            background: "rgba(8, 10, 14, 0.92)",
+            color: "#e5e7eb",
+            font: "13px/1.5 system-ui, sans-serif",
+            textAlign: "center",
+            padding: 24,
+          }}
+        >
+          <strong style={{ fontSize: 15 }}>The viewport needs a GPU</strong>
+          <span style={{ maxWidth: 440, opacity: 0.8 }}>
+            {GpuLossNote || "The WebGPU / WebGL2 context is unavailable."} Close other GPU-heavy tabs, then retry.
+          </span>
+          <button
+            type="button"
+            onClick={HandleRetryGpu}
+            style={{
+              padding: "6px 16px",
+              borderRadius: 6,
+              border: "1px solid rgba(251, 191, 36, 0.55)",
+              background: "rgba(251, 191, 36, 0.12)",
+              color: "#fcd34d",
+              cursor: "pointer",
+            }}
+          >
+            Retry GPU
+          </button>
+        </div>
       )}
       <button
         type="button"

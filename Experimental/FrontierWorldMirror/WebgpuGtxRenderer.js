@@ -22,6 +22,7 @@ import {
 } from "./ShadowPipeline.js";
 import { ExpandVehicleInstances } from "./VehicleBvhAssets.js";
 import { RADIANCE_FIELD_WGSL } from "./RadianceFieldShaders.js";
+import { BuildRadianceVolumes } from "./RadianceFieldLayout.js";
 import {
   BuildSkyViewLut,
   GetSkyViewCacheKey,
@@ -105,6 +106,9 @@ struct SceneUniforms {
 @group(0) @binding(10) var uSkySampler   : sampler;
 @group(0) @binding(11) var uMoonAtlasTex : texture_2d<f32>;
 @group(0) @binding(12) var<storage, read> uRadianceField : array<vec4f>;
+@group(0) @binding(13) var uRfDistTex : texture_3d<f32>;
+@group(0) @binding(14) var uRfRadTex : texture_3d<f32>;
+@group(0) @binding(15) var uRfVolSampler : sampler;
 var<private> rfFragPix : vec2f;
 
 const PI : f32 = 3.14159265359;
@@ -2966,6 +2970,9 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
       { binding: 10, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
       { binding: 11, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
       { binding: 12, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "read-only-storage" } },
+      { binding: 13, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "3d" } },
+      { binding: 14, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "3d" } },
+      { binding: 15, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
     ],
   });
   const ScenePipelineLayout = Device.createPipelineLayout({
@@ -3235,6 +3242,14 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
   let RadianceFieldBuf = Device.createBuffer({ size: 24 * 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   let RadianceFieldRef = null;
   let RadianceFieldFlags = { Probe: false, Clip: false };
+  // Half-float 3D volumes for the cone march (distance tiers + stacked radiance mips): one trilinear fetch per lookup.
+  const MakeVolume = (Format, Dims) =>
+    Device.createTexture({ dimension: "3d", size: Dims, format: Format, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+  let RfDistTex = MakeVolume("r16float", [1, 1, 1]);
+  let RfRadTex = MakeVolume("rgba16float", [1, 1, 1]);
+  const RfVolSampler = Device.createSampler({
+    magFilter: "linear", minFilter: "linear", addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge", addressModeW: "clamp-to-edge",
+  });
 
   let SceneBindGroup = null;
   const RebuildSceneBindGroup = () => {
@@ -3255,6 +3270,9 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
         { binding: 10, resource: SkySampler },
         { binding: 11, resource: MoonAtlasTex.createView() },
         { binding: 12, resource: { buffer: RadianceFieldBuf } },
+        { binding: 13, resource: RfDistTex.createView({ dimension: "3d" }) },
+        { binding: 14, resource: RfRadTex.createView({ dimension: "3d" }) },
+        { binding: 15, resource: RfVolSampler },
       ],
     });
   };
@@ -3344,7 +3362,19 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
         RebuildSceneBindGroup();
       }
       Device.queue.writeBuffer(RadianceFieldBuf, 0, Src.buffer, Src.byteOffset, Src.byteLength);
-      RadianceFieldFlags = { Probe: Src[1] > 0.5, Clip: Src[2] > 0.5 };
+      const Volumes = BuildRadianceVolumes(Src);
+      if (Volumes) {
+        try { RfDistTex.destroy(); } catch {}
+        try { RfRadTex.destroy(); } catch {}
+        RfDistTex = MakeVolume("r16float", Volumes.DistDims);
+        RfRadTex = MakeVolume("rgba16float", Volumes.RadDims);
+        const [Dw, Dh, Dd] = Volumes.DistDims;
+        const [Rw, Rh, Rd] = Volumes.RadDims;
+        Device.queue.writeTexture({ texture: RfDistTex }, Volumes.Dist, { bytesPerRow: Dw * 2, rowsPerImage: Dh }, [Dw, Dh, Dd]);
+        Device.queue.writeTexture({ texture: RfRadTex }, Volumes.Rad, { bytesPerRow: Rw * 8, rowsPerImage: Rh }, [Rw, Rh, Rd]);
+        RebuildSceneBindGroup();
+      }
+      RadianceFieldFlags = { Probe: Src[1] > 0.5, Clip: Src[2] > 0.5 && !!Volumes };
     },
 
     UploadAtlas(Pixels) {

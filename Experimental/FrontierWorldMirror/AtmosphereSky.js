@@ -762,7 +762,7 @@ export function EvaluateSolarCoronaRadiance(dx, dy, dz, sunDir, Solar, Out = [0,
   return Out;
 }
 
-// CPU 3D Value-Noise FBM for volumetric cloud parity in CpuGtxFallbackRenderer
+// CPU 3D Value-Noise FBM for volumetric cloud parity in GtxReferenceTracer
 function Hash3(ix, iy, iz) {
   let n = (ix * 374761393 + iy * 668265263 + iz * 2147483647) | 0;
   n = (n ^ (n >>> 13)) * 1274126177;

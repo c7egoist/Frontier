@@ -17,6 +17,10 @@
 //    [24 + 4t .. +2] tier origin (texel coords)
 //    [36 + 24c ..] cascade c: +0..2 bounds min, +3 voxel spacing, +4..6 inv span, +8..10 dims, +11 mip0 base,
 //                             +12..14 mip1 dims, +15 mip1 base, +16..18 mip2 dims, +19 mip2 base
+//    [84 + 3c + m] z layer of cascade c / mip m in the GPU radiance volume   [90..92] radiance volume W, H, D
+//  GPU VOLUMES (BuildRadianceVolumes): hardware-trilinear 3D textures for the shaders
+//    distance : r16f 48 x 48 x (48 * tiers), tier t at z layer 48t
+//    radiance : rgba16f W x H x D, the 6 cascade/mip grids stacked along z (x / y edge-replicated into the padding)
 //  DATA
 //    cell i            : (x, y, z, backfaceRatio)
 //    irradiance        : IrrOffset + i*64 + texel           -> rgb
@@ -99,8 +103,75 @@ export function PackRadianceField(Probe, Clip) {
       Put(C.Mip1, Plan.Mips[Ci][1]);
       Put(C.Mip2, Plan.Mips[Ci][2]);
     });
+    let Layer = 0, VolW = 1, VolH = 1;
+    Clip.Cascades.forEach((C, Ci) => {
+      const Dims = [[C.DimX, C.DimY, C.DimZ], C.Mip1Dims, C.Mip2Dims];
+      Dims.forEach((D, M) => {
+        F[84 + Ci * 3 + M] = Layer;
+        Layer += Math.max(1, D[2]);
+        VolW = Math.max(VolW, D[0]);
+        VolH = Math.max(VolH, D[1]);
+      });
+    });
+    F[90] = VolW; F[91] = VolH; F[92] = Math.max(1, Layer);
   }
   return F;
+}
+
+//==========================================================================================================================================
+// GPU VOLUMES — half-float 3D textures so every clipmap / radiance lookup is ONE hardware-trilinear fetch on the GPU
+//==========================================================================================================================================
+const HalfScratchF = new Float32Array(1);
+const HalfScratchU = new Uint32Array(HalfScratchF.buffer);
+function FloatToHalfBits(V) {
+  HalfScratchF[0] = V;
+  const X = HalfScratchU[0];
+  const Sign = (X >>> 16) & 0x8000;
+  const Exp = (X >>> 23) & 0xff;
+  let Mant = X & 0x7fffff;
+  if (Exp === 0xff) return Sign | 0x7c00 | (Mant ? 0x200 : 0);
+  const E = Exp - 127 + 15;
+  if (E >= 0x1f) return Sign | 0x7bff; // clamp to the largest finite half
+  if (E <= 0) {
+    if (E < -10) return Sign;
+    Mant = (Mant | 0x800000) >> (1 - E);
+    return Sign | ((Mant + 0x1000) >> 13);
+  }
+  return Sign | (E << 10) | ((Mant + 0x1000) >> 13);
+}
+
+export function BuildRadianceVolumes(F) {
+  if (!F || F[2] < 0.5) return null;
+  const Tiers = F[23] | 0;
+  const DistFloat = F[20] * 4;
+  const Dist = new Uint16Array(48 * 48 * 48 * Tiers);
+  for (let I = 0; I < Dist.length; ++I) Dist[I] = FloatToHalfBits(F[DistFloat + I]);
+  const W = F[90] | 0, H = F[91] | 0, D = F[92] | 0;
+  const Rad = new Uint16Array(W * H * D * 4);
+  for (let C = 0; C < 2; ++C) {
+    const Hd = 36 + C * 24;
+    for (let M = 0; M < 3; ++M) {
+      const Gx = F[Hd + 8 + M * 4] | 0, Gy = F[Hd + 9 + M * 4] | 0, Gz = F[Hd + 10 + M * 4] | 0;
+      const Src = F[Hd + 11 + M * 4];
+      const Layer = F[84 + C * 3 + M] | 0;
+      if (Gx < 1 || Gy < 1 || Gz < 1) continue;
+      for (let Z = 0; Z < Gz; ++Z) {
+        for (let Y = 0; Y < H; ++Y) {
+          const Sy = Math.min(Y, Gy - 1);
+          for (let X = 0; X < W; ++X) {
+            const Sx = Math.min(X, Gx - 1);
+            const S = (Src + (Z * Gy + Sy) * Gx + Sx) * 4;
+            const O = (((Layer + Z) * H + Y) * W + X) * 4;
+            Rad[O] = FloatToHalfBits(F[S]);
+            Rad[O + 1] = FloatToHalfBits(F[S + 1]);
+            Rad[O + 2] = FloatToHalfBits(F[S + 2]);
+            Rad[O + 3] = 0x3c00;
+          }
+        }
+      }
+    }
+  }
+  return { Dist, DistDims: [48, 48, 48 * Tiers], Rad, RadDims: [W, H, D] };
 }
 
 //==========================================================================================================================================

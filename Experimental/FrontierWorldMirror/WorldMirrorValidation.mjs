@@ -103,7 +103,7 @@ import {
   BuildDefaultLevels,
   CreateNewLevelRecord,
 } from "./LevelSystem.js";
-import { CreateGtxBandKernel, CpuGtxRenderer } from "./CpuGtxFallbackRenderer.js";
+import { CreateGtxBandKernel, GtxReferenceTracer } from "./GtxReferenceTracer.js";
 import {
   ApplyUnrealDolly,
   ApplyUnrealMouseLook,
@@ -304,7 +304,7 @@ assert.equal(Duplicated.Rows.length, 23, "Duplicate Current Level clones all 23 
 // 7. Verify standalone index.html bundle integrity & non-SDF shadow map / BVH shader presence
 const ViewportSrc = fs.readFileSync(path.join(Folder, "GtxWorldViewport.jsx"), "utf8");
 const WebgpuSrc = fs.readFileSync(path.join(Folder, "WebgpuGtxRenderer.js"), "utf8");
-const CpuSrc = fs.readFileSync(path.join(Folder, "CpuGtxFallbackRenderer.js"), "utf8");
+const CpuSrc = fs.readFileSync(path.join(Folder, "GtxReferenceTracer.js"), "utf8");
 for (const ForbiddenSdfFn of [
   "evalSceneSdfOpaque",
   "evalLocalPrimSdf",
@@ -316,7 +316,7 @@ for (const ForbiddenSdfFn of [
 ]) {
   assert.ok(!ViewportSrc.includes(ForbiddenSdfFn), `GtxWorldViewport has zero ${ForbiddenSdfFn}`);
   assert.ok(!WebgpuSrc.includes(ForbiddenSdfFn), `WebgpuGtxRenderer has zero ${ForbiddenSdfFn}`);
-  assert.ok(!CpuSrc.includes(ForbiddenSdfFn), `CpuGtxFallbackRenderer has zero ${ForbiddenSdfFn}`);
+  assert.ok(!CpuSrc.includes(ForbiddenSdfFn), `GtxReferenceTracer has zero ${ForbiddenSdfFn}`);
 }
 assert.ok(
   !ViewportSrc.includes("localDirs[6]") &&
@@ -335,14 +335,20 @@ assert.ok(
   "Non-SDF PCSS/SMRT/PCF/BVH shadow pipeline, ControlVehicle BVH, and 2px silhouette outline present",
 );
 
-// 8. Verify Zero-WebGL CpuGtxRenderer + KHR_parallel_shader_compile Dual-Backend Self-Healing Parity
+// 8. GPU-only viewport: WebGPU -> WebGL2 with device-loss recovery, NO CPU display path; the reference tracer stays headless
 assert.ok(
   ViewportSrc.includes("KHR_parallel_shader_compile") &&
-    ViewportSrc.includes("CpuGtxRenderer") &&
-    ViewportSrc.includes("SessionWebGlBlocked"),
-  "Dual-backend KHR_parallel_shader_compile + zero-WebGL CpuGtxRenderer self-healing wired",
+    ViewportSrc.includes("RecoverFromDeviceLoss") &&
+    ViewportSrc.includes("EnterGiSafeMode") &&
+    ViewportSrc.includes('"gpu-lost"'),
+  "GPU-only viewport wires WebGPU device-loss recovery, WebGL2 context recovery and the GI safe mode",
 );
-const CpuFallback = new CpuGtxRenderer();
+assert.ok(
+  !ViewportSrc.includes("cpu-gtx") && !ViewportSrc.includes("GtxReferenceTracer") && !ViewportSrc.includes("getContext(\"2d\""),
+  "Viewport has no CPU fallback renderer",
+);
+assert.ok(!fs.existsSync(path.join(Folder, "CpuGtxFallbackRenderer.js")), "CpuGtxFallbackRenderer.js is gone");
+const CpuFallback = new GtxReferenceTracer();
 const CpuAtlas = new MaterialAtlasSynchronizer();
 CpuAtlas.UpdatePrimitives(Compiled.Primitives);
 const DoneCpu = CpuFallback.RenderSlice(
@@ -356,7 +362,7 @@ const DoneCpu = CpuFallback.RenderSlice(
   },
   90,
 );
-assert.equal(DoneCpu, true, "CpuGtxRenderer completes full Cornell-Studio Gallery frame");
+assert.equal(DoneCpu, true, "GtxReferenceTracer completes full Cornell-Studio Gallery frame");
 let NonBlackPixels = 0;
 for (let I = 0; I < CpuFallback.OffscreenImg.data.length; I += 4) {
   const R = CpuFallback.OffscreenImg.data[I];
@@ -365,7 +371,7 @@ for (let I = 0; I < CpuFallback.OffscreenImg.data.length; I += 4) {
   assert.ok(Number.isFinite(R) && Number.isFinite(G) && Number.isFinite(B), "Finite RGB output");
   if (R + G + B > 24) NonBlackPixels += 1;
 }
-assert.ok(NonBlackPixels > 160 * 90 * 0.9, "CpuGtxRenderer produces fully lit Cornell-Studio Gallery");
+assert.ok(NonBlackPixels > 160 * 90 * 0.9, "GtxReferenceTracer produces fully lit Cornell-Studio Gallery");
 
 // 9. Verify Atomic Double-Buffering (Zero Top-to-Bottom Scanline Refresh), Hermetic Worker Kernel, and Unreal WASD Camera
 const SnapshotFrameA = new Uint8ClampedArray(CpuFallback.OffscreenImg.data);
@@ -482,8 +488,9 @@ assert.ok(
   HtmlText.includes("Frontier World Mirror — Tier 1 GTX") &&
     HtmlText.includes("evalShadowMapPCSS") &&
     HtmlText.includes("KHR_parallel_shader_compile") &&
-    (HtmlText.includes("RequestAtomicFrame") || HtmlText.includes("bandDone")),
-  "Bundled index.html embeds Multi-Worker Atomic Double-Buffered GTX pipeline",
+    !HtmlText.includes("RequestAtomicFrame") &&
+    !HtmlText.includes("CPU Fallback"),
+  "Bundled index.html embeds the GPU-only GTX pipeline (no CPU fallback frame pool)",
 );
 assert.ok(
   HtmlText.includes("Create New Level") &&
@@ -744,7 +751,7 @@ assert.ok(
   // Bake both cones into 32-primitive MaterialAtlas and render through CPU GTX raytracer
   const ConeAtlas = new MaterialAtlasSynchronizer();
   ConeAtlas.UpdatePrimitives(ConeScene.Primitives);
-  const ConeCpu = new CpuGtxRenderer();
+  const ConeCpu = new GtxReferenceTracer();
   assert.equal(
     ConeCpu.RenderSlice(
       {
@@ -940,7 +947,7 @@ assert.ok(
 
   // Verify Per-Face FaceColors 3x2 guttered atlas baking & raytraced color differentiation on cube faces
   const FaceAtlasSync = new MaterialAtlasSynchronizer();
-  const FaceCpu = new CpuGtxRenderer();
+  const FaceCpu = new GtxReferenceTracer();
   const FaceRows = [
     { Id: "face-cube", Name: "Face Cube", Panel: "geometry", PrimitiveShape: "box", Preview: true },
     { Id: "camera", Name: "Cam", Panel: "camera" },
@@ -995,7 +1002,7 @@ assert.ok(
     "Per-Face FaceColors renders distinct colors on adjacent visible faces of the same cube",
   );
 
-  // Verify all 15 DebugViews (1..15) render non-empty buffers in CpuGtxRenderer AND exist in WGSL & GLSL shaders
+  // Verify all 15 DebugViews (1..15) render non-empty buffers in GtxReferenceTracer AND exist in WGSL & GLSL shaders
   const DbgDir = path.dirname(fileURLToPath(import.meta.url));
   const WgslSrc = fs.readFileSync(path.join(DbgDir, "WebgpuGtxRenderer.js"), "utf8");
   const GlslSrc = fs.readFileSync(path.join(DbgDir, "GtxWorldViewport.jsx"), "utf8");
@@ -1168,8 +1175,8 @@ assert.ok(
   const VehHit = TraceVehicleBvhCpu([-1.42, -3.0, -0.50], [0, 1, 0], 10.0, Compiled.Vehicles, VehAssets);
   assert.ok(VehHit && VehHit.pickCode >= 500, "TraceVehicleBvhCpu intersects ControlVehicle BVH cleanly");
 
-  // Verify CpuGtxRenderer renders ControlVehicle pixels cleanly into EntityBuf (pickCode >= 500)
-  const CpuVehProbe = new CpuGtxRenderer();
+  // Verify GtxReferenceTracer renders ControlVehicle pixels cleanly into EntityBuf (pickCode >= 500)
+  const CpuVehProbe = new GtxReferenceTracer();
   const ProbeAtlas = new Uint8Array(2048 * 2048 * 4);
   ProbeAtlas.fill(190);
   CpuVehProbe.RenderFullFrame({
@@ -1185,7 +1192,7 @@ assert.ok(
   for (let i = 0; i < CpuVehProbe.EntityBuf.length; i++) {
     if (CpuVehProbe.EntityBuf[i] >= 500) CpuVehPixels++;
   }
-  assert.ok(CpuVehPixels > 100, `CpuGtxRenderer rendered ${CpuVehPixels} ControlVehicle BVH pixels cleanly`);
+  assert.ok(CpuVehPixels > 100, `GtxReferenceTracer rendered ${CpuVehPixels} ControlVehicle BVH pixels cleanly`);
 
   const SlalomLevel = CreateNewLevelRecord({
     Name: "Automotive Cone Slalom",
@@ -1334,7 +1341,7 @@ assert.ok(
   assert.ok(NightAreaMat && NightAreaMat.lightPos[2] < 1.85, "Area shadow lightPos clears roof baffle");
 
   // CPU night render with area/emissive light vs dark lights-off render + shadow contrast
-  const CpuNight = new CpuGtxRenderer();
+  const CpuNight = new GtxReferenceTracer();
   const NightAtlas = new MaterialAtlasSynchronizer();
   NightAtlas.UpdatePrimitives(NightScene.Primitives);
   const FvbPath = VehicleBundlePath;
@@ -1530,7 +1537,7 @@ assert.ok(
     const Sc = CompileLiveGtxScene(GiRows, Vals, Hid, "PERSP");
     const Atl = new MaterialAtlasSynchronizer();
     Atl.UpdatePrimitives(Sc.Primitives);
-    const Cpu = new CpuGtxRenderer();
+    const Cpu = new GtxReferenceTracer();
     Cpu.RenderFullFrame({
       CompiledScene: Sc,
       AtlasPixels: Atl.Pixels,
@@ -1704,7 +1711,7 @@ assert.ok(
     const Sc = CompileLiveGtxScene(ShowcaseInitialRows, Vals, Hid, "PERSP");
     const Atl = new MaterialAtlasSynchronizer();
     Atl.UpdatePrimitives(Sc.Primitives);
-    const Cpu = new CpuGtxRenderer();
+    const Cpu = new GtxReferenceTracer();
     Cpu.RenderFullFrame({
       CompiledScene: Sc,
       AtlasPixels: Atl.Pixels,
@@ -1744,7 +1751,7 @@ assert.ok(
 {
   const { CanonicalGiFieldSettings, CanonicalRenderSettings: Crs } = await import("./ShowcaseGalleryScene.js");
   const { BakeRadianceFieldSync, DescribeRadianceFieldRequest } = await import("./RadianceFieldBaker.js");
-  const { CreateRadianceFieldSampler, RADIANCE_FIELD_TEXTURE_WIDTH } = await import("./RadianceFieldLayout.js");
+  const { BuildRadianceVolumes, CreateRadianceFieldSampler, RADIANCE_FIELD_TEXTURE_WIDTH } = await import("./RadianceFieldLayout.js");
   const { EncodeRenderSettingsUniforms } = await import("./ShadowPipeline.js");
   assert.strictEqual(Crs.GiAlgorithm, "voxel_sdf", "Default GI engine is the C++ default SdfGlobalIllumination");
   assert.deepStrictEqual(
@@ -1770,7 +1777,7 @@ assert.ok(
   const RenderFloor = (Sc, Field) => {
     const Atl = new MaterialAtlasSynchronizer();
     Atl.UpdatePrimitives(Sc.Primitives);
-    const Cpu = new CpuGtxRenderer();
+    const Cpu = new GtxReferenceTracer();
     Cpu.RenderFullFrame({ CompiledScene: Sc, AtlasPixels: Atl.Pixels, Width: 96, Height: 64, ViewModeCode: 0, ShowGrid: false, RadianceField: Field });
     let Sum = 0;
     for (let I = 0; I < Cpu.OffscreenImg.data.length; I += 4) Sum += Cpu.OffscreenImg.data[I] + Cpu.OffscreenImg.data[I + 1] + Cpu.OffscreenImg.data[I + 2];
@@ -1790,6 +1797,49 @@ assert.ok(
     if (Engine === "ddgi") Sampler.ProbeIrradiance(F, 1, 0.5, 0.01, 0, 0, 1, 0, 0, 1, G);
     else Sampler.ConeGi(F, 1, 0.5, 0.01, 0, 0, 1, ...Sc.SkyRadiance, 16, G);
     assert.ok(G.every((V) => V > 0.005 && V < 18), `${Engine} irradiance at the gallery floor is plausible (${G.map((V) => V.toFixed(3))})`);
+    if (Engine === "voxel_sdf") {
+      // GPU 3D volumes: emulate the hardware-trilinear fetch the shaders do and match the packed CPU reference lookups.
+      const V = BuildRadianceVolumes(F);
+      assert.ok(V && V.DistDims[2] === 48 * F[23] && V.RadDims.every((D) => D >= 1), "Clipmap volumes built for the GPU");
+      const HalfToFloat = (H) => {
+        const E = (H >> 10) & 31, M = H & 1023, Sg = H & 0x8000 ? -1 : 1;
+        return E === 0 ? Sg * M * 2 ** -24 : Sg * (1 + M / 1024) * 2 ** (E - 15);
+      };
+      const Trilinear = (Tex, Dims, C, Ch, U, Vv, W) => {
+        const Fx = U * Dims[0] - 0.5, Fy = Vv * Dims[1] - 0.5, Fz = W * Dims[2] - 0.5;
+        const X0 = Math.floor(Fx), Y0 = Math.floor(Fy), Z0 = Math.floor(Fz);
+        let R = 0;
+        for (let K = 0; K < 8; ++K) {
+          const Dx = K & 1, Dy = (K >> 1) & 1, Dz = K >> 2;
+          const X = Math.min(Dims[0] - 1, Math.max(0, X0 + Dx)), Y = Math.min(Dims[1] - 1, Math.max(0, Y0 + Dy)), Z = Math.min(Dims[2] - 1, Math.max(0, Z0 + Dz));
+          const Wt = (Dx ? Fx - X0 : 1 - Fx + X0) * (Dy ? Fy - Y0 : 1 - Fy + Y0) * (Dz ? Fz - Z0 : 1 - Fz + Z0);
+          R += Wt * HalfToFloat(Tex[((Z * Dims[1] + Y) * Dims[0] + X) * C + Ch]);
+        }
+        return R;
+      };
+      let Seed = 11, WorstDist = 0, WorstRad = 0;
+      const Rnd = () => (Seed = (Seed * 16807) % 2147483647) / 2147483647;
+      const RefRgb = [0, 0, 0];
+      for (let I = 0; I < 600; ++I) {
+        const P = [Rnd() * 5 - 2.5, Rnd() * 5 - 2, Rnd() * 2.4 - 0.2];
+        const RefD = Sampler.TierDistance(F, ...P);
+        if (RefD < 1e4) {
+          const T = Sampler.Pick.Tier, Spc = F[22] * 2 ** T, Q = P.map((X) => X / Spc), F0 = Q.map(Math.floor);
+          const Gx = F0[0] - F[24 + T * 4], Gy = F0[1] - F[25 + T * 4], Gz = F0[2] - F[26 + T * 4];
+          const GpuD = Trilinear(V.Dist, V.DistDims, 1, 0, (Gx + Q[0] - F0[0] + 0.5) / 48, (Gy + Q[1] - F0[1] + 0.5) / 48, (T * 48 + Gz + Q[2] - F0[2] + 0.5) / V.DistDims[2]);
+          WorstDist = Math.max(WorstDist, Math.abs(GpuD - RefD) / Math.max(0.05, Math.abs(RefD)));
+        }
+        const Casc = I & 1, H = 36 + Casc * 24;
+        Sampler.CascadeRadiance(F, Casc, ...P, 0, RefRgb);
+        const Dims = [F[H + 8], F[H + 9], F[H + 10]];
+        const Fr = [0, 1, 2].map((K) => Math.min(Dims[K] - 1, Math.max(0, (P[K] - F[H + K]) * F[H + 4 + K] * (Dims[K] - 1))));
+        for (let Ch = 0; Ch < 3; ++Ch) {
+          const Gpu = Trilinear(V.Rad, V.RadDims, 4, Ch, (Fr[0] + 0.5) / F[90], (Fr[1] + 0.5) / F[91], (F[84 + Casc * 3] + Fr[2] + 0.5) / F[92]);
+          WorstRad = Math.max(WorstRad, Math.abs(Gpu - RefRgb[Ch]) / Math.max(0.02, Math.abs(RefRgb[Ch])));
+        }
+      }
+      assert.ok(WorstDist < 4e-3 && WorstRad < 4e-3, `GPU clipmap volumes match the packed reference (dist ${WorstDist.toExponential(2)}, radiance ${WorstRad.toExponential(2)})`);
+    }
     const Lit = RenderFloor(Sc, F);
     const Fallback = RenderFloor(Sc, null);
     assert.ok(Number.isFinite(Lit) && Lit > 0.05, `${Engine} CPU frame renders (${Lit.toFixed(3)})`);

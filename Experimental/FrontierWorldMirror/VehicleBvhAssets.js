@@ -295,12 +295,11 @@ export async function LoadVehicleBvhAssets() {
   if (CachedPromise) return CachedPromise;
 
   CachedPromise = (async () => {
+    // The asset lives only in Experimental/GtxReflectionBenchmark/Assets; the relative form resolves when the editor is
+    // served at "/" (Serve.py maps "/<Studio>/" into Experimental), the absolute form when it is served from the repo root.
     const urls = [
-      "/Experimental/ShadowAlgorithmLab/Assets/VehicleBenchmarkAssets.bin",
-      "../ShadowAlgorithmLab/Assets/VehicleBenchmarkAssets.bin",
-      "./Assets/VehicleBenchmarkAssets.bin",
-      "/Experimental/GtxReflectionBenchmark/Assets/VehicleBenchmarkAssets.bin",
       "../GtxReflectionBenchmark/Assets/VehicleBenchmarkAssets.bin",
+      "/Experimental/GtxReflectionBenchmark/Assets/VehicleBenchmarkAssets.bin",
     ];
     let arrayBuf = null;
     for (const url of urls) {
@@ -541,7 +540,7 @@ function IntersectTriMoller(ro, rd, v0x, v0y, v0z, v1x, v1y, v1z, v2x, v2y, v2z)
   return t > 1e-4 ? t : -1;
 }
 
-// Fast CPU ray-BVH trace used by viewport picking & CpuGtxFallbackRenderer
+// Fast CPU ray-BVH trace used by viewport picking & GtxReferenceTracer
 export function TraceVehicleBvhCpu(ro, rd, maxT, vehicles, assets) {
   if (!assets || !vehicles || vehicles.length === 0) return null;
   const { instances } = BuildVehicleTlasAndInstances(vehicles, assets);

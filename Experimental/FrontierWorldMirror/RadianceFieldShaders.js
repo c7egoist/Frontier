@@ -5,7 +5,9 @@
 //            * rfConeGi           = VoxelSdfClipmapVolume::EvaluateDeterministicConeGiOverPi (SdfGlobalIllumination engine)
 //            * rfAmbientOcclusion = LinearCosineLightIntegration combined contact x chassis AO (raw, unfiltered on GPU)
 //          The packed field (see RadianceFieldLayout.js header) is a storage buffer array<vec4f> on WebGPU (binding 12) and an
-//          RGBA32F texture of width RADIANCE_FIELD_TEXTURE_WIDTH on WebGL (uRadianceField).
+//          RGBA32F texture of width RADIANCE_FIELD_TEXTURE_WIDTH on WebGL (uRadianceField). The clipmap distance tiers and the
+//          radiance mips are ALSO uploaded as half-float 3D volumes (BuildRadianceVolumes) so each lookup in the cone march is one
+//          hardware-trilinear fetch: WGSL uRfDistTex / uRfRadTex / uRfVolSampler (bindings 13-15), GLSL uRfDistTex / uRfRadTex.
 //          The AO block calls a host-provided occlusion trace: WGSL `rfTraceDistance(o, d, maxD) -> f32` / GLSL `float rfTraceDistance(vec3,vec3,float)`
 //          returning hit distance or -1.0 on miss.
 //==========================================================================================================================================
@@ -94,25 +96,22 @@ fn rfProbeIrradiance(P : vec3f, N : vec3f, V : vec3f) -> vec3f {
 
 struct RfTierSample { d : f32, tier : i32, };
 
+// Toroidal distance clipmap Sample(): one hardware-trilinear fetch from the r16f tier volume (tier t at z layer 48t).
 fn rfTierDistance(P : vec3f) -> RfTierSample {
-  let distFloat = i32(rfH(20)) * 4;
   let levels = i32(rfH(23));
   var spc = rfH(22);
   var r : RfTierSample;
   r.d = 1e5; r.tier = 3;
+  let depth = f32(levels * 48);
   for (var ti : i32 = 0; ti < 3; ti = ti + 1) {
     if (ti >= levels) { break; }
     let q = P / spc;
     let f0 = floor(q);
-    let x = i32(f0.x - rfH(24 + ti * 4)); let y = i32(f0.y - rfH(25 + ti * 4)); let z = i32(f0.z - rfH(26 + ti * 4));
-    if (x >= 0 && y >= 0 && z >= 0 && x + 1 < 48 && y + 1 < 48 && z + 1 < 48) {
+    let x = f0.x - rfH(24 + ti * 4); let y = f0.y - rfH(25 + ti * 4); let z = f0.z - rfH(26 + ti * 4);
+    if (x >= 0.0 && y >= 0.0 && z >= 0.0 && x + 1.0 < 48.0 && y + 1.0 < 48.0 && z + 1.0 < 48.0) {
       let fr = q - f0;
-      let i = distFloat + ti * 110592 + (z * 48 + y) * 48 + x;
-      let c00 = mix(rfF(i), rfF(i + 1), fr.x);
-      let c10 = mix(rfF(i + 48), rfF(i + 49), fr.x);
-      let c01 = mix(rfF(i + 2304), rfF(i + 2305), fr.x);
-      let c11 = mix(rfF(i + 2352), rfF(i + 2353), fr.x);
-      r.d = mix(mix(c00, c10, fr.y), mix(c01, c11, fr.y), fr.z);
+      let uvw = vec3f((x + fr.x + 0.5) / 48.0, (y + fr.y + 0.5) / 48.0, (f32(ti) * 48.0 + z + fr.z + 0.5) / depth);
+      r.d = textureSampleLevel(uRfDistTex, uRfVolSampler, uvw, 0.0).r;
       r.tier = ti;
       return r;
     }
@@ -121,42 +120,33 @@ fn rfTierDistance(P : vec3f) -> RfTierSample {
   return r;
 }
 
-fn rfGridRgb(gridOff : i32, dims : vec3i, h : i32, P : vec3f) -> vec3f {
+// One radiance grid (cascade c, mip m) from the stacked rgba16f volume; x/y padding is edge-replicated.
+fn rfGridRgb(c : i32, m : i32, P : vec3f) -> vec3f {
+  let h = 36 + c * 24;
+  let dims = vec3f(rfH(h + 8 + m * 4), rfH(h + 9 + m * 4), rfH(h + 10 + m * 4));
   let lo = vec3f(rfH(h), rfH(h + 1), rfH(h + 2));
   let inv = vec3f(rfH(h + 4), rfH(h + 5), rfH(h + 6));
-  let dm1 = vec3f(dims - vec3i(1));
+  let dm1 = max(dims - vec3f(1.0), vec3f(0.0));
   let f = clamp((P - lo) * inv * dm1, vec3f(0.0), dm1);
-  let c0 = vec3i(floor(f));
-  let c1 = min(dims - vec3i(1), c0 + vec3i(1));
-  let t = f - vec3f(c0);
-  let sxy = dims.x * dims.y;
-  let a000 = rfV(gridOff + c0.z * sxy + c0.y * dims.x + c0.x).xyz;
-  let a100 = rfV(gridOff + c0.z * sxy + c0.y * dims.x + c1.x).xyz;
-  let a010 = rfV(gridOff + c0.z * sxy + c1.y * dims.x + c0.x).xyz;
-  let a110 = rfV(gridOff + c0.z * sxy + c1.y * dims.x + c1.x).xyz;
-  let a001 = rfV(gridOff + c1.z * sxy + c0.y * dims.x + c0.x).xyz;
-  let a101 = rfV(gridOff + c1.z * sxy + c0.y * dims.x + c1.x).xyz;
-  let a011 = rfV(gridOff + c1.z * sxy + c1.y * dims.x + c0.x).xyz;
-  let a111 = rfV(gridOff + c1.z * sxy + c1.y * dims.x + c1.x).xyz;
-  return mix(mix(mix(a000, a100, t.x), mix(a010, a110, t.x), t.y), mix(mix(a001, a101, t.x), mix(a011, a111, t.x), t.y), t.z);
+  let vol = vec3f(rfH(90), rfH(91), rfH(92));
+  let uvw = vec3f((f.x + 0.5) / vol.x, (f.y + 0.5) / vol.y, (rfH(84 + c * 3 + m) + f.z + 0.5) / vol.z);
+  return textureSampleLevel(uRfRadTex, uRfVolSampler, uvw, 0.0).rgb;
 }
-
-fn rfMipDims(h : i32, k : i32) -> vec3i { return vec3i(i32(rfH(h + k)), i32(rfH(h + k + 1)), i32(rfH(h + k + 2))); }
 
 fn rfCascadeRadiance(casc : i32, P : vec3f, coneR : f32) -> vec3f {
   if (casc > 1) { return vec3f(0.0); }
   let h = 36 + casc * 24;
   let vs = rfH(h + 3);
   if (coneR <= vs * 1.1 || rfH(h + 12) < 2.0) {
-    return rfGridRgb(i32(rfH(h + 11)), rfMipDims(h, 8), h, P);
+    return rfGridRgb(casc, 0, P);
   }
   let t1 = vs * 2.2;
   if (coneR <= t1 || rfH(h + 16) < 2.0) {
     let t = clamp((coneR - vs * 1.1) / max(0.03, vs * 1.1), 0.0, 1.0);
-    return mix(rfGridRgb(i32(rfH(h + 11)), rfMipDims(h, 8), h, P), rfGridRgb(i32(rfH(h + 15)), rfMipDims(h, 12), h, P), t);
+    return mix(rfGridRgb(casc, 0, P), rfGridRgb(casc, 1, P), t);
   }
   let t = clamp((coneR - t1) / max(0.05, vs * 2.6), 0.0, 1.0);
-  return mix(rfGridRgb(i32(rfH(h + 15)), rfMipDims(h, 12), h, P), rfGridRgb(i32(rfH(h + 19)), rfMipDims(h, 16), h, P), t);
+  return mix(rfGridRgb(casc, 1, P), rfGridRgb(casc, 2, P), t);
 }
 
 fn rfConeGi(P : vec3f, Nin : vec3f, sky : vec3f, coneCount : i32) -> vec3f {
@@ -326,65 +316,50 @@ vec3 rfProbeIrradiance(vec3 P, vec3 N, vec3 V) {
   return wt > 1e-6 ? acc / wt : vec3(0.0);
 }
 
+// Toroidal distance clipmap Sample(): one hardware-trilinear fetch from the R16F tier volume (tier t at z layer 48t).
 float rfTierDistance(vec3 P, out int tier) {
-  int distFloat = int(rfH(20)) * 4;
   int levels = int(rfH(23));
   float spc = rfH(22);
+  float depth = float(levels * 48);
   tier = 3;
   for (int ti = 0; ti < 3; ++ti) {
     if (ti >= levels) break;
     vec3 q = P / spc;
     vec3 f0 = floor(q);
-    int x = int(f0.x - rfH(24 + ti * 4)), y = int(f0.y - rfH(25 + ti * 4)), z = int(f0.z - rfH(26 + ti * 4));
-    if (x >= 0 && y >= 0 && z >= 0 && x + 1 < 48 && y + 1 < 48 && z + 1 < 48) {
+    float x = f0.x - rfH(24 + ti * 4), y = f0.y - rfH(25 + ti * 4), z = f0.z - rfH(26 + ti * 4);
+    if (x >= 0.0 && y >= 0.0 && z >= 0.0 && x + 1.0 < 48.0 && y + 1.0 < 48.0 && z + 1.0 < 48.0) {
       vec3 fr = q - f0;
-      int i = distFloat + ti * 110592 + (z * 48 + y) * 48 + x;
-      float c00 = mix(rfF(i), rfF(i + 1), fr.x);
-      float c10 = mix(rfF(i + 48), rfF(i + 49), fr.x);
-      float c01 = mix(rfF(i + 2304), rfF(i + 2305), fr.x);
-      float c11 = mix(rfF(i + 2352), rfF(i + 2353), fr.x);
       tier = ti;
-      return mix(mix(c00, c10, fr.y), mix(c01, c11, fr.y), fr.z);
+      return textureLod(uRfDistTex, vec3((x + fr.x + 0.5) / 48.0, (y + fr.y + 0.5) / 48.0, (float(ti) * 48.0 + z + fr.z + 0.5) / depth), 0.0).r;
     }
     spc *= 2.0;
   }
   return 1e5;
 }
 
-vec3 rfGridRgb(int gridOff, ivec3 dims, int h, vec3 P) {
+vec3 rfGridRgb(int c, int m, vec3 P) {
+  int h = 36 + c * 24;
+  vec3 dims = vec3(rfH(h + 8 + m * 4), rfH(h + 9 + m * 4), rfH(h + 10 + m * 4));
   vec3 lo = vec3(rfH(h), rfH(h + 1), rfH(h + 2));
   vec3 inv = vec3(rfH(h + 4), rfH(h + 5), rfH(h + 6));
-  vec3 dm1 = vec3(dims - 1);
+  vec3 dm1 = max(dims - 1.0, vec3(0.0));
   vec3 f = clamp((P - lo) * inv * dm1, vec3(0.0), dm1);
-  ivec3 c0 = ivec3(floor(f));
-  ivec3 c1 = min(dims - 1, c0 + 1);
-  vec3 t = f - vec3(c0);
-  int sxy = dims.x * dims.y;
-  vec3 a000 = rfV(gridOff + c0.z * sxy + c0.y * dims.x + c0.x).xyz;
-  vec3 a100 = rfV(gridOff + c0.z * sxy + c0.y * dims.x + c1.x).xyz;
-  vec3 a010 = rfV(gridOff + c0.z * sxy + c1.y * dims.x + c0.x).xyz;
-  vec3 a110 = rfV(gridOff + c0.z * sxy + c1.y * dims.x + c1.x).xyz;
-  vec3 a001 = rfV(gridOff + c1.z * sxy + c0.y * dims.x + c0.x).xyz;
-  vec3 a101 = rfV(gridOff + c1.z * sxy + c0.y * dims.x + c1.x).xyz;
-  vec3 a011 = rfV(gridOff + c1.z * sxy + c1.y * dims.x + c0.x).xyz;
-  vec3 a111 = rfV(gridOff + c1.z * sxy + c1.y * dims.x + c1.x).xyz;
-  return mix(mix(mix(a000, a100, t.x), mix(a010, a110, t.x), t.y), mix(mix(a001, a101, t.x), mix(a011, a111, t.x), t.y), t.z);
+  vec3 vol = vec3(rfH(90), rfH(91), rfH(92));
+  return textureLod(uRfRadTex, vec3((f.x + 0.5) / vol.x, (f.y + 0.5) / vol.y, (rfH(84 + c * 3 + m) + f.z + 0.5) / vol.z), 0.0).rgb;
 }
-
-ivec3 rfMipDims(int h, int k) { return ivec3(int(rfH(h + k)), int(rfH(h + k + 1)), int(rfH(h + k + 2))); }
 
 vec3 rfCascadeRadiance(int casc, vec3 P, float coneR) {
   if (casc > 1) return vec3(0.0);
   int h = 36 + casc * 24;
   float vs = rfH(h + 3);
-  if (coneR <= vs * 1.1 || rfH(h + 12) < 2.0) return rfGridRgb(int(rfH(h + 11)), rfMipDims(h, 8), h, P);
+  if (coneR <= vs * 1.1 || rfH(h + 12) < 2.0) return rfGridRgb(casc, 0, P);
   float t1 = vs * 2.2;
   if (coneR <= t1 || rfH(h + 16) < 2.0) {
     float t = clamp((coneR - vs * 1.1) / max(0.03, vs * 1.1), 0.0, 1.0);
-    return mix(rfGridRgb(int(rfH(h + 11)), rfMipDims(h, 8), h, P), rfGridRgb(int(rfH(h + 15)), rfMipDims(h, 12), h, P), t);
+    return mix(rfGridRgb(casc, 0, P), rfGridRgb(casc, 1, P), t);
   }
   float t = clamp((coneR - t1) / max(0.05, vs * 2.6), 0.0, 1.0);
-  return mix(rfGridRgb(int(rfH(h + 15)), rfMipDims(h, 12), h, P), rfGridRgb(int(rfH(h + 19)), rfMipDims(h, 16), h, P), t);
+  return mix(rfGridRgb(casc, 1, P), rfGridRgb(casc, 2, P), t);
 }
 
 vec3 rfConeGi(vec3 P, vec3 Nin, vec3 sky, int coneCount) {

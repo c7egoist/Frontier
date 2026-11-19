@@ -5,7 +5,7 @@
 //   Renders genuine raytraced 3-point studio thumbnails on a 100% TRANSPARENT BACKGROUND (Alpha = 0) with tight auto-fit camera framing
 //   for Outliner rows, Asset Browser ("Models"), and Construct ("Geometry" / "Cameras" / "Lighting").
 
-import { CpuGtxRenderer } from "./CpuGtxFallbackRenderer.js";
+import { GtxReferenceTracer } from "./GtxReferenceTracer.js";
 import { MaterialAtlasSynchronizer } from "./MaterialAtlasCompiler.js";
 import { CompileLiveGtxScene } from "./ShowcaseGalleryScene.js";
 import {
@@ -169,7 +169,7 @@ export function RenderAnalyticalThumbnailRgba({
   }
 
   if (!SharedThumbAtlas) SharedThumbAtlas = new MaterialAtlasSynchronizer();
-  if (!SharedThumbTracer) SharedThumbTracer = new CpuGtxRenderer();
+  if (!SharedThumbTracer) SharedThumbTracer = new GtxReferenceTracer();
 
   const ObjRotation = PropDef
     ? [0, 0, -24]
