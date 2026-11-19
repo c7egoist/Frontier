@@ -26,6 +26,7 @@ import { BrowserFPS, useBrowserTiming } from "./BrowserTiming.js";
 import {
   EnsureEditorCamera,
   IsEditorCamera,
+  IsRenderSettings,
   ConsolidateAtmosphere,
   ConsolidateAtmosphereValues,
   ConsolidateAtmosphereFlags,
@@ -51,6 +52,9 @@ import LevelDialogModal from "./LevelDialogModal.jsx";
 import {
   CreateNewLevelRecord,
   LoadSavedLevelsState,
+  BuildBlankVehicleLevel,
+  BLANK_VEHICLE_LEVEL_ID,
+  EnsureRenderSettingsInLevel,
   ResetSavedLevelsState,
   SaveLevelsState,
 } from "./LevelSystem.js";
@@ -60,6 +64,7 @@ import {
   ConstructForceTemplates,
   NormalizeVec3,
   RaycastWorldPlacementAtUv,
+  ResolveRenderSettings,
   ShowcaseInitialRows,
   ShowcaseInitialValues,
 } from "./ShowcaseGalleryScene.js";
@@ -77,9 +82,23 @@ import {
 } from "./WorldDragDrop.js";
 import { AnalyticalShapeThumbnail } from "./AnalyticalShapeThumbnail.jsx";
 import { GetWorldPropById, IsFanProp, WORLD_PROP_CATALOG } from "./WorldPropLibrary.js";
+import {
+  COMPONENT_VIEWER_TAB,
+  ComponentViewerHost,
+  ComponentViewerSlot,
+} from "./ComponentViewerDock.jsx";
 import "./Editor.css";
 
 const ConstructExtraCones = [
+  {
+    Id: "control-vehicle-spawn",
+    Name: "ControlVehicle",
+    Panel: "geometry",
+    Icon: "vehicle",
+    PrimitiveShape: "vehicle",
+    Parent: "showcase",
+    Description: "ControlVehicle BVH Mesh · GT Coupe Body + 4 Rims + 4 Tyres",
+  },
   {
     Id: "traffic-cone",
     Name: "Traffic Cone",
@@ -118,7 +137,13 @@ const ConstructExtraProps = WORLD_PROP_CATALOG.map((Prop) => ({
 
 function RenderOutlinerRowIcon(Row, Rec) {
   const PropId = Row.PropId || Rec?.PropId || null;
+  if (Row.Panel === "render-settings") {
+    return <Icon Name="render-settings" Size={22} />;
+  }
   if (Row.Panel === "geometry") {
+    if (Row.PrimitiveShape === "vehicle") {
+      return <Icon Name="vehicle" Size={22} />;
+    }
     const Shape =
       Row.PrimitiveShape ||
       (Row.Icon === "editor-sphere"
@@ -312,11 +337,15 @@ const DebugViews = [
   "ForceField · Vorticity |∇×F|",
   "ForceField · Divergence ∇·F",
 ];
-const StorageKey = "Frontier.WorldMirrorGtx.v3";
+const StorageKey = "Frontier.WorldMirrorGtx.v7";
 function Restore() {
   try {
     localStorage.removeItem("Frontier.WorldMirrorGtx.v1");
     localStorage.removeItem("Frontier.WorldMirrorGtx.v2");
+    localStorage.removeItem("Frontier.WorldMirrorGtx.v3");
+    localStorage.removeItem("Frontier.WorldMirrorGtx.v4");
+    localStorage.removeItem("Frontier.WorldMirrorGtx.v5");
+    localStorage.removeItem("Frontier.WorldMirrorGtx.v6");
     return JSON.parse(localStorage.getItem(StorageKey)) || {};
   } catch {
     return {};
@@ -357,6 +386,15 @@ function OutlinerMetadata(Row, Record = {}, Rows = []) {
   const Position = LightProperties.pos || Record.Position || [0, 0, 0];
   if (IsEditorCamera(Row))
     return "Editor · permanent · 43.0° FOV";
+  if (IsRenderSettings(Row) || Row.Panel === "render-settings") {
+    const Rs = ResolveRenderSettings({ "render-settings": Record });
+    const ShShort =
+      Rs.ShadowAlgorithm === "contact_pcss"
+        ? "Contact+PCSS"
+        : Rs.ShadowAlgorithm.toUpperCase();
+    const GiShort = Rs.GiAlgorithm === "off" ? "GI Off" : `GI ${Rs.GiAlgorithm.toUpperCase()}`;
+    return `${ShShort} · ${GiShort} · ${Rs.ShadowMapRes}²`;
+  }
   if (Row.Panel === "group") {
     const Count = Rows.filter((Item) => Item.Parent === Row.Id).length;
     return Count + (Count === 1 ? " item" : " items");
@@ -515,6 +553,19 @@ function OutlinerMetadata(Row, Record = {}, Rows = []) {
 }
 
 const Saved = Restore();
+// Blank start (fresh storage or ?level=blank): plane + ControlVehicle under the C++ default sky
+const StartBlank =
+  new URLSearchParams(location.search).get("level") === "blank" || !Saved.Rows;
+if (StartBlank) {
+  const Blank = EnsureRenderSettingsInLevel(BuildBlankVehicleLevel());
+  Saved.Rows = Blank.Rows;
+  Saved.Values = Blank.Values;
+  Saved.Hidden = Blank.Hidden;
+  Saved.Collapsed = Blank.Collapsed;
+  Saved.Selected = Blank.Selected;
+  Saved.Name = Blank.Name;
+  Saved.LightDesignRevision = 1;
+}
 const SceneRows = Saved.Rows ? ConsolidateAtmosphere(Saved.Rows) : undefined;
 const SkyAlias = !SceneRows?.some((Row) => Row.Id === "sky");
 Saved.Values = NormalizeHeightFogValues(
@@ -621,7 +672,9 @@ function App() {
     [ShowGizmo, SetShowGizmo] = useState(true),
     [ForceOverlaySettings, SetForceOverlaySettings] = useState(DEFAULT_FORCE_OVERLAY),
     [CreateLevelOpen, SetCreateLevelOpen] = useState(false),
-    [LevelsState, SetLevelsState] = useState(() => LoadSavedLevelsState());
+    [LevelsState, SetLevelsState] = useState(() =>
+      LoadSavedLevelsState(StartBlank ? BLANK_VEHICLE_LEVEL_ID : null),
+    );
   const PreviousFractureRows = useRef(Rows);
   useEffect(() => {
     const Receive = (Event) => {
@@ -1703,7 +1756,7 @@ function App() {
     Toast("Spawned 3-Source Wind + Cyclonic Vortex + Curl Turbulence Rig");
   };
   const RemoveSelectedRow = () => {
-    if (!Subject || IsEditorCamera(Subject) || Subject.Panel === "group") return;
+    if (!Subject || IsEditorCamera(Subject) || IsRenderSettings(Subject) || Subject.Panel === "group") return;
     AssignRows((Previous) => {
       const Removed = new Set([Selected]);
       let Changed = true;
@@ -1917,6 +1970,25 @@ function App() {
     Expand(false);
     ShowMenu(null);
   };
+  // ComponentViewer dock tab: activate where it already lives, otherwise dock it in the Centre beside the Viewport
+  const OpenComponentViewer = () => {
+    ShowMenu(null);
+    const Home = Object.keys(PaneTabs).find((Side) => PaneTabs[Side].includes(COMPONENT_VIEWER_TAB));
+    if (Home) {
+      Activate((Previous) => ({ ...Previous, [Home]: COMPONENT_VIEWER_TAB }));
+      return;
+    }
+    AssignTabs((Previous) => ({ ...Previous, Centre: [...Previous.Centre, COMPONENT_VIEWER_TAB] }));
+    Activate((Previous) => ({ ...Previous, Centre: COMPONENT_VIEWER_TAB }));
+    Expand(false);
+  };
+  const ComponentViewerDocked = Object.values(PaneTabs).some((Tabs) => Tabs.includes(COMPONENT_VIEWER_TAB));
+  const ViewportMenu = ({ X, Y }) =>
+    ShowMenu({
+      Type: "Viewport",
+      X: Math.min(innerWidth - 240, X),
+      Y: Math.min(innerHeight - 180, Y),
+    });
   const RowMenu = (Event, Row) => {
     Event.preventDefault();
     Select(Row.Id);
@@ -2033,7 +2105,7 @@ function App() {
             }}
             onKeyDown={(Event) => {
               if (Event.key === "Enter") SelectRow(Row.Id);
-              if (Event.key === "F2" && !IsEditorCamera(Row)) RenameRow(Row.Id);
+              if (Event.key === "F2" && !IsEditorCamera(Row) && !IsRenderSettings(Row)) RenameRow(Row.Id);
               if (Event.key === "ArrowRight")
                 Collapse((Previous) => ({ ...Previous, [Row.Id]: false }));
               if (Event.key === "ArrowLeft")
@@ -2059,7 +2131,7 @@ function App() {
               <Glyph Name="chevron" Size={12} />
             </button>
             {RenderOutlinerRowIcon(Row, Values[Row.Id])}
-            {Rename === Row.Id && !IsEditorCamera(Row) ? (
+            {Rename === Row.Id && !IsEditorCamera(Row) && !IsRenderSettings(Row) ? (
               <input
                 autoFocus
                 aria-label="Rename object"
@@ -2129,9 +2201,13 @@ function App() {
             <button
               className="visibility"
               aria-label={"Toggle " + Row.Name + " visibility"}
-              disabled={IsEditorCamera(Row)}
+              disabled={IsEditorCamera(Row) || IsRenderSettings(Row)}
               title={
-                IsEditorCamera(Row) ? "Permanent editor camera" : undefined
+                IsEditorCamera(Row)
+                  ? "Permanent editor camera"
+                  : IsRenderSettings(Row)
+                    ? "Permanent camera render settings"
+                    : undefined
               }
               onClick={(Event) => {
                 Event.stopPropagation();
@@ -2637,6 +2713,7 @@ function App() {
           UpdateEditorCamera={UpdateEditorCamera}
           OnTransformEntity={HandleGizmoTransformEntity}
           OnDropWorldActor={HandleDropWorldActor}
+          OnViewportContextMenu={ViewportMenu}
           OnApplyMaterialDrop={HandleApplyMaterialDrop}
           OnApplyColourDrop={HandleApplyColourDrop}
           OnFpsSample={HandleFpsSample}
@@ -2657,6 +2734,7 @@ function App() {
             UpdateEditorCamera={UpdateEditorCamera}
             OnTransformEntity={HandleGizmoTransformEntity}
             OnDropWorldActor={HandleDropWorldActor}
+            OnViewportContextMenu={ViewportMenu}
             OnApplyMaterialDrop={HandleApplyMaterialDrop}
             OnApplyColourDrop={HandleApplyColourDrop}
             View={2}
@@ -2775,6 +2853,8 @@ function App() {
       Viewport()
     ) : Tab === "ShaderEditor" ? (
       ShaderBody(true)
+    ) : Tab === COMPONENT_VIEWER_TAB ? (
+      <ComponentViewerSlot />
     ) : Tab === "Inspector" ? (
       <>
         <div className="inspector-scroll" key={Subject.Id}>
@@ -2839,6 +2919,7 @@ function App() {
               OnChangeForceOverlay={SetForceOverlaySettings}
               OnSaveForcePreset={SaveForcePresetToAssetBrowser}
               OnDeleteSubject={RemoveSelectedRow}
+              OnSelectSubject={SelectRow}
               ReferenceDetailCards={
                 Subject.Panel === "light" && !Subject.ReferenceOnly
                   ? ReferenceCards("details")
@@ -3063,6 +3144,7 @@ function App() {
           </section>
         ))}
       </main>
+      <ComponentViewerHost Open={ComponentViewerDocked} />
       {ShaderFloating && (
         <div inert={Shade || AssetsBlocking || WindSubject ? "" : undefined}>
           <ShaderPanel
@@ -3175,6 +3257,7 @@ function App() {
                     </button>
                   ),
                 )}
+                <button onClick={OpenComponentViewer}>{COMPONENT_VIEWER_TAB}</button>
                 <hr />
                 <button
                   onClick={() => {
@@ -3226,6 +3309,31 @@ function App() {
                   Clear filters
                 </button>
               </>
+            ) : Menu.Type === "Viewport" ? (
+              <>
+                <label>VIEWPORT</label>
+                <button onClick={OpenComponentViewer}>
+                  Open ComponentViewer
+                  {ComponentViewerDocked && <small>docked</small>}
+                </button>
+                <button
+                  onClick={() => {
+                    ShowMenu(null);
+                    ToggleAssets(true);
+                  }}
+                >
+                  ContentBrowser
+                </button>
+                <hr />
+                <button
+                  onClick={() => {
+                    ShowMenu(null);
+                    OpenConstruct(true);
+                  }}
+                >
+                  Construct… <small>Ctrl+A</small>
+                </button>
+              </>
             ) : Menu.Type === "File" ? (
               <>
                 <button onClick={SaveFile}>Export HTML UI state…</button>
@@ -3264,9 +3372,9 @@ function App() {
                   </button>
                 )}
                 <button
-                  disabled={IsEditorCamera(Subject)}
+                  disabled={IsEditorCamera(Subject) || IsRenderSettings(Subject)}
                   onClick={() => {
-                    if (IsEditorCamera(Subject)) return;
+                    if (IsEditorCamera(Subject) || IsRenderSettings(Subject)) return;
                     RenameRow(Selected);
                     ShowMenu(null);
                   }}
@@ -3274,8 +3382,9 @@ function App() {
                   Rename <small>F2</small>
                 </button>
                 <button
-                  disabled={IsEditorCamera(Subject)}
+                  disabled={IsEditorCamera(Subject) || IsRenderSettings(Subject)}
                   onClick={() => {
+                    if (IsEditorCamera(Subject) || IsRenderSettings(Subject)) return;
                     ToggleHidden(Selected);
                     ShowMenu(null);
                   }}
@@ -3305,17 +3414,21 @@ function App() {
                       : "Enable fracture"}
                   </button>
                 )}
-                <button onClick={() => AddRow(Subject)}>Duplicate</button>
+                {!IsEditorCamera(Subject) && !IsRenderSettings(Subject) && (
+                  <button onClick={() => AddRow(Subject)}>Duplicate</button>
+                )}
                 {Subject.Panel !== "group" && (
                   <button
-                    disabled={IsEditorCamera(Subject)}
+                    disabled={IsEditorCamera(Subject) || IsRenderSettings(Subject)}
                     title={
                       IsEditorCamera(Subject)
                         ? "The editor camera cannot be deleted"
-                        : undefined
+                        : IsRenderSettings(Subject)
+                          ? "Render Settings component cannot be deleted"
+                          : undefined
                     }
                     onClick={() => {
-                      if (IsEditorCamera(Subject)) return;
+                      if (IsEditorCamera(Subject) || IsRenderSettings(Subject)) return;
                       AssignRows((Previous) => {
                         const Removed = new Set([Selected]);
                         let Changed = true;

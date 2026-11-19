@@ -1,6 +1,6 @@
 // UI smoke test: boots Main.js inside jsdom (Shared/Studio/Scripts/StudioHarness.mjs mocks WebGL, canvas, layout and
 // runs the workers in-process) and drives the main paths — boot, tree, channels, drawer, simulate, graph, add /
-// duplicate / delete, compile, details edits, content actions, tabs, file import.
+// duplicate / delete, compile, details edits, Add-menu import, tabs, file import.
 // Geometry Compile is a separate workspace (Experimental/GeometryCompiler/Compile.html, own smoke). Here the framed
 // compiler is played by a stand-in that speaks CompileExchange.js: it compiles the asset headlessly with the real
 // CompileSteps, structured-clones it (as postMessage would) and posts 'finish' back.
@@ -161,10 +161,25 @@ await step('details edits (vec3, range, toggle, select)', async () => {
   console.log('   inputs touched:', n);
 });
 await step('root details', async () => { click($('ComponentTree').querySelector('.comp-row')); await sleep(10); console.log('   root sections:', $('Details').querySelectorAll('.panel').length); });
-await step('content tab + sample → Geometry Compiler frame', async () => {
-  click(w.document.querySelector('[data-left=content]')); await sleep(10);
-  console.log('   content:', $('ContentCount').textContent, '| samples:', $('SampleList').children.length, '| formats:', $('ImportFormats').textContent.slice(0, 60));
-  click($('SampleList').querySelector('button'));
+await step('no content tab; Add menu import → Geometry Compiler frame', async () => {
+  const gone = !w.document.querySelector('[data-left=content]') && !$('ContentList') && !$('SampleList');
+  console.log('   content tab removed:', gone);
+  if (!gone) throw new Error('content tab is still present');
+  compiler.reply = 'compile';
+  click($('AddComponentBtn')); await sleep(20);
+  const imp = [...$('AddList').querySelectorAll('.menu-item')].find((b) => /Import mesh file/.test(b.textContent));
+  console.log('   add-menu import entry:', !!imp);
+  if (!imp) throw new Error('Add menu has no import entry');
+  let opened = false;
+  $('FileInput').click = () => { opened = true; };
+  click(imp); await sleep(10);
+  delete $('FileInput').click;
+  if (!opened) throw new Error('import entry did not open the file picker');
+  const obj = 'v -1 0 -1\nv 1 0 -1\nv 1 0 1\nv -1 0 1\nv 0 1.5 0\nf 1 2 3 4\nf 1 5 2\nf 2 5 3\nf 3 5 4\nf 4 5 1\n';
+  const file = new w.File([obj], 'Wedge.obj');
+  file.arrayBuffer = async () => new TextEncoder().encode(obj).buffer;
+  Object.defineProperty($('FileInput'), 'files', { value: [file], configurable: true });
+  $('FileInput').dispatchEvent(new w.Event('change', { bubbles: true }));
   await awaitCompiler(1);
   const src = $('Compile').getAttribute('src') || '';
   console.log('   frame open:', !$('Compile').hidden, '| src:', src.replace(/^.*\/Experimental\//, ''), '| sent:', compiler.opened[0]?.asset?.name);
@@ -174,24 +189,17 @@ await step('content tab + sample → Geometry Compiler frame', async () => {
 await step('compiler finish → opened as Blueprint', async () => {
   await awaitFrameClosed(); await sleep(100);
   const sent = compiler.opened[0].asset;
-  console.log('   frame hidden:', $('Compile').hidden, '| title:', $('BpTitle').textContent, '| tabs:', $('BlueprintTabs').children.length, '| content:', $('ContentCount').textContent);
+  console.log('   frame hidden:', $('Compile').hidden, '| title:', $('BpTitle').textContent, '| tabs:', $('BlueprintTabs').children.length);
   if (!$('Compile').hidden) throw new Error('frame stayed open after finish');
   if (!$('BpTitle').textContent.includes(sent.name.replace(/[^\w]+/g, ''))) throw new Error('compiled asset did not open as a Blueprint');
 });
-await step('content row actions', async () => {
-  const row = $('ContentList').querySelector('.content-row');
-  const acts = row ? [...row.querySelectorAll('.content-actions button')] : [];
-  console.log('   actions:', acts.map((b) => b.textContent).join(','));
-  if (acts[0]) { click(acts[0]); await sleep(20); }
-  console.log('   comps:', $('StatComponents').textContent);
-  if (acts[2]) {
-    compiler.reply = 'cancel';
-    const n = compiler.opened.length;
-    click(acts[2]); await awaitCompiler(n + 1);
-    console.log('   recompile sent:', compiler.opened.length > n, '| recompile flag:', compiler.opened.at(-1).recompile);
-    await awaitFrameClosed();
-    console.log('   cancelled → frame hidden:', $('Compile').hidden);
-  }
+await step('Add menu lists the compiled asset as a Static Mesh', async () => {
+  click($('AddComponentBtn')); await sleep(20);
+  const before = $('StatComponents').textContent;
+  const mesh = [...$('AddList').querySelectorAll('.menu-item')].find((b) => /Wedge/.test(b.textContent));
+  if (mesh) { click(mesh); await sleep(20); }
+  console.log('   entry:', !!mesh, '| comps:', before, '→', $('StatComponents').textContent);
+  if (!mesh) throw new Error('compiled asset missing from the Add menu');
 });
 await step('switch tabs and close', async () => {
   const tabs = [...$('BlueprintTabs').querySelectorAll('.document-tab')];

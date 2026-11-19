@@ -1,5 +1,5 @@
 // Component Viewer (formerly Vehicle Lab): a Blueprint-class style editor. Left: the Components tree (scene
-// components with transforms, then actor components) and the Content tray of compiled assets. Centre: one tab per
+// components with transforms, then actor components); compiled assets are added from the Add menu. Centre: one tab per
 // open blueprint with the Viewport (inspection channels, simulate) or the Construction Script graph, plus a drawer
 // with the compiled data of the selected mesh and Vehicle Lab's response curves. Right: Details for the selection.
 import { $, el, iconEl, section, panel, rangeField, segmented, segmentedField, toggle, selectField, vec3Field, colorField, textField, rows, metrics, toast, download } from '../Shared/Studio/Ui.js';
@@ -14,7 +14,6 @@ import { fieldShell, beam, glowSprite, solidArrow, anchorMark, addHalo, cameraMo
 import { createCameraHud } from '../Shared/Studio/Camera.js';
 import { SOCKET_KINDS, SOCKET_KIND, SOCKET_FIELDS, SOCKET_PARAMS, DRIVES, socketDefaults, createSocketState, stepSocket, socketPose, socketReadout, rotateVector, dockAccepts, poseLabel } from './Sockets.js';
 import { socketVisual } from './SocketVisuals.js';
-import { IMPORT_FORMATS } from '../Shared/GeometryCompile/Engine/ImportFormats.js';
 
 const CHANNELS = [
   { id: 'lit', label: 'Lit', key: '1' }, { id: 'unlit', label: 'Unlit', key: '2' }, { id: 'density', label: 'Density', key: '3' },
@@ -28,11 +27,11 @@ const CHANNEL_NOTE = {
 const DEG = Math.PI / 180;
 const AMBER = '#ffb238';
 
-export function createComponentViewer({ assets, iconRenderer, openCompile, importFiles, samples }) {
+export function createComponentViewer({ assets, iconRenderer, openCompile, importFiles }) {
   const stage = new Stage($('Viewport'), { background: '#0b0b0d' });
   stage.raycaster.params.Line.threshold = 0.05;
   const blueprints = [];
-  let bp = null, selectedId = null, channel = 'lit', centreMode = 'viewport', simulate = false, drawerTab = 'compiled', leftTab = 'components';
+  let bp = null, selectedId = null, channel = 'lit', centreMode = 'viewport', simulate = false, drawerTab = 'compiled';
   let objects = new Map(), selection = null, drive = createDriveState();
   const graphState = new Map(); // bp.id → { nodes positions, pan }
   let sockets = new Map();             // component id → { c, node, mount, vis } for the current scene
@@ -388,7 +387,6 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
     renderTabs();
     renderHeading();
     renderTree();
-    renderContent();
     renderDetails();
     renderDrawer();
     if (centreMode === 'graph') renderGraph();
@@ -541,6 +539,12 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
         list.append(b);
       }
     }
+    if (!q || 'import mesh file'.includes(q)) {
+      list.append(el('div', { class: 'menu-group' }, 'IMPORT'));
+      const imp = el('button', { type: 'button', class: 'menu-item', title: 'Compile a mesh file through Geometry Compile' }, iconEl('upload', 15), el('span', {}, 'Import mesh file…'), el('small', {}, 'obj · gltf · stl'));
+      imp.addEventListener('click', () => { menu.hidden = true; $('FileInput').click(); });
+      list.append(imp);
+    }
   }
 
   function add(type, props = {}, name = null) {
@@ -556,56 +560,6 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
 
   function addMesh(asset) {
     return add('StaticMesh', { asset: asset.id }, asset.name.replace(/[^\w]+/g, ''));
-  }
-
-  // ------------------------------------------------------------------------------------------- content (left)
-  function renderContent() {
-    const list = $('ContentList');
-    list.innerHTML = '';
-    const all = [...assets.values()];
-    $('ContentCount').textContent = String(all.length);
-    for (const a of all) {
-      const ok = isCompiled(a);
-      const used = blueprints.some((b) => b.components.some((c) => c.props.asset === a.id));
-      const card = el('div', { class: 'content-row', draggable: 'true' },
-        el('div', { class: 'content-thumb sm' }, a.out.icon ? el('img', { src: a.out.icon, alt: '' }) : el('span', { class: 'format-badge' }, a.format.split(' ')[0])),
-        el('div', { class: 'content-meta' }, el('b', {}, a.name), el('small', {}, `${a.settings.meta.category} · ${a.out.geometry ? fmt(a.out.geometry.indices.length / 3) + ' tris' : '—'}`),
-          el('div', { class: 'chips' }, el('span', { class: `chip ${ok ? 'ok' : 'warn'}` }, ok ? 'Compiled' : 'Stale'), used ? el('span', { class: 'chip' }, 'In use') : null,
-            ...STEPS.filter((s) => s.optional && a.steps[s.id].state === 'done').map((s) => el('span', { class: 'chip dim' }, s.id.toUpperCase())))),
-      );
-      const actions = el('div', { class: 'content-actions' });
-      const addB = el('button', { type: 'button', class: 'tool', title: 'Add as Static Mesh component' }, iconEl('plus', 13), 'Add');
-      addB.addEventListener('click', () => { if (!a.out.geometry) return toast('Compile the asset first'); addMesh(a); setLeft('components'); });
-      const openB = el('button', { type: 'button', class: 'tool', title: 'New blueprint from this asset' }, iconEl('cube', 13), 'Blueprint');
-      openB.addEventListener('click', () => newBlueprintFromAsset(a));
-      const reB = el('button', { type: 'button', class: 'tool', title: 'Open in Geometry Compile' }, iconEl('hammer', 13), 'Compile');
-      reB.addEventListener('click', () => openCompile(a, { recompile: true }));
-      actions.append(addB, openB, reB);
-      card.append(actions);
-      card.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/asset', a.id));
-      list.append(card);
-    }
-    const sampleList = $('SampleList');
-    sampleList.innerHTML = '';
-    for (const s of samples) {
-      const b = el('button', { type: 'button', class: 'entity import' }, iconEl(s.icon || 'sparkle', 16, 'entity-icon'), el('div', {}, el('b', {}, s.label), el('small', {}, s.note)), iconEl('upload', 13, 'muted'));
-      b.addEventListener('click', () => s.open());
-      sampleList.append(b);
-    }
-  }
-
-  function newBlueprintFromAsset(asset) {
-    const b = window.FrontierComponentViewer.createBlueprintFor(asset);
-    open(b);
-    toast(`BP_${asset.name.replace(/[^\w]+/g, '')} created`);
-  }
-
-  function setLeft(tab) {
-    leftTab = tab;
-    for (const t of document.querySelectorAll('[data-left]')) t.classList.toggle('active', t.dataset.left === tab);
-    $('LeftComponents').hidden = tab !== 'components';
-    $('LeftContent').hidden = tab !== 'content';
-    if (tab === 'content') renderContent();
   }
 
   // ------------------------------------------------------------------------------------------- details (right)
@@ -1066,9 +1020,6 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
   $('AddSearch').addEventListener('input', renderAddMenu);
   $('AddSearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') { const first = $('AddList').querySelector('.menu-item'); if (first) first.click(); } if (e.key === 'Escape') $('AddMenu').hidden = true; });
   document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#AddMenu, #AddComponentBtn')) $('AddMenu').hidden = true; });
-  for (const t of document.querySelectorAll('[data-left]')) t.addEventListener('click', () => setLeft(t.dataset.left));
-  $('ImportBtn').addEventListener('click', () => $('FileInput').click());
-  $('ImportFormats').append(...IMPORT_FORMATS.map((f) => el('span', { class: `chip ${f.reads ? '' : 'dim'}`, title: f.reads ? 'Read in this build' : 'Listed, no reader in this build' }, f.label)));
   for (const b of document.querySelectorAll('[data-drawer]')) b.addEventListener('click', () => { drawerTab = b.dataset.drawer; renderDrawer(); });
   $('DrawerHandle').addEventListener('click', () => {
     const d = $('Drawer'); const openNow = !d.classList.contains('open');
@@ -1133,7 +1084,6 @@ export function createComponentViewer({ assets, iconRenderer, openCompile, impor
   return {
     open,
     refresh() { if (!bp) return; rebuildScene(); renderAll(); },
-    showContent() { setLeft('content'); },
     get blueprint() { return bp; },
     blueprints,
   };

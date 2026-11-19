@@ -6,6 +6,8 @@
 import {
   BuildMaterialRecord,
   CanonicalEditorCamera,
+  CanonicalRenderSettings,
+  ResolveRenderSettings,
   ShowcaseInitialRows,
   ShowcaseInitialValues,
 } from "./ShowcaseGalleryScene.js";
@@ -14,10 +16,67 @@ import {
   BuildCylinderConeMaterial,
   BuildTrafficConeMaterial,
 } from "./WorldDragDrop.js";
+import {
+  ConvertAzimuthElevationToWorldAxis,
+  SolarCelestialDefaults,
+  SolveSolarEphemeris,
+} from "./CelestialEphemerisSolver.js";
 
-export const LEVEL_STORAGE_KEY = "Frontier.WorldMirrorLevels.v3";
+export const LEVEL_STORAGE_KEY = "Frontier.WorldMirrorLevels.v7";
+export const BLANK_VEHICLE_LEVEL_ID = "level-blank-vehicle";
 
 const Clone = (Value) => JSON.parse(JSON.stringify(Value));
+
+export function EnsureRenderSettingsInLevel(Lvl) {
+  if (!Lvl || !Array.isArray(Lvl.Rows)) return Lvl;
+  let Rows = Lvl.Rows;
+  const HasRenderSettings = Rows.some((R) => R.Id === "render-settings");
+  if (!HasRenderSettings) {
+    const CamIdx = Rows.findIndex((R) => R.Id === "camera");
+    const RenderRow = {
+      Id: "render-settings",
+      Name: "Render Settings",
+      Panel: "render-settings",
+      Icon: "render-settings",
+      Parent: "camera",
+      Description: "Shadows, GI & Reflections · Per-pipeline quality",
+    };
+    Rows = [...Rows];
+    if (CamIdx >= 0) Rows.splice(CamIdx + 1, 0, RenderRow);
+    else Rows.push(RenderRow);
+  }
+  let Values = {
+    ...(Lvl.Values || {}),
+    "render-settings": ResolveRenderSettings(Lvl.Values),
+  };
+  if (Lvl.Id === "level-showcase-gallery" && !Rows.some((R) => R.Id === "control-vehicle")) {
+    const VehicleRow = ShowcaseInitialRows.find((R) => R.Id === "control-vehicle");
+    if (VehicleRow) {
+      Rows = [...Rows];
+      const SphereIdx = Rows.findIndex((R) => R.Id === "abbe-sphere");
+      if (SphereIdx >= 0) Rows.splice(SphereIdx + 1, 0, Clone(VehicleRow));
+      else Rows.push(Clone(VehicleRow));
+      if (!Values["control-vehicle"] && ShowcaseInitialValues["control-vehicle"]) {
+        Values["control-vehicle"] = Clone(ShowcaseInitialValues["control-vehicle"]);
+      }
+    }
+  }
+  for (const EnvId of ["atmosphere", "clouds", "moon", "stars"]) {
+    if (!Rows.some((R) => R.Panel === EnvId)) {
+      const EnvRow = ShowcaseInitialRows.find((R) => R.Id === EnvId);
+      if (EnvRow) {
+        Rows = [...Rows];
+        const SunIdx = Rows.findIndex((R) => R.Panel === "sun" || R.Id === "world");
+        if (SunIdx >= 0) Rows.splice(SunIdx + 1, 0, Clone(EnvRow));
+        else Rows.push(Clone(EnvRow));
+      }
+    }
+    if (!Values[EnvId] && ShowcaseInitialValues[EnvId]) {
+      Values[EnvId] = Clone(ShowcaseInitialValues[EnvId]);
+    }
+  }
+  return { ...Lvl, Rows, Values };
+}
 
 function BuildLookDevStudioLevel() {
   const Rows = [
@@ -293,20 +352,144 @@ function BuildEmptyProvingGroundLevel(Id = "level-proving-ground", Name = "Empty
   };
 }
 
+// Blank start: one neutral plane, our ControlVehicle and the C++ default sky (CelestialEphemerisSolver +
+// AtmosphericMediumConfiguration defaults: 10 Sep 2026 15:30 UTC+2, Benoni -26.19 / 28.32, 0.533 deg disc).
+export function BuildBlankVehicleLevel(Id = BLANK_VEHICLE_LEVEL_ID, Name = "Blank Plane · ControlVehicle", Notes = "") {
+  const Solved = SolveSolarEphemeris();
+  const SunAxis = ConvertAzimuthElevationToWorldAxis(Solved.AzimuthDegrees, Solved.ElevationDegrees);
+  const Rows = [
+    { Id: "scene", Name, Panel: "group", Icon: "folder-scene", Parent: null, Description: "Blank level collection" },
+    {
+      Id: "ground-plane",
+      Name: "Blank Plane",
+      PrimitiveShape: "box",
+      Panel: "geometry",
+      Icon: "editor-cube",
+      Parent: "scene",
+      Preview: true,
+      Description: "Neutral ground plane · 16.00 × 16.00 m",
+    },
+    {
+      Id: "control-vehicle",
+      Name: "ControlVehicle",
+      PrimitiveShape: "vehicle",
+      Panel: "geometry",
+      Icon: "vehicle",
+      Parent: "scene",
+      Preview: true,
+      Description: "ControlVehicle BVH Mesh · Full-Scale 1:1",
+    },
+    { Id: "cameras", Name: "Cameras", Panel: "group", Icon: "camera", Parent: null, Description: "Editor cameras" },
+    { Id: "camera", Name: "Editor Camera", Panel: "camera", Icon: "camera", Parent: "cameras", Description: "Permanent editor navigation camera" },
+    { Id: "post", Name: "ACES Post-Process", Panel: "post", Icon: "environment-exposure", Parent: "cameras", Description: "Exposure & tonemapping" },
+    { Id: "world", Name: "World", Panel: "group", Icon: "folder-world", Parent: null, Description: "C++ solar & sky environment" },
+    { Id: "sun", Name: "Sun", Panel: "sun", Icon: "sun", Parent: "world", Preview: true, Description: "Directional · C++ Solar Ephemeris" },
+    { Id: "atmosphere", Name: "Atmosphere", Panel: "atmosphere", Icon: "atmosphere", Parent: "world", Description: "C++ AtmosphericSkySequence medium" },
+    { Id: "clouds", Name: "Volumetric Clouds", Panel: "clouds", Icon: "cloud", Parent: "world", Description: "3D raymarched cumulus & stratus slab" },
+    { Id: "moon", Name: "Moon", Panel: "moon", Icon: "moon", Parent: "world", Description: "Synodic phase · lunar disc & glow" },
+    { Id: "stars", Name: "Stars", Panel: "stars", Icon: "stars", Parent: "world", Description: "Deterministic celestial starfield" },
+  ];
+
+  const Values = {
+    scene: { Notes: Notes || "Blank plane with the ControlVehicle under the C++ default sky." },
+    "ground-plane": {
+      Position: [0, 0.5, -0.68],
+      Rotation: [0, 0, 0],
+      Scale: [16.0, 16.0, 0.16],
+      "Cast shadows": true,
+      GI: true,
+      ...BuildMaterialRecord({ Type: "Standard", BaseLinear: [0.42, 0.42, 0.43], Roughness: 0.72 }),
+    },
+    "control-vehicle": {
+      Position: [0.0, 0.65, -0.60],
+      Rotation: [0, 0, -24],
+      Scale: [0.78, 0.78, 0.78],
+      "Cast shadows": true,
+      GI: true,
+      ...BuildMaterialRecord({
+        Type: "Clear coat",
+        BaseLinear: [0.88, 0.91, 0.97],
+        Metallic: 0.22,
+        Roughness: 0.14,
+        Coat: 1.0,
+        CoatRoughness: 0.03,
+      }),
+    },
+    camera: {
+      Position: [...CanonicalEditorCamera.Position],
+      Target: [...CanonicalEditorCamera.Target],
+      "Focal Length": CanonicalEditorCamera.FocalLengthMm,
+      "Sensor Width": CanonicalEditorCamera.SensorWidthMm,
+      Aperture: CanonicalEditorCamera.ApertureFStop,
+      "Subject Distance": CanonicalEditorCamera.SubjectDistanceM,
+    },
+    sun: {
+      Direction: SunAxis.map((C) => Number(C.toFixed(4))),
+      SolarIrradiance: [5.4, 5.1, 4.65],
+      SkyRadiance: [0.16, 0.23, 0.36],
+      Intensity: 5.4,
+      "Angular Diameter": SolarCelestialDefaults.AngularDiameterDegrees,
+      Temperature: SolarCelestialDefaults.ColorTemperatureKelvin,
+      "Colour source": 0,
+      "Sun Tint": "#ffffff",
+      "Sun Glare": SolarCelestialDefaults.SunGlareStrength,
+      Appearance: SolarCelestialDefaults.AppearanceMode,
+      "Local Hours": SolarCelestialDefaults.LocalHours,
+      "Day of Month": SolarCelestialDefaults.DayOfMonth,
+      Month: SolarCelestialDefaults.Month,
+      Latitude: SolarCelestialDefaults.SiteLatitudeDegrees,
+      Longitude: SolarCelestialDefaults.SiteLongitudeDegrees,
+      UtcOffset: SolarCelestialDefaults.UtcOffsetHours,
+      Animate: false,
+      Speed: 1,
+      Notes: "C++ CelestialEphemerisSolver defaults (Meeus, no refraction; +X North, +Y West, +Z Up).",
+    },
+    atmosphere: {
+      Rayleigh: 1.0,
+      Mie: 1.0,
+      "Mie Anisotropy": 0.78,
+      Ozone: 1.2,
+      "Rayleigh Scale H": 8000,
+      "Mie Scale H": 1200,
+      Atmosphere: 60000,
+      "Horizon Glow": 1.0,
+      "Sky Tint": "#ffffff",
+      "Sky Brightness": 1.0,
+      "Ground Albedo": "#3c5471",
+      Notes: "C++ AtmosphericMediumConfiguration defaults (ground albedo 0.045 / 0.088 / 0.165 linear).",
+    },
+    clouds: { ...Clone(ShowcaseInitialValues.clouds || {}), Enabled: false },
+    moon: Clone(ShowcaseInitialValues.moon || {}),
+    stars: Clone(ShowcaseInitialValues.stars || {}),
+  };
+
+  return {
+    Id,
+    Name,
+    Notes: Notes || "Blank plane with the ControlVehicle.",
+    Rows,
+    Values,
+    Hidden: {},
+    Collapsed: {},
+    Selected: "control-vehicle",
+  };
+}
+
 export function BuildDefaultLevels() {
   return [
-    {
+    EnsureRenderSettingsInLevel({
       Id: "level-showcase-gallery",
       Name: "Cornell-Studio Gallery",
-      Notes: "Canonical C++ <-> HTML Architectural Cornell-Studio Gallery.",
+      Notes: "Canonical C++ <-> HTML Architectural Cornell-Studio Gallery with ControlVehicle.",
       Rows: Clone(ShowcaseInitialRows),
       Values: Clone(ShowcaseInitialValues),
       Hidden: {},
       Collapsed: {},
       Selected: "chrome-sphere",
-    },
-    BuildLookDevStudioLevel(),
-    BuildEmptyProvingGroundLevel(),
+    }),
+    EnsureRenderSettingsInLevel(BuildLookDevStudioLevel()),
+    EnsureRenderSettingsInLevel(BuildEmptyProvingGroundLevel()),
+    EnsureRenderSettingsInLevel(BuildBlankVehicleLevel()),
   ];
 }
 
@@ -325,7 +508,17 @@ function BuildAutomotiveConeSlalomLevel(
       Icon: "editor-cube",
       Parent: "scene",
       Preview: true,
-      Description: "Dark tarmac proving pad · 8.40 × 8.40 m",
+      Description: "Dark tarmac proving pad · 14.00 × 14.00 m",
+    },
+    {
+      Id: "control-vehicle",
+      Name: "ControlVehicle",
+      PrimitiveShape: "vehicle",
+      Panel: "geometry",
+      Icon: "vehicle",
+      Parent: "scene",
+      Preview: true,
+      Description: "ControlVehicle BVH Mesh · Full-Scale 1:1 Proving Ground Car",
     },
     {
       Id: "traffic-cone-1",
@@ -408,10 +601,25 @@ function BuildAutomotiveConeSlalomLevel(
     "asphalt-pad": {
       Position: [0, 0.5, -0.68],
       Rotation: [0, 0, 0],
-      Scale: [8.4, 8.4, 0.16],
+      Scale: [14.0, 14.0, 0.16],
       "Cast shadows": true,
       GI: true,
       ...BuildMaterialRecord({ Type: "Standard", BaseLinear: [0.09, 0.095, 0.105], Roughness: 0.68 }),
+    },
+    "control-vehicle": {
+      Position: [0.0, 0.65, -0.60],
+      Rotation: [0, 0, -24],
+      Scale: [0.78, 0.78, 0.78],
+      "Cast shadows": true,
+      GI: true,
+      ...BuildMaterialRecord({
+        Type: "Clear coat",
+        BaseLinear: [0.88, 0.91, 0.97],
+        Metallic: 0.22,
+        Roughness: 0.14,
+        Coat: 1.0,
+        CoatRoughness: 0.03,
+      }),
     },
     "traffic-cone-1": {
       Position: [-0.95, -0.85, -0.21],
@@ -530,6 +738,14 @@ export const LEVEL_TEMPLATES = Object.freeze([
     Subtitle: "Infinite cyclorama stage with Clear-Coat, Charlie Velvet & Subsurface spheres",
   },
   {
+    Id: "blank-vehicle",
+    Category: "Blank",
+    Badge: "BLANK + VEHICLE",
+    Spec: "2 entities · Plane + ControlVehicle",
+    Title: "Blank Plane · ControlVehicle",
+    Subtitle: "Neutral plane with our ControlVehicle under the C++ default sun, sky & atmosphere",
+  },
+  {
     Id: "empty",
     Category: "Blank",
     Badge: "CLEAN SLATE",
@@ -604,11 +820,11 @@ export function CreateNewLevelRecord({ Name, TemplateId, Notes = "", CurrentLeve
     Copy.Name = CleanName;
     Copy.Notes = Notes || `Duplicated from ${CurrentLevel.Name}`;
     if (Copy.Rows?.[0]?.Id === "scene") Copy.Rows[0].Name = CleanName;
-    return Copy;
+    return EnsureRenderSettingsInLevel(Copy);
   }
 
   if (TemplateId === "gallery") {
-    return {
+    return EnsureRenderSettingsInLevel({
       Id: NewId,
       Name: CleanName,
       Notes: Notes || "Cornell-Studio Gallery level instance.",
@@ -617,15 +833,19 @@ export function CreateNewLevelRecord({ Name, TemplateId, Notes = "", CurrentLeve
       Hidden: {},
       Collapsed: {},
       Selected: "chrome-sphere",
-    };
+    });
   }
 
   if (TemplateId === "force-lab") {
-    return BuildForceFieldLabLevel(NewId, CleanName, Notes);
+    return EnsureRenderSettingsInLevel(BuildForceFieldLabLevel(NewId, CleanName, Notes));
   }
 
   if (TemplateId === "slalom") {
-    return BuildAutomotiveConeSlalomLevel(NewId, CleanName, Notes);
+    return EnsureRenderSettingsInLevel(BuildAutomotiveConeSlalomLevel(NewId, CleanName, Notes));
+  }
+
+  if (TemplateId === "blank-vehicle") {
+    return EnsureRenderSettingsInLevel(BuildBlankVehicleLevel(NewId, CleanName, Notes));
   }
 
   if (TemplateId === "lookdev") {
@@ -634,13 +854,25 @@ export function CreateNewLevelRecord({ Name, TemplateId, Notes = "", CurrentLeve
     Base.Name = CleanName;
     if (Notes) Base.Notes = Notes;
     Base.Rows[0].Name = CleanName;
-    return Base;
+    return EnsureRenderSettingsInLevel(Base);
   }
 
-  return BuildEmptyProvingGroundLevel(NewId, CleanName, Notes);
+  return EnsureRenderSettingsInLevel(BuildEmptyProvingGroundLevel(NewId, CleanName, Notes));
 }
 
-export function LoadSavedLevelsState() {
+// PreferredLevelId (e.g. the blank start) is activated and re-added from its template when missing
+export function LoadSavedLevelsState(PreferredLevelId = null) {
+  const State = ReadSavedLevelsState();
+  if (!PreferredLevelId) return State;
+  if (!State.Levels.some((L) => L.Id === PreferredLevelId)) {
+    const Fresh = BuildDefaultLevels().find((L) => L.Id === PreferredLevelId);
+    if (!Fresh) return State;
+    return { ActiveLevelId: PreferredLevelId, Levels: [Fresh, ...State.Levels] };
+  }
+  return { ...State, ActiveLevelId: PreferredLevelId };
+}
+
+function ReadSavedLevelsState() {
   const Defaults = BuildDefaultLevels();
   if (typeof window === "undefined") {
     return { ActiveLevelId: Defaults[0].Id, Levels: Defaults };
@@ -648,16 +880,21 @@ export function LoadSavedLevelsState() {
   try {
     window.localStorage.removeItem("Frontier.WorldMirrorLevels.v1");
     window.localStorage.removeItem("Frontier.WorldMirrorLevels.v2");
+    window.localStorage.removeItem("Frontier.WorldMirrorLevels.v3");
+    window.localStorage.removeItem("Frontier.WorldMirrorLevels.v4");
+    window.localStorage.removeItem("Frontier.WorldMirrorLevels.v5");
+    window.localStorage.removeItem("Frontier.WorldMirrorLevels.v6");
     const Raw = window.localStorage.getItem(LEVEL_STORAGE_KEY);
     if (!Raw) return { ActiveLevelId: Defaults[0].Id, Levels: Defaults };
     const Parsed = JSON.parse(Raw);
     if (!Array.isArray(Parsed?.Levels) || Parsed.Levels.length === 0) {
       return { ActiveLevelId: Defaults[0].Id, Levels: Defaults };
     }
-    const Active = Parsed.Levels.some((L) => L.Id === Parsed.ActiveLevelId)
+    const NormalizedLevels = Parsed.Levels.map((L) => EnsureRenderSettingsInLevel(L));
+    const Active = NormalizedLevels.some((L) => L.Id === Parsed.ActiveLevelId)
       ? Parsed.ActiveLevelId
-      : Parsed.Levels[0].Id;
-    return { ActiveLevelId: Active, Levels: Parsed.Levels };
+      : NormalizedLevels[0].Id;
+    return { ActiveLevelId: Active, Levels: NormalizedLevels };
   } catch {
     return { ActiveLevelId: Defaults[0].Id, Levels: Defaults };
   }

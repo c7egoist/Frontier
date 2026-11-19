@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Standalone preview server for Experimental/FrontierWorldMirror on 0.0.0.0:8098."""
+"""Preview server for Experimental/FrontierWorldMirror (with the docked ComponentViewer) on 0.0.0.0:8098."""
 
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -11,10 +11,17 @@ EDITOR_DIR = Path(__file__).resolve().parent
 
 
 class FrontierWorldMirrorHandler(SimpleHTTPRequestHandler):
+    extensions_map = {**SimpleHTTPRequestHandler.extensions_map, ".js": "text/javascript", ".mjs": "text/javascript", ".facet": "application/octet-stream", ".wasm": "application/wasm"}
+
     def translate_path(self, path):
         clean = path.split("?", 1)[0].split("#", 1)[0]
         rel = clean.lstrip("/")
         if clean.startswith("/ProjectBrowser") or clean.startswith("/FrontierWorldMirror"):
+            return str(REPO_ROOT / "Experimental" / rel)
+        # The editor is served at "/", so its relative "../<Studio>/" links (the docked ComponentViewer, the Shared
+        # kit, the Geometry Compiler and the ControlVehicle assets) land on "/<Studio>/"; map them into Experimental.
+        head = rel.split("/", 1)[0]
+        if head and (REPO_ROOT / "Experimental" / head).is_dir() and not (REPO_ROOT / head).exists():
             return str(REPO_ROOT / "Experimental" / rel)
         return super().translate_path(path)
 

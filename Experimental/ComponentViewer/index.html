@@ -10,11 +10,10 @@
 <body>
 <div id="Studio" class="workspace">
 
-  <!-- ============================================================ LEFT: Components / Content -->
-  <section class="dock left" aria-label="Components and content">
+  <!-- ============================================================ LEFT: Components -->
+  <section class="dock left" aria-label="Components">
     <div class="tab-strip">
-      <button type="button" class="document-tab active" data-left="components">Components</button>
-      <button type="button" class="document-tab" data-left="content">Content</button>
+      <div class="document-tab active">Components</div>
     </div>
 
     <div id="LeftComponents" class="left-pane">
@@ -35,20 +34,6 @@
       <footer class="dock-footer"><div><i>DRAG</i>re-parent</div><div><i>DBL-CLICK</i>frame</div><div><i>DEL · CTRL D</i>remove · copy</div></footer>
     </div>
 
-    <div id="LeftContent" class="left-pane" hidden>
-      <div class="outliner-heading"><h1>Content</h1><small>compiled assets · <span id="ContentCount">0</span></small></div>
-      <div class="drop-zone">
-        <button type="button" id="ImportBtn" class="primary wide" data-icon="upload" data-icon-size="14">Import object…</button>
-        <p>Drop a file anywhere. Every import opens <b>Geometry Compile</b>: units, transform, UV charts, SDF, cluster LOD, collision and icon.</p>
-        <div class="chips" id="ImportFormats"></div>
-      </div>
-      <div class="outliner-scroll">
-        <div class="collection"><span data-icon="folder"></span><div><b>Compiled</b><small>Add places a Static Mesh under the selection</small></div></div>
-        <div id="ContentList" class="content-list"></div>
-        <div class="collection"><span data-icon="sparkle"></span><div><b>Sample sources</b><small>Open straight into Geometry Compile</small></div></div>
-        <div id="SampleList"></div>
-      </div>
-    </div>
   </section>
 
   <!-- ============================================================ CENTRE: blueprint tabs, viewport / graph -->
@@ -101,7 +86,7 @@
 </div>
 
 <!-- ============================================================ GEOMETRY COMPILER (separate workspace, framed) -->
-<!-- Imports, samples and Recompile open Experimental/GeometryCompiler/Compile.html here; it hands the compiled asset
+<!-- Imports and Recompile open Experimental/GeometryCompiler/Compile.html here; it hands the compiled asset
      back through Shared/GeometryCompile/CompileExchange.js. The frame loads on the first compile. -->
 <iframe id="Compile" class="compile-frame" hidden title="Geometry Compiler" aria-label="Geometry Compile"></iframe>
 

@@ -1,12 +1,12 @@
 // Boot: the compile context (workers + icon baker, used headlessly for the ControlVehicle sample), the asset library,
-// the import paths (file picker, drag-and-drop, sample sources) and the Geometry Compiler hand-off. The compiler is a
+// the import paths (file picker, drag-and-drop) and the Geometry Compiler hand-off. The compiler is a
 // separate workspace (Experimental/GeometryCompiler/Compile.html) framed full-window; see CompileExchange.js.
 import { $, toast } from '../Shared/Studio/Ui.js';
 import { hydrateIcons } from '../Shared/Studio/Icons.js';
 import { fmt } from '../Shared/GeometryCompile/CompileSteps.js';
 import { loadVehicleParts } from '../Shared/Models/ControlVehicle.js';
 import { createCompileContext } from '../Shared/GeometryCompile/CompileContext.js';
-import { COMPILE_SAMPLES, assetFromFile } from '../Shared/GeometryCompile/CompileSources.js';
+import { assetFromFile } from '../Shared/GeometryCompile/CompileSources.js';
 import { hostCompiler } from '../Shared/GeometryCompile/CompileExchange.js';
 import { createBlueprint, addComponent, findComponent, VEHICLE_SHEET } from './Blueprint.js';
 import { createComponentViewer } from './ComponentViewer.js';
@@ -66,9 +66,6 @@ function createBlueprintFor(asset) {
 }
 window.FrontierComponentViewer = { createBlueprintFor, assets };
 
-// ------------------------------------------------------------------------------------------------------ samples
-const samples = COMPILE_SAMPLES.map((s) => ({ ...s, async open() { openCompile(await s.source()); } }));
-
 // ---------------------------------------------------------------------------------------------- vehicle sample
 // Parts, the procedural wing and the headless compile live in Shared/Models/ControlVehicle.js (also used by the
 // Level Designer's Lobby).
@@ -106,7 +103,7 @@ function buildVehicleBlueprint(parts) {
 }
 
 // ---------------------------------------------------------------------------------------------------------- boot
-const viewer = createComponentViewer({ assets, iconRenderer, openCompile, importFiles, samples });
+const viewer = createComponentViewer({ assets, iconRenderer, openCompile, importFiles });
 hydrateIcons(document);
 
 (async () => {
