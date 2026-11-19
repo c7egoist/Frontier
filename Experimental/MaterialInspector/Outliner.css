@@ -109,6 +109,18 @@
 .ol-eye.off { color: #4a4a4a; }
 .ol-eye:hover { color: #fff; background: var(--pz-g7, #2c2c2c); }
 
+/* ---------------------------------------------------------------- footer action bar — acts on the selected row */
+.ol-actions { flex: none; display: flex; align-items: center; gap: 2px; padding: 6px 10px; background: var(--pz-g2, #151515); border-top: 1px solid var(--pz-g5, #222); }
+.ol-act-wrap { position: relative; display: flex; }
+.ol-act { width: 28px; height: 28px; min-height: 28px; padding: 0; border: 0; border-radius: 8px; background: none; color: #9a9a9a; display: grid; place-items: center; }
+.ol-act:hover:not(:disabled), .ol-act.on { background: var(--pz-g7, #2c2c2c); color: #fff; }
+.ol-act:disabled { opacity: .28; cursor: default; }
+.ol-act.gap, .ol-act-wrap.gap { margin-left: auto; }
+.ol-act-menu { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 30; min-width: 168px; padding: 4px; border-radius: 12px; background: var(--pz-g4, #1f1f1f); box-shadow: 0 12px 32px #000a, inset 0 0 0 1px #ffffff12; display: flex; flex-direction: column; gap: 1px; }
+.ol-act-menu button { display: flex; align-items: center; gap: 8px; height: 30px; min-height: 30px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: #cfcfcf; font-size: 12px; text-align: left; }
+.ol-act-menu button:hover:not(:disabled) { background: var(--pz-g7, #2c2c2c); color: #fff; }
+.ol-act-menu button:disabled { opacity: .35; }
+
 /* ---------------------------------------------------------------- footer — 45 px readout strip */
 .ol-foot { flex: none; height: 45px; display: flex; align-items: center; gap: 0; padding: 0 16px; background: var(--pz-g2, #151515); border-top: 1px solid var(--pz-g5, #222); }
 .ol-foot > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }

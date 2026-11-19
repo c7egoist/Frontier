@@ -364,11 +364,17 @@ try {
     const Seat = document.querySelector(".cd-right > .cd-material");   // the card's root: its innerHTML is rebuilt on render
     const Open = [...Seat.querySelectorAll(".mi-row.open")].map((E) => E.dataset.row);
     const Editors = [...Seat.querySelectorAll(".mi-editor")].map((E) => E.dataset.editor);
+    // amber is r high, g middling, b low: none of the open rows' borders may carry it
+    const Amber = (C) => { const [R, G, B, A = 1] = (C.match(/[\d.]+/g) || []).map(Number); return A > 0.05 && R > 180 && G > 90 && G < 200 && B < 110; };
+    const Borders = [...Seat.querySelectorAll(".mi-row.open, .mi-row.open .mi-row-head, .mi-metric.hot")].flatMap((E) => { const C = getComputedStyle(E); return [C.borderTopColor, C.borderLeftColor]; });
+    const AmberBorders = Borders.filter(Amber);
     // closing one leaves the other
     Seat.querySelector(`.mi-row-head[data-ch="${Keys[0]}"]`)?.click();
     const After = [...Seat.querySelectorAll(".mi-row.open")].map((E) => E.dataset.row);
-    return { Keys, Open, Editors, After };
+    return { Keys, Open, Editors, After, AmberBorders, Footer: [...document.querySelectorAll(".ol-actions .ol-act")].map((E) => E.dataset.act) };
   });
+  Check("material · open inspector rows carry no amber border", R.AmberBorders.length === 0, JSON.stringify(R.AmberBorders));
+  Check("material · layer stack footer has add / move / toggle / delete buttons", ["ol-act-menu", "layer-up", "layer-down", "layer-remove"].every((A) => R.Footer.includes(A)), JSON.stringify(R.Footer));
   Check("material · channel rows open side by side (emission + roughness) and close independently",
     R.Keys.length === 2 && R.Keys.every((K) => R.Open.includes(K) && R.Editors.includes(K)) && !R.After.includes(R.Keys[0]) && R.After.includes(R.Keys[1]), JSON.stringify(R));
 
@@ -380,8 +386,14 @@ try {
     for (const Id of Ids) Root.querySelector(`[data-act="open"][data-id="${Id}"]`).click();
     const Open = [...Root.querySelectorAll(".mi-row.open")].map((E) => E.dataset.row);
     Card.FoldRows(); Card.Render();
-    return { Ids, Open, Thumb: !!Root.querySelector(".ai-thumb, [data-thumb]") };
+    const Before = Card.State.Doc.layers.length;
+    const Menu = document.querySelector('.ol-actions [data-act="ol-act-menu"]'); Menu?.click();
+    document.querySelector(".ol-act-menu button:not([disabled])")?.click();
+    await new Promise((Ok) => setTimeout(Ok, 60));
+    const Added = Card.State.Doc.layers.length - Before;
+    return { Ids, Open, Thumb: !!Root.querySelector(".ai-thumb, [data-thumb]"), Added, Footer: [...document.querySelectorAll(".ol-actions .ol-act")].map((E) => E.dataset.act) };
   });
+  Check("pattern · layers footer adds a layer from its menu and carries move / duplicate / delete", R.Added === 1 && ["layer-up", "layer-down", "layer-dup", "layer-remove"].every((A) => R.Footer.includes(A)), JSON.stringify({ Added: R.Added, Footer: R.Footer }));
   Check("pattern · property rows open side by side (e.g. fill + outline)", R.Ids.length === 2 && R.Ids.every((Id) => R.Open.includes(Id)), JSON.stringify(R));
   Check("pattern · docked inspector carries no preview thumbnail (the viewport is the preview)", !R.Thumb, JSON.stringify(R));
 

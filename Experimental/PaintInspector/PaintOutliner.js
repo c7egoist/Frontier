@@ -88,6 +88,17 @@ export function MountPaintOutliner(Host, Inspector, Options = {}) {
     const P = S.P, N = B.Stats(P), Filtering = !!St.Query.trim() || St.Filters.size > 0;
     const Visible = P.layers.filter((L) => L.kind !== "folder" && B.Effective(P, L)).length, Total = P.layers.filter((L) => L.kind !== "folder").length;
     const Rows = LayerRows(St, Filtering);
+    // footer action bar: add, then the selected layer's order (within its group), copy, visibility, lock and delete
+    const Sel = B.Layer(P, P.selectedLayerId), Sibs = Sel ? B.TopFirst(P, Sel.parentId || null) : [], At = Sibs.findIndex((L) => L.id === Sel?.id);
+    const Actions = [
+      { Act: "layer-add", Glyph: "plus", Label: "Add layer", Menu: B.LAYER_TYPES.map((T) => ({ Label: `${T.Label} layer`, Act: "layer-add", Value: T.Id, Glyph: T.Icon, Hint: T.Hint })) },
+      { Act: "layer-up", Glyph: "up", Label: "Move layer up", Id: Sel ? `layer:${Sel.id}` : "", Disabled: !Sel || At <= 0 },
+      { Act: "layer-down", Glyph: "down", Label: "Move layer down", Id: Sel ? `layer:${Sel.id}` : "", Disabled: !Sel || At < 0 || At >= Sibs.length - 1 },
+      { Act: "layer-dup", Glyph: "duplicate", Label: "Duplicate layer", Id: Sel ? `layer:${Sel.id}` : "", Disabled: !Sel || Sel.kind === "folder" },
+      { Act: "layer-eye", Glyph: Sel && !Sel.visible ? "eye-off" : "eye", Label: Sel && !Sel.visible ? "Show layer" : "Hide layer", Id: Sel ? `layer:${Sel.id}` : "", Disabled: !Sel },
+      { Act: "layer-lock", Glyph: Sel?.locked ? "lock" : "unlock", Label: Sel?.locked ? "Unlock layer" : "Lock layer", Id: Sel ? `layer:${Sel.id}` : "", Disabled: !Sel, On: !!Sel?.locked },
+      { Act: "layer-remove", Glyph: "trash", Label: "Delete layer", Id: Sel ? `layer:${Sel.id}` : "", Disabled: !Sel || P.layers.length <= 1, Gap: true },
+    ];
     return Shell({
       Label: "Texture paint layer outliner", Title: "Layers", Meta: `Texture Paint · ${B.MeshLabel(P)}`,
       Tools: `<span class="pi-add">${Dropdown("layer-add", B.LAYER_TYPES.map((T) => [T.Label, T.Id, T.Icon, T.Hint]), null, { Label: "Add a layer", Placeholder: "Add", Class: "compact ol-add-dd", Search: false })}</span>`,
@@ -98,7 +109,7 @@ export function MountPaintOutliner(Host, Inspector, Options = {}) {
       Placeholder: "Search layers…",
       Filters: [...B.LAYER_TYPES.filter((T) => P.layers.some((L) => L.kind === T.Id)).map((T) => [T.Label, `type:${T.Id}`]), ["With mask", "masked"], ["Hidden", "hidden"], ["Locked", "locked"]],
       Rows: (Filtering ? "" : MeshRows()) + (Filtering ? Rows : GroupRow({ Id: "stack", Depth: 0, Icon: icon("layers", 15), Name: "Layer stack", Meta: "top of the stack first", Expandable: false, Expanded: true }) + Rows),
-      Empty: "No layers match",
+      Empty: "No layers match", Actions,
       Footer: [
         { Label: "Res", Value: P.resolution >= 1024 ? `${P.resolution / 1024}K` : String(P.resolution) },
         { Label: "Layers", Value: String(N.Layers) },
@@ -128,6 +139,14 @@ export function MountPaintOutliner(Host, Inspector, Options = {}) {
       case "layer-lock": if (L) { Inspector.Edit(Id, { locked: !L.locked }); Inspector.Flash(`${L.name} ${L.locked ? "unlocked" : "locked"}`); } return true;
       case "mask-toggle": if (L?.mask) { if (L.locked) return Inspector.Flash("Layer is locked"), true; Inspector.Edit(Id, { mask: { ...L.mask, enabled: !L.mask.enabled } }); } return true;
       case "layer-add": { const New = Inspector.Add(El.dataset.value); const At = B.Layer(S.P, New); if (At?.parentId) Outliner.State.Expanded[`layer:${At.parentId}`] = true; Outliner.Render(); Outliner.FocusRow(`layer:${New}`); return true; }
+      case "layer-up": case "layer-down": {
+        if (!L) return true;
+        const Sibs = B.TopFirst(S.P, L.parentId || null), At = Sibs.findIndex((E) => E.id === Id), To = Sibs[At + (Act === "layer-up" ? -1 : 1)];
+        if (To && Inspector.Move(Id, To.id, Act === "layer-up" ? "before" : "after")) Outliner.FocusRow(`layer:${Id}`);
+        return true;
+      }
+      case "layer-dup": if (L) { const New = Inspector.Duplicate(Id); if (New) Outliner.FocusRow(`layer:${New}`); } return true;
+      case "layer-remove": if (L) { if (L.locked) return Inspector.Flash(`${L.name} is locked`), true; Inspector.Remove(Id); } return true;
       case "stat-hidden": Flip("hidden"); return true;
       case "stat-masked": Flip("masked"); return true;
       default: return false;

@@ -200,6 +200,27 @@ await step("row tools and status toggles fire without errors", async () => {
   console.log(`   tools: ${Acts.join(", ") || "(none)"}`);
 });
 
+if (q(".ol-actions")) await step("footer action bar: add from its menu, move, duplicate, hide, delete", async () => {
+  const Count = () => (Hub.State.Doc?.layers || Hub.State.P?.Authoring?.Layers || Hub.State.P?.layers || []).length;
+  const Rows = Count();
+  click(q('.ol-actions [data-act="ol-act-menu"]')); await sleep(10);
+  const Items = qa(".ol-act-menu button:not([disabled])");
+  expect(Items.length >= 1, "add menu lists entries");
+  click(Items[0]); await sleep(20);
+  expect(!q(".ol-act-menu"), "menu closes after a pick");
+  expect(Count() === Rows + 1, `a layer was added (${Rows} → ${Count()})`);
+  const Done = [];
+  for (const A of ["layer-up", "layer-down", "layer-dup", "layer-vis", "layer-eye", "layer-toggle", "layer-lock"]) {
+    const B = qa(`.ol-actions [data-act="${A}"]`).find((E) => !E.disabled);
+    if (!B) continue;
+    click(B); await sleep(20); Done.push(A);
+    if (/vis|eye|toggle|lock/.test(A)) { const Again = qa(`.ol-actions [data-act="${A}"]`).find((E) => !E.disabled); if (Again) { click(Again); await sleep(20); } }
+  }
+  const Del = qa('.ol-actions [data-act="layer-remove"]').find((E) => !E.disabled);
+  if (Del) { const N = Count(); click(Del); await sleep(20); expect(Count() === N - 1, "delete removes the selected layer"); Done.push("layer-remove"); }
+  console.log(`   footer: add + ${Done.join(", ")}`);
+});
+
 await step("card edits re-render the outliner", async () => {
   const Before = OL().innerHTML;
   const Undo = w.document.querySelector('#Card [data-act="undo"]:not([disabled])');

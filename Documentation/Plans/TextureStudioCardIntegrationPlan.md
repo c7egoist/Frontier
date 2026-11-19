@@ -239,3 +239,29 @@ Screenshots: `Experimental/TextureStudio/Screenshots/{fill-linear-scene,fill-poi
 | `CheckCardDock.mjs` | **36 / 36**. New checks: material emission + roughness open together and close independently; pattern rows open side by side; no docked preview thumbnail; paint channel rows side by side. The brush hand-off check now polls instead of using one 200 ms wait. |
 | Smoke: Material 0 errors · Artwork 0 errors (new "rows open side by side") · Paint 0 · Brush 14/0 · Bake 0 · Outliners 10/0 | green |
 | Model checks: Material, Artwork, Paint, Brush | 0 fails |
+
+## 9. No amber borders; outliner footer buttons
+
+### 9.1 Asks
+
+- Inspector cards carry no orange/amber border. This applies to open rows, hot metrics, drop zones, focused fields and the active stamp.
+- The layer outliners get a footer button bar: add layer, move up/down, and the usual layer operations.
+
+### 9.2 How
+
+| Piece | Change |
+| :--- | :--- |
+| `TextureStudio/CardDock.css` | Scoped to `.cd-host` / `.cd-brush-menu`. The amber borders become transparent: open rows use `--raised` as their fill, and focused fields use `--line-strong`. Focus rings are white at .28. The standalone card pages are unchanged. |
+| `MaterialInspector/OutlinerKit.js` | `ActionBar(Actions)` renders `.ol-actions` above `ol-foot`. An entry with `Menu` opens a small pick list above the bar. The list closes on a pick, an outside click or Esc. |
+| Material layer stack | Add detail (stratum or preset), move up/down (detail strata), toggle, delete. |
+| Pattern / Stamp layers | Add layer (any kind), add folder, move up/down, duplicate, hide, lock, delete. |
+| Texture Paint layers | Add layer (any type), move up/down within its folder, duplicate, hide, lock, delete (locked layers refuse). |
+
+### 9.3 Gates
+
+| Gate | Result |
+| :--- | :--- |
+| `SmokeOutliners.mjs` | New step: add from the footer menu, then move, duplicate, hide and delete. Green on material, pattern, stamp, bake and bakeset. |
+| `CheckCardDock.mjs` | New checks: no amber border on open material rows; the material footer carries add / move / delete; the pattern footer adds a layer from its menu. |
+| Smoke: Material · Artwork · Paint · Bake | 0 errors |
+| Model checks: Material 17 · Artwork 12 · Paint 15 | 0 fails |

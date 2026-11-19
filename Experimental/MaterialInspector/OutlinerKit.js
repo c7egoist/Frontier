@@ -42,8 +42,22 @@ export const GroupRow = (R) => TreeRow({ ...R, Kind: `group ${R.Kind || ""}` });
 // Footer column: { Label, Value, Unit, Tone }
 const FootCol = ({ Label, Value, Unit = "", Tone = "" }) => `<span class="${Tone ? `tone-${Tone}` : ""}"><small>${Esc(Label)}</small><b>${Esc(Value)}${Unit ? ` <em>${Esc(Unit)}</em>` : ""}</b></span>`;
 
+// Footer action bar (acts on the selected row): { Act, Glyph, Label, Id, Value, Disabled, Gap (space before), Menu:[{ Label, Act, Value, Glyph, Hint }] }
+// A Menu button opens a small list above the bar; picking an entry fires that entry's act like any other button.
+function ActionBar(Actions, St) {
+  return `<div class="ol-actions" role="toolbar" aria-label="Layer actions">${Actions.map((A) => {
+    const Attr = `${A.Id !== undefined ? `data-id="${Esc(A.Id)}"` : ""} ${A.Value !== undefined ? `data-value="${Esc(A.Value)}"` : ""}`;
+    if (A.Menu) {
+      const Open = St.ActMenu === A.Act;
+      return `<span class="ol-act-wrap ${A.Gap ? "gap" : ""}"><button type="button" class="ol-act ${Open ? "on" : ""}" data-act="ol-act-menu" data-menu="${Esc(A.Act)}" ${A.Disabled ? "disabled" : ""} aria-haspopup="true" aria-expanded="${Open}" title="${Esc(A.Label)}" aria-label="${Esc(A.Label)}">${icon(A.Glyph, 13)}</button>
+        ${Open ? `<div class="ol-act-menu" role="menu">${A.Menu.map((E) => `<button type="button" role="menuitem" data-act="${Esc(E.Act || A.Act)}" ${E.Value !== undefined ? `data-value="${Esc(E.Value)}"` : ""} ${E.Disabled ? "disabled" : ""} title="${Esc(E.Hint || "")}">${E.Glyph ? icon(E.Glyph, 12) : ""}<span>${Esc(E.Label)}</span></button>`).join("")}</div>` : ""}</span>`;
+    }
+    return `<button type="button" class="ol-act ${A.Gap ? "gap" : ""} ${A.On ? "on" : ""}" data-act="${Esc(A.Act)}" ${Attr} ${A.Disabled ? "disabled" : ""} title="${Esc(A.Label)}" aria-label="${Esc(A.Label)}">${icon(A.Glyph, 13)}</button>`;
+  }).join("")}</div>`;
+}
+
 // Shell: { Label, Title, Meta, Tools, Stats:[…], Placeholder, Filters:[[Label, Value]], Chips (html, e.g. presets), Rows (html),
-//          Empty, Footer:[…], Count }
+//          Empty, Actions:[…] (footer action bar), Footer:[…], Count }
 export function Shell(O, St) {
   const Active = O.Filters?.filter(([, V]) => St.Filters.has(V)) || [];
   return `<article class="ol-card" aria-label="${Esc(O.Label || "Outliner")}">
@@ -61,6 +75,7 @@ export function Shell(O, St) {
     <div class="ol-rows" role="tree" aria-label="${Esc(O.Label || "Outliner")} tree" aria-multiselectable="false">
       ${O.Rows || `<p class="ol-empty">${Esc(O.Empty || "Nothing matches")}</p>`}
     </div>
+    ${O.Actions?.length ? ActionBar(O.Actions, St) : ""}
     ${O.Footer?.length ? `<footer class="ol-foot">${O.Footer.map(FootCol).join("")}</footer>` : ""}
   </article>`;
 }
@@ -69,7 +84,7 @@ export function Shell(O, St) {
 // Spec: { Html(St), OnSelect(Id, Event), OnAction(Act, El, Event) → true if handled (re-render is the caller's job),
 //         OnRename(Id, Name), CanRename(Id), OnDelete(Id), OnDrop(DragId, TargetId, "before" | "after" | "inside"), CanDrop(DragId, TargetId) }
 export function CreateOutliner(Host, Spec) {
-  const St = { Query: "", Filters: new Set(), Expanded: {}, Renaming: null, MenuOpen: false, Drag: null };
+  const St = { Query: "", Filters: new Set(), Expanded: {}, Renaming: null, MenuOpen: false, ActMenu: null, Drag: null };
   const Render = () => {
     const Scroll = Host.querySelector(".ol-rows")?.scrollTop ?? 0;
     Rebuild(Host, Spec.Html(St), ".ol-card");
@@ -93,20 +108,27 @@ export function CreateOutliner(Host, Spec) {
     const El = Event.target.closest("[data-act]"), Row = Event.target.closest("[data-row]"), Inside = !!El && Host.contains(El);
     // Clicking outside the open filter menu closes it — and still performs whatever was clicked (a chip, a row tool…).
     if (St.MenuOpen && !Event.target.closest(".ol-filter-wrap")) { St.MenuOpen = false; Render(); if (!El) return; }
+    let Closed = false;
+    if (St.ActMenu && El?.dataset.act !== "ol-act-menu") { St.ActMenu = null; Closed = true; if (!El || !Inside) { Render(); return; } }
     if (El && Inside && !El.disabled) {
       const Act = El.dataset.act;
       if (Act === "ol-search" || Act === "ol-rename") return;
       if (Act === "ol-expand") { const Id = El.dataset.id; St.Expanded[Id] = !(El.classList.contains("open")); Render(); FocusRow(Id); return; }
       if (Act === "ol-filter-menu") { St.MenuOpen = !St.MenuOpen; Render(); return; }
+      if (Act === "ol-act-menu") { St.ActMenu = St.ActMenu === El.dataset.menu ? null : El.dataset.menu; Render(); return; }
       if (Act === "ol-filter") { const V = El.dataset.value; St.Filters.has(V) ? St.Filters.delete(V) : St.Filters.add(V); Render(); return; }
       if (Act === "ol-filter-clear") { St.Filters.clear(); St.MenuOpen = false; Render(); return; }
-      if (Spec.OnAction?.(Act, El, Event)) return;
+      if (Spec.OnAction?.(Act, El, Event)) { if (Closed && Host.querySelector(".ol-act-menu")) Render(); return; }
     }
     if (Row && !El?.closest?.(".ol-status, .ol-eye, .ol-tool, .ol-caret")) {
       if (Event.detail >= 2 && Spec.CanRename?.(Row.dataset.row)) { St.Renaming = Row.dataset.row; Render(); Host.querySelector(".ol-rename")?.select(); return; }
       Spec.OnSelect?.(Row.dataset.row, Event);
     }
   });
+
+  // the footer action menu closes on a click elsewhere or Esc
+  document.addEventListener("click", (Event) => { if (St.ActMenu && Event.target.isConnected && !Host.contains(Event.target)) { St.ActMenu = null; Render(); } });
+  Host.addEventListener("keydown", (Event) => { if (Event.key === "Escape" && St.ActMenu) { Event.stopPropagation(); St.ActMenu = null; Render(); } }, true);
 
   Host.addEventListener("input", (Event) => {
     if (Event.target.dataset.act !== "ol-search") return;

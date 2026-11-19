@@ -117,6 +117,16 @@ export function MountMaterialOutliner(Host, Hub) {
       Meta: `${P.category || "Material"} · ${Sum.Enabled}/${Sum.Total} strata`, Expandable: true, Expanded: RootOpen || !!St.Query,
       Renaming: St.Renaming === Id.root, Title: P.label || "" })
       + (RootOpen || St.Query ? Body : "") + LibraryHtml(St);
+    // footer action bar: add a stratum, then the active stratum's order, enable and delete (detail strata move / delete)
+    const Act = Hub.Layer(), Detail = Act?.Model === "detail";
+    const Actions = [
+      { Act: "add-detail", Glyph: "plus", Label: "Add stratum", Disabled: Layers.length >= 16, Menu: [{ Label: "Detail stratum", Act: "add-detail", Glyph: "detail" },
+        ...M.DETAIL_PRESETS.map((D) => ({ Label: `${D.Label} detail`, Act: "add-preset", Value: D.Id, Glyph: "detail" }))] },
+      { Act: "layer-up", Glyph: "up", Label: "Move stratum up", Id: Act?.Identity, Disabled: !Detail || !M.CanMoveLayer(S.P, Act.Identity, -1) },
+      { Act: "layer-down", Glyph: "down", Label: "Move stratum down", Id: Act?.Identity, Disabled: !Detail || !M.CanMoveLayer(S.P, Act.Identity, 1) },
+      { Act: "layer-toggle", Glyph: Act?.Enabled ? "eye" : "eye-off", Label: Act?.Enabled ? "Disable stratum" : "Enable stratum", Id: Act?.Identity, Disabled: !Act },
+      { Act: "layer-remove", Glyph: "trash", Label: "Remove stratum", Id: Act?.Identity, Disabled: !Detail, Gap: true },
+    ];
     return Shell({
       Label: "Material outliner", Title: "Outliner", Meta: "Material Scene & Strata",
       Tools: `<button type="button" class="ol-round" data-act="add-detail" ${Layers.length >= 16 ? "disabled" : ""} title="Add detail stratum" aria-label="Add detail stratum">${icon("plus", 14)}</button>`,
@@ -130,7 +140,7 @@ export function MountMaterialOutliner(Host, Hub) {
         <button type="button" data-act="add-detail" ${Layers.length >= 16 ? "disabled" : ""}>${icon("detail", 11)}Detail stratum</button>
         ${M.DETAIL_PRESETS.map((D) => `<button type="button" data-act="add-preset" data-preset="${D.Id}" title="New detail stratum · ${Esc(D.Label)}" ${Layers.length >= 16 ? "disabled" : ""}><i style="background:linear-gradient(90deg, ${D.Stops.join(", ")})"></i>${Esc(D.Label)}</button>`).join("")}
       </span>`,
-      Rows, Empty: "No strata or channels match",
+      Rows, Empty: "No strata or channels match", Actions,
       Footer: [
         { Label: "F0", Value: (I.F0 * 100).toFixed(1), Unit: "%" },
         { Label: "Class", Value: I.Class, Tone: I.Hybrid ? "warn" : "" },
@@ -190,7 +200,7 @@ export function MountMaterialOutliner(Host, Hub) {
     } else if (Act === "layer-up" || Act === "layer-down") { Hub.Apply(M.MoveLayer(S.P, LayerId, Act === "layer-up" ? -1 : 1)); Hub.Render(); Outliner.FocusRow(`layer:${LayerId}`); }
     else if (Act === "layer-remove") Remove(LayerId);
     else if (Act === "add-detail") AddDetail(null);
-    else if (Act === "add-preset") AddDetail(El.dataset.preset);
+    else if (Act === "add-preset") AddDetail(El.dataset.preset || El.dataset.value);
     else if (Act === "stat-enabled") { Outliner.State.Filters.has("enabled") ? Outliner.State.Filters.delete("enabled") : Outliner.State.Filters.add("enabled"); Outliner.Render(); }
     else if (Act === "stat-driven") { Outliner.State.Filters.has("driven") ? Outliner.State.Filters.delete("driven") : Outliner.State.Filters.add("driven"); Outliner.Render(); }
     else return false;

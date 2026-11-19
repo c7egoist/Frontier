@@ -113,6 +113,18 @@ export function MountArtworkOutliner(Host, Hub) {
       Expandable: true, Expanded: RootOpen || Filtering, Selected: false,
     });
     const Full = D.layers.length >= MAX_LAYERS;
+    // footer action bar: add / group, then the selected layer's order, copy, visibility, lock and delete
+    const Sel = A.FindLayer(D, D.selectedLayerId), SelAt = Sel ? D.layers.indexOf(Sel) : -1, SelFolder = Sel?.kind === "folder";
+    const Actions = [
+      { Act: "add-layer", Glyph: "plus", Label: "Add layer", Disabled: Full, Menu: A.LAYER_KINDS.map((K) => ({ Label: `${K.Label} layer`, Act: "add-layer", Value: K.Kind, Glyph: K.Glyph, Hint: K.Hint })) },
+      { Act: "add-folder", Glyph: "folder", Label: "Group the selected layer", Disabled: Full },
+      { Act: "layer-up", Glyph: "up", Label: "Move layer up", Id: Sel?.id, Disabled: !Sel || SelFolder || SelAt === D.layers.length - 1 },
+      { Act: "layer-down", Glyph: "down", Label: "Move layer down", Id: Sel?.id, Disabled: !Sel || SelFolder || SelAt <= 0 },
+      { Act: "layer-dup", Glyph: "duplicate", Label: "Duplicate layer", Id: Sel?.id, Disabled: !Sel || SelFolder || Full },
+      { Act: "layer-vis", Glyph: Sel?.visible === false ? "eye-off" : "eye", Label: Sel?.visible === false ? "Show layer" : "Hide layer", Id: Sel?.id, Disabled: !Sel },
+      { Act: "layer-lock", Glyph: Sel?.locked ? "lock" : "unlock", Label: Sel?.locked ? "Unlock layer" : "Lock layer", Id: Sel?.id, Disabled: !Sel, On: !!Sel?.locked },
+      { Act: "layer-remove", Glyph: "trash", Label: "Delete layer", Id: Sel?.id, Disabled: !Sel || D.layers.length <= 1, Gap: true },
+    ];
     return Shell({
       Label: `${Mode.Title} outliner`, Title: "Layers", Meta: `${Mode.Title} · ${Mode.Tag.toLowerCase()}`,
       Tools: `<button type="button" class="ol-round" data-act="add-folder" ${Full ? "disabled" : ""} title="Group the selected layer" aria-label="New group">${icon("folder", 14)}</button>`,
@@ -123,7 +135,7 @@ export function MountArtworkOutliner(Host, Hub) {
       Placeholder: "Search layers, modifiers…",
       Filters: [["Visible", "visible"], ["Hidden", "hidden"], ["Motifs", "motif"], ["Text", "text"], ["Gradients", "gradient"], ["With modifiers", "mods"], ["Masked", "masked"], ["Locked", "locked"]],
       Chips: Filtering ? "" : `<span class="ol-chip-row">${A.LAYER_KINDS.map((K) => `<button type="button" data-act="add-layer" data-kind="${K.Kind}" ${Full ? "disabled" : ""} title="${Esc(K.Hint)}">${icon("plus", 10)}${K.Label}</button>`).join("")}</span>`,
-      Rows: Canvas + Body + StartersHtml(St), Empty: "No layers match",
+      Rows: Canvas + Body + StartersHtml(St), Empty: "No layers match", Actions,
       Footer: [
         { Label: "Layers", Value: `${D.layers.length}`, Unit: `/ ${MAX_LAYERS}`, Tone: Full ? "warn" : "" },
         { Label: "Instances", Value: St2.Instances >= 1000 ? `${(St2.Instances / 1000).toFixed(1)}k` : `${St2.Instances}` },
@@ -168,9 +180,10 @@ export function MountArtworkOutliner(Host, Hub) {
       case "layer-remove": Remove(Id); return true;
       case "add-layer": {
         if (D.layers.length >= MAX_LAYERS) return Hub.Flash(`Layer limit reached (${MAX_LAYERS})`), true;
-        const R = A.AddLayer(D, El.dataset.kind);
-        S.Open = El.dataset.kind === "text" ? "text" : El.dataset.kind === "motif" ? "shape" : "fill";
-        Commit(R.Doc, `${El.dataset.kind[0].toUpperCase()}${El.dataset.kind.slice(1)} layer added`);
+        const Kind = El.dataset.kind || El.dataset.value;
+        const R = A.AddLayer(D, Kind);
+        S.Open = Kind === "text" ? "text" : Kind === "motif" ? "shape" : "fill";
+        Commit(R.Doc, `${Kind[0].toUpperCase()}${Kind.slice(1)} layer added`);
         return true;
       }
       case "add-folder": { const R = A.AddFolder(D); Outliner.State.Expanded[`layer:${R.Id}`] = true; Commit(R.Doc, "Group created"); return true; }
