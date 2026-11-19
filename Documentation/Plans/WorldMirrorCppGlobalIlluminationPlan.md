@@ -109,3 +109,70 @@
 | Worker bake (DDGI and Voxel SDF) | 🟢 1.4 s and 24.3 s, the same stats as before. |
 | Browser | ⚠️ Still not visually confirmed (no GPU or browser in the sandbox). |
 
+
+## 7. 🧭 Update: Lumen-style GI on a persistent GPU global distance field
+
+> **TL;DR:** The C++ GI bake (24 s of CPU, requested again on every scene change) is gone from the viewport. Both backends now keep a **global distance field on the GPU** and update only the voxels around whatever moved. GI is the Unreal Lumen design:
+>
+> - a global SDF;
+> - a radiance **surface cache** stored in the field's voxels;
+> - a final gather (per-pixel rays or a probe radiance cache) traced through the field.
+>
+> Emissive primitives now light the scene with exact integrals instead of cone GI.
+
+### 7.1 Pipeline (identical on WebGPU and WebGL2)
+
+| Pass | What it does | When it runs |
+| :--- | :--- | :--- |
+| StaticBuild | Signed distance and albedo/emission of the analytic primitives, written into a two-level clipmap. Both levels (48³ each, 0.117 m and 0.233 m voxels) are stacked in one rgba16f 3D texture. | First frame, a layout change, or a primitive edit. Only the old ∪ new box of the edited primitive is rebuilt. |
+| LocalBake | A local SDF of each vehicle mesh (body, tyres, rims), built by exact BVH closest-triangle queries. | Once per mesh. |
+| Compose | Merges the static field with the vehicle instances (world→local transforms) into the live field. | Only the old ∪ new box of a moving instance. |
+| SurfaceLight | Radiance surface cache: sun and moon with SDF soft shadows, area/point lights (polygon form factors), emissive primitives (exact sphere and box integrals), sky, and multi-bounce feedback from the previous frame's cache. | While converging: 72 frames, restarted by a lighting change. |
+| ProbeTrace / ProbeBlend | 7×6×4 probes trace up to 256 rays through the field into the surface cache, then blend into 8×8 octahedral irradiance plus 16×16 Chebyshev depth moments. | `ddgi` engine, while converging. |
+
+- **Scene shaders:** `voxel_sdf` runs per-pixel final-gather rays through the field into the surface cache (4–32 rays, bilateral 7×7). `ddgi` samples the probe cache. Both add exact traced AO.
+- **WebGPU** runs the passes as compute (`GlobalDistanceFieldGi.js`).
+- **WebGL2** runs the same six kernels as fragment passes into 3D texture layers, with MRT and the viewport clipped to the dirty box (`GlobalDistanceFieldGiGl.js`, which needs `EXT_color_buffer_float`).
+- **Idle frames** do no field work. The viewport keeps redrawing only while the radiance converges.
+
+### 7.2 Emissive lighting (replaces cone GI)
+
+| Emitter | Illuminance | Visibility |
+| :--- | :--- | :--- |
+| Sphere | Exact horizon-clipped sphere integral. | Shadow rays to stratified points on the sphere's facing disk. The ray count follows Shadow Rays (2–8). |
+| Box-like | Sum of Lambert polygon form factors of the faces that face the receiver. | Shadow rays to stratified points in the emitter volume, ignoring the emitter itself. |
+
+The same integrals feed the surface cache, so direct and indirect emissive light agree. Against Monte Carlo the integrals match within 0.01 for quads and spheres, including partly-below-horizon cases.
+
+### 7.3 Render settings that now take effect
+
+| Setting | Before | Now |
+| :--- | :--- | :--- |
+| Half-Resolution Shadow Pass | Never read. | Renders the sun depth map at half resolution. |
+| Edge Anti-Aliasing | Never read. | FXAA in the blit/outline pass on both backends. |
+| GI Intensity / Sky & Ambient Fill | `Number(x) ?? d` gave NaN for missing values. | Finite fallback in the resolver and the encoder. Fill is now applied the same way on both backends. |
+| Reflection Rays (1–8) | WGSL clamped to 4. | Up to 8 on both backends. |
+| AO Rays / Pixel (4–32) | Forced to at least 12. | Uses the slider value. |
+| Cone GI Directions (analytic GI) | WGSL ignored it; GLSL applied a gain fudge. | Renamed **Sky Visibility Cones**: that many BVH-traced sky visibility rays (primitives and vehicle). |
+| Cone Directions (`voxel_sdf`) | Cone count of the CPU field. | Renamed **Final Gather Rays** (4–32). |
+| Clipmap, probe, inject and bilateral settings | Fed the CPU bake. | Feed the GPU field layout, the injection flags and the convergence signature. |
+
+The Render Settings panel now shows the live GPU GI state (backend, clip levels, probes, convergence). **Reset** restarts the accumulation without rebuilding the field.
+
+### 7.4 Verification (headless Dawn and ANGLE on lavapipe; no browser GPU in the sandbox)
+
+| Check | Result |
+| :--- | :--- |
+| GPU field vs CPU closest-surface reference (55,296 voxels, with vehicle) | 🟢 Mean error 0.00084 m. 7 voxels exceed tolerance on thin vehicle panels; the 2 inside overlapping primitives are expected, because the CPU reference is unsigned. |
+| Vehicle move (WebGPU and WebGL2) | 🟢 37,914 static + 154,266 composed voxels; the mesh is not rebaked. 147 ms (WebGPU) / 165 ms (WebGL2) on lavapipe. |
+| Idle frame | 🟢 0 static, 0 composed voxels. |
+| Incremental vs full rebuild | 🟢 0 differing voxels on both backends. |
+| WebGL2 vs WebGPU | 🟢 Field identical. Surface radiance within 0.4%. Probe rays bit-identical. |
+| Probe irradiance (12 frames) | 🟢 No NaN. irr/π 0.145 / 0.177 / 0.240. |
+| Scene-side sampling on ANGLE | 🟢 Header flags decode; field gather and probe irradiance are finite. |
+| Shader compiles | 🟢 Dawn: 6 compute passes plus scene/shadow/outline. ANGLE: scene and outline programs link. naga: all WGSL modules. |
+| `WorldMirrorValidation.mjs` | 🟢 20/20. Suite 20 is rewritten for the GPU field: layout, dirty boxes, idle diff, lighting signature, parameter block, kernels, no CPU GI imports on the live path, and the settings fixes. The Suite 11 mock device now executes the field's compute passes. |
+| ESLint | 🟢 0 errors. |
+| Browser | ⚠️ Not visually confirmed. The full scene pipeline does not fit lavapipe in the 4 GB sandbox. |
+
+**Off the live path:** `RadianceFieldBaker.js`, `VoxelSdfClipmap.js`, `DynamicProbeCache.js`, `RadianceFieldScene.js` and `RadianceFieldLayout.js` remain only for the CPU reference tracer and validation. No viewport, renderer or inspector module imports them.

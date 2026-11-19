@@ -6,6 +6,7 @@
 //   Pass 3: Optional 3D ForceField Overlay + Depth-Cleared Always-On-Top 13-Handle Slate GizmoPRO
 //==========================================================================================================================================
 
+import { GdfStatus } from "./GlobalDistanceFieldStatus.js";
 import {
   ATLAS_WIDTH,
   ATLAS_HEIGHT,
@@ -22,7 +23,7 @@ import {
 } from "./ShadowPipeline.js";
 import { ExpandVehicleInstances } from "./VehicleBvhAssets.js";
 import { RADIANCE_FIELD_WGSL } from "./RadianceFieldShaders.js";
-import { BuildRadianceVolumes } from "./RadianceFieldLayout.js";
+import { CreateGlobalDistanceFieldGi } from "./GlobalDistanceFieldGi.js";
 import {
   BuildSkyViewLut,
   GetSkyViewCacheKey,
@@ -2107,8 +2108,25 @@ fn evaluateGtxConeGiAndAo(pos : vec3f, N : vec3f, selfPrimIdx : i32) -> GiAoOut 
 
   var res : GiAoOut;
   res.ao = clamp(1.0 - aoOcc, 0.26, 1.0);
-  res.irr = (skyAmb + evalStarlightAmbient(N)) * mix(0.45, 1.0, res.ao) + bounceAccum;
+  res.irr = (skyAmb + evalStarlightAmbient(N)) * coneSkyVisibility(pos, N, selfPrimIdx, U.uRenderCfg2.z) + bounceAccum;
   return res;
+}
+
+// Sky visibility through GiCones cosine-distributed directions, BVH traced against primitives and the vehicle (2.5 m reach).
+fn coneSkyVisibility(pos : vec3f, N : vec3f, selfPrimIdx : i32, cones : i32) -> f32 {
+  let cnt = clamp(cones, 4, 14);
+  let basis = buildBasis(N);
+  let phi = hash12(pos.xy * 97.3 + pos.z * 41.9) * 6.2831853;
+  var vis : f32 = 0.0;
+  for (var k : i32 = 0; k < 14; k = k + 1) {
+    if (k >= cnt) { break; }
+    let u = (f32(k) + 0.5) / f32(cnt);
+    let r = sqrt(u);
+    let a = phi + f32(k) * 2.39996323;
+    let d = normalize(basis.T * (cos(a) * r) + basis.B * (sin(a) * r) + N * sqrt(max(0.0, 1.0 - u)));
+    if (!traceShadowRayAny(pos + N * 0.01, d, 2.5, selfPrimIdx, -1)) { vis = vis + 1.0; }
+  }
+  return vis / f32(cnt);
 }
 
 struct ShadingFrame {
@@ -2293,24 +2311,87 @@ fn traceBvhReflection(startOrigin : vec3f, startNormal : vec3f, startDir : vec3f
   return min(totalRad, vec3f(60.0));
 }
 
+${RADIANCE_FIELD_WGSL}
+
+// Exact illuminance factor of emissive primitive ei at (p, N); E = Le * result. Spheres: horizon-clipped sphere integral.
+// Boxes: Lambert polygon form factor of each face facing p (non-box shapes use their box with the inscribed-volume ratio).
+fn emitterIlluminance(p : vec3f, N : vec3f, ei : i32) -> f32 {
+  let ps = sdFetch(0, ei);
+  let h = sdFetch(1, ei).xyz;
+  let shape = i32(ps.w + 0.5);
+  let toE = ps.xyz - p;
+  let dist = length(toE);
+  if (shape == 1) {
+    let r = (h.x + h.y + h.z) / 3.0;
+    if (dist <= r * 1.001) { return 0.0; }
+    let s2 = clamp(r * r / (dist * dist), 0.0, 0.9999);
+    return gdfSphereIlluminance(dot(N, toE / dist), s2);
+  }
+  let rot = loadPrimRot(ei);
+  let scale = select(0.785398, 1.0, shape == 0);
+  var e : f32 = 0.0;
+  for (var f : i32 = 0; f < 6; f = f + 1) {
+    let ax = f >> 1u;
+    let sg = select(-1.0, 1.0, (f & 1) == 1);
+    var na = rot.c0; var ua = rot.c1; var va = rot.c2;
+    var ha = h.x; var hu = h.y; var hv = h.z;
+    if (ax == 1) { na = rot.c1; ua = rot.c2; va = rot.c0; ha = h.y; hu = h.z; hv = h.x; }
+    if (ax == 2) { na = rot.c2; ua = rot.c0; va = rot.c1; ha = h.z; hu = h.x; hv = h.y; }
+    let fc = ps.xyz + na * (sg * ha);
+    if (dot(p - fc, na * sg) <= 0.0) { continue; }
+    e = e + 3.14159265 * gdfQuadFF(p, N, fc, ua * hu, va * hv) * scale;
+  }
+  return e;
+}
+
+// Fraction of the emitter visible from o: shadow rays to stratified points over the sphere's facing disk / the box volume.
+fn emitterAreaVisibility(o : vec3f, ei : i32, shape : i32, c : vec3f, h : vec3f, rays : i32, selfIdx : i32) -> f32 {
+  let ePick = i32(sdFetch(3, ei).w + 0.5);
+  let rot = loadPrimRot(ei);
+  let toC = c - o;
+  let basis = buildBasis(toC / max(length(toC), 1e-4));
+  let j = hash12(o.xy * 211.7 + o.z * 71.3);
+  var vis : f32 = 0.0;
+  for (var k : i32 = 0; k < 8; k = k + 1) {
+    if (k >= rays) { break; }
+    let a = fract(f32(k) * 0.61803399 + j);
+    let b = fract(f32(k) * 0.75487767 + j * 1.37);
+    let w = fract(f32(k) * 0.56984029 + j * 2.11);
+    var s : vec3f;
+    if (shape == 1) {
+      let r = (h.x + h.y + h.z) / 3.0 * 0.95 * sqrt(a);
+      let ang = 6.2831853 * b;
+      s = c + (basis.T * cos(ang) + basis.B * sin(ang)) * r;
+    } else {
+      s = c + fwdRotateCols((vec3f(a, b, w) * 2.0 - 1.0) * h * 0.95, rot);
+    }
+    let d = s - o;
+    let len = length(d);
+    if (len < 1e-3 || !traceShadowRayAny(o, d / len, len - 0.01, selfIdx, ePick)) { vis = vis + 1.0; }
+  }
+  return vis / f32(rays);
+}
+
 fn rfTraceDistance(o : vec3f, d : vec3f, maxD : f32) -> f32 {
   let h = traceOpaqueSceneIgnoring(o, d, maxD, -1);
   return select(-1.0, h.t, h.hit);
 }
-${RADIANCE_FIELD_WGSL}
+fn rfSkyRadiance(d : vec3f) -> vec3f {
+  return evalSky(d) * U.uRenderCfg1.z + evalStarlightAmbient(d);
+}
 
 fn evaluateMultiModeGi(pos : vec3f, N : vec3f, selfPrimIdx : i32) -> GiAoOut {
   let giAlg = U.uSelection.z;
   let giInt = U.uRenderCfg1.y;
   let fillB = U.uRenderCfg1.z;
   if (giAlg == 3 || giAlg == 4) {
-    // C++ engines: SdfGlobalIllumination (VoxelSdfClipmap cone GI) / DdgiRaytracing (DynamicProbeCache) + LinearCosine AO
+    // GPU global distance field engines: surface-cache final gather (voxel_sdf) / world radiance cache probes (ddgi) + exact AO
     var out : GiAoOut;
     let Vv = normalize(U.uCamOriginAndExp.xyz - pos);
     if (giAlg == 4) {
       out.irr = rfProbeIrradiance(pos, N, Vv) * giInt;
     } else {
-      out.irr = rfConeGi(pos, N, U.uSkyRadiance.xyz, i32(U.uGiCfg.x)) * giInt;
+      out.irr = rfFieldGather(pos, N, rfFragPix, i32(U.uGiCfg.x)) * giInt;
     }
     let ao = rfAmbientOcclusion(pos, N, rfFragPix, i32(U.uGiCfg.w), U.uGiCfg.y, U.uGiCfg.z);
     out.ao = 0.35 + 0.65 * ao;
@@ -2442,42 +2523,37 @@ fn shadePrimaryOpaqueHit(hit : HitInfo, V : vec3f) -> vec3f {
     }
   }
 
-  // Direct shadowed lighting from emissive primitives (closest-point + soft penumbra + specular GGX)
+  // Direct lighting from emissive primitives: exact illuminance (horizon-clipped sphere integral / Lambert polygon form factors of
+  // the facing box faces, the same integrals the GPU surface cache injects) with visibility traced to stratified points spread over
+  // the emitter, so penumbrae come from the emitter's real extent. The BRDF is evaluated at the closest-point direction.
   let primCount = U.uCountsAndModes.x;
   let emitShad = U.uRenderCfg2.x != 0;
+  let eRays = clamp(max(2, U.uRenderCfg0.z), 2, 8);
   for (var ei : i32 = 0; ei < primCount; ei = ei + 1) {
     if (ei == idx) { continue; }
     let gb = sdFetch(6, ei);
-    let bEmit = gb.w;
-    if (bEmit > 0.05) {
-      let ps = sdFetch(0, ei);
-      let hf = sdFetch(1, ei);
-      let eShape = i32(ps.w + 0.5);
-      var targetP = ps.xyz;
-      if (eShape != 1) {
-        let eRot = loadPrimRot(ei);
-        let lp = invRotateCols(hit.pos - ps.xyz, eRot);
-        targetP = ps.xyz + fwdRotateCols(clamp(lp, -hf.xyz, hf.xyz), eRot);
-      }
-      let toE = targetP - hit.pos;
-      let d2 = max(0.04, dot(toE, toE));
-      let dist = sqrt(d2);
-      let eDir = toE / dist;
-      let NdotE = max(0.0, dot(N, eDir));
-      if (NdotE > 0.0) {
-        let rEff = max(0.08, (hf.x + hf.y + hf.z) * 0.3333333);
-        let solidOmega = min(2.0, (rEff * rEff) / max(0.04, d2));
-        var eVis = 1.0;
-        if (emitShad) {
-          let ePick = i32(sdFetch(3, ei).w + 0.5);
-          let coneSin = clamp(rEff / max(dist, 0.35), 0.04, 0.24) * U.uRenderCfg1.x;
-          let rawV = evalWgslBvhRayShadow(hit.pos + N * 0.012, eDir, max(0.02, dist - 0.03), coneSin, 2, idx, ePick);
-          eVis = mix(0.03, 1.0, rawV);
-        }
-        let eIrr = gb.rgb * bEmit * solidOmega * 1.45 * eVis;
-        Lo = Lo + evaluateOpenPbrDirect(N, Nc, T, B, V, eDir, mat, edgeTint) * eIrr;
-      }
+    if (gb.w <= 0.05) { continue; }
+    let eFac = emitterIlluminance(hit.pos, N, ei);
+    if (eFac <= 1e-6) { continue; }
+    let ps = sdFetch(0, ei);
+    let hf = sdFetch(1, ei);
+    let eShape = i32(ps.w + 0.5);
+    var targetP = ps.xyz;
+    if (eShape != 1) {
+      let eRot = loadPrimRot(ei);
+      let lp = invRotateCols(hit.pos - ps.xyz, eRot);
+      targetP = ps.xyz + fwdRotateCols(clamp(lp, -hf.xyz, hf.xyz), eRot);
     }
+    var eDir = normalize(targetP - hit.pos);
+    let nl = dot(N, eDir);
+    if (nl < 0.05) { eDir = normalize(eDir + N * (0.05 - nl)); }
+    let ndl = max(dot(N, eDir), 0.05);
+    var eVis = 1.0;
+    if (emitShad) {
+      eVis = emitterAreaVisibility(hit.pos + N * 0.012, ei, eShape, ps.xyz, hf.xyz, eRays, idx);
+    }
+    let eIrr = gb.rgb * gb.w * (eFac * eVis / ndl);
+    Lo = Lo + evaluateOpenPbrDirect(N, Nc, T, B, V, eDir, mat, edgeTint) * eIrr;
   }
 
   let lightCount = U.uCountsAndModes.y;
@@ -2521,13 +2597,13 @@ fn shadePrimaryOpaqueHit(hit : HitInfo, V : vec3f) -> vec3f {
   // Non-SDF Reflections: BVH Raytraced Reflections (REFLECTION_BVH_FRAG) or Sky/Env Only
   let reflAlg = U.uSelection.w;
   if (viewMode == 0 && reflAlg != 2 && raySharpness > 0.02) {
-    let rCnt = clamp(U.uRenderCfg2.w, 1, 4);
+    let rCnt = clamp(U.uRenderCfg2.w, 1, 8);
     let rBounces = clamp(U.uRenderCfg3.w, 1, 3);
     let rBasis = buildBasis(R);
     let cone = max(0.003, mat.roughness * mat.roughness * 0.22);
     let phi = hash12(hit.pos.xy * 83.7 + hit.pos.z * 27.1) * 6.2831853;
     var acc = vec3f(0.0);
-    for (var ri : i32 = 0; ri < 4; ri = ri + 1) {
+    for (var ri : i32 = 0; ri < 8; ri = ri + 1) {
       if (ri >= rCnt) { break; }
       let d2 = select(vec2f(0.0), vogelDiskSample(ri, rCnt, phi) * cone, rCnt > 1);
       let rDir = normalize(R + rBasis.T * d2.x + rBasis.B * d2.y);
@@ -2759,7 +2835,7 @@ fn fsMain(@builtin(position) fragPos : vec4f) -> @location(0) vec4f {
 
 export const GTX_WGSL_OUTLINE_SHADER = /* wgsl */ `
 @group(0) @binding(0) var uSceneTex : texture_2d<f32>;
-@group(0) @binding(1) var<uniform> uOutline : vec4i; // x=selectedCode, y=width, z=height
+@group(0) @binding(1) var<uniform> uOutline : vec4i; // x=selectedCode, y=width, z=height, w=edge anti-aliasing
 
 struct VsOut {
   @builtin(position) pos : vec4f,
@@ -2795,12 +2871,44 @@ fn decodeSelAndDepth(a : f32) -> SelDepth {
   return r;
 }
 
+fn aaLuma(c : vec3f) -> f32 { return dot(c, vec3f(0.299, 0.587, 0.114)); }
+fn aaFetch(p : vec2i, maxCoord : vec2i) -> vec3f { return textureLoad(uSceneTex, clamp(p, vec2i(0), maxCoord), 0).rgb; }
+fn aaBilinear(xy : vec2f, maxCoord : vec2i) -> vec3f {
+  let f = xy - 0.5;
+  let i = vec2i(floor(f));
+  let t = fract(f);
+  let top = mix(aaFetch(i, maxCoord), aaFetch(i + vec2i(1, 0), maxCoord), t.x);
+  let bot = mix(aaFetch(i + vec2i(0, 1), maxCoord), aaFetch(i + vec2i(1, 1), maxCoord), t.x);
+  return mix(top, bot, t.y);
+}
+// FXAA (console quality) on the tonemapped colour: luma edge detection, then a 2/4-tap blend along the local edge direction.
+fn edgeAntiAlias(p : vec2i, maxCoord : vec2i, cM : vec3f) -> vec3f {
+  let xy = vec2f(p) + 0.5;
+  let lNW = aaLuma(aaFetch(p + vec2i(-1, -1), maxCoord));
+  let lNE = aaLuma(aaFetch(p + vec2i(1, -1), maxCoord));
+  let lSW = aaLuma(aaFetch(p + vec2i(-1, 1), maxCoord));
+  let lSE = aaLuma(aaFetch(p + vec2i(1, 1), maxCoord));
+  let lM = aaLuma(cM);
+  let lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)));
+  let lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+  if (lMax - lMin < max(0.0312, lMax * 0.125)) { return cM; }
+  var dir = vec2f(-((lNW + lNE) - (lSW + lSE)), (lNW + lSW) - (lNE + lSE));
+  let reduce = max((lNW + lNE + lSW + lSE) * 0.03125, 1.0 / 128.0);
+  let rcpMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + reduce);
+  dir = clamp(dir * rcpMin, vec2f(-8.0), vec2f(8.0));
+  let a = 0.5 * (aaBilinear(xy + dir * (1.0 / 3.0 - 0.5), maxCoord) + aaBilinear(xy + dir * (2.0 / 3.0 - 0.5), maxCoord));
+  let b = a * 0.5 + 0.25 * (aaBilinear(xy - dir * 0.5, maxCoord) + aaBilinear(xy + dir * 0.5, maxCoord));
+  let lB = aaLuma(b);
+  return select(b, a, lB < lMin || lB > lMax);
+}
+
 @fragment
 fn fsMain(@builtin(position) fragPos : vec4f) -> @location(0) vec4f {
   let maxCoord = vec2i(max(1, uOutline.y) - 1, max(1, uOutline.z) - 1);
   let p = clamp(vec2i(i32(fragPos.x), i32(fragPos.y)), vec2i(0), maxCoord);
   let center = textureLoad(uSceneTex, p, 0);
   var color = center.rgb;
+  if (uOutline.w != 0) { color = edgeAntiAlias(p, maxCoord, center.rgb); }
 
   if (uOutline.x > 0) {
     let c0 = decodeSelAndDepth(center.a);
@@ -3238,15 +3346,22 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
     ],
   });
 
-  // Packed C++ GI radiance field (RadianceFieldLayout.js); 24-vec4 empty header until the first bake lands.
-  let RadianceFieldBuf = Device.createBuffer({ size: 24 * 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-  let RadianceFieldRef = null;
-  let RadianceFieldFlags = { Probe: false, Clip: false };
-  // Half-float 3D volumes for the cone march (distance tiers + stacked radiance mips): one trilinear fetch per lookup.
-  const MakeVolume = (Format, Dims) =>
+  // GPU global distance field GI (GlobalDistanceFieldGi.js): persistent distance field + surface cache + probes, all on this
+  // device. Until its first Advance the scene reads an empty header (flags 0) and 1-texel volumes.
+  let Gdf;
+  try {
+    Gdf = await CreateGlobalDistanceFieldGi(Device);
+  } catch (Err) {
+    Gdf = { Ok: false, Reason: `gdf-init:${String(Err?.message || Err).slice(0, 96)}` };
+  }
+  if (!Gdf.Ok) console.warn("[WebGPU] global distance field GI unavailable:", Gdf.Reason);
+  const GdfEmptyField = Device.createBuffer({ size: 24 * 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const CreateVolume = (Format, Dims) =>
     Device.createTexture({ dimension: "3d", size: Dims, format: Format, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
-  let RfDistTex = MakeVolume("r16float", [1, 1, 1]);
-  let RfRadTex = MakeVolume("rgba16float", [1, 1, 1]);
+  const GdfEmptyVolume = CreateVolume("rgba16float", [1, 1, 1]);
+  const GdfEmptyView = GdfEmptyVolume.createView({ dimension: "3d" });
+  const GdfBound = { Field: null, Dist: null, Rad: null };
+  let GdfResetSeen = GdfStatus.ResetSerial;
   const RfVolSampler = Device.createSampler({
     magFilter: "linear", minFilter: "linear", addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge", addressModeW: "clamp-to-edge",
   });
@@ -3269,9 +3384,9 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
         { binding: 9, resource: SkyViewTex.createView() },
         { binding: 10, resource: SkySampler },
         { binding: 11, resource: MoonAtlasTex.createView() },
-        { binding: 12, resource: { buffer: RadianceFieldBuf } },
-        { binding: 13, resource: RfDistTex.createView({ dimension: "3d" }) },
-        { binding: 14, resource: RfRadTex.createView({ dimension: "3d" }) },
+        { binding: 12, resource: { buffer: GdfBound.Field || GdfEmptyField } },
+        { binding: 13, resource: GdfBound.Dist || GdfEmptyView },
+        { binding: 14, resource: GdfBound.Rad || GdfEmptyView },
         { binding: 15, resource: RfVolSampler },
       ],
     });
@@ -3349,32 +3464,6 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
       ConfiguredCanvas = Canvas;
       CanvasCtx = Ctx;
       return true;
-    },
-
-    UploadRadianceField(Field) {
-      if (Field === RadianceFieldRef) return;
-      RadianceFieldRef = Field;
-      const Src = Field && Field.length >= 96 ? Field : new Float32Array(96);
-      const Bytes = Math.max(24 * 16, Src.byteLength);
-      if (RadianceFieldBuf.size < Bytes) {
-        try { RadianceFieldBuf.destroy(); } catch {}
-        RadianceFieldBuf = Device.createBuffer({ size: Bytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-        RebuildSceneBindGroup();
-      }
-      Device.queue.writeBuffer(RadianceFieldBuf, 0, Src.buffer, Src.byteOffset, Src.byteLength);
-      const Volumes = BuildRadianceVolumes(Src);
-      if (Volumes) {
-        try { RfDistTex.destroy(); } catch {}
-        try { RfRadTex.destroy(); } catch {}
-        RfDistTex = MakeVolume("r16float", Volumes.DistDims);
-        RfRadTex = MakeVolume("rgba16float", Volumes.RadDims);
-        const [Dw, Dh, Dd] = Volumes.DistDims;
-        const [Rw, Rh, Rd] = Volumes.RadDims;
-        Device.queue.writeTexture({ texture: RfDistTex }, Volumes.Dist, { bytesPerRow: Dw * 2, rowsPerImage: Dh }, [Dw, Dh, Dd]);
-        Device.queue.writeTexture({ texture: RfRadTex }, Volumes.Rad, { bytesPerRow: Rw * 8, rowsPerImage: Rh }, [Rw, Rh, Rd]);
-        RebuildSceneBindGroup();
-      }
-      RadianceFieldFlags = { Probe: Src[1] > 0.5, Clip: Src[2] > 0.5 && !!Volumes };
     },
 
     UploadAtlas(Pixels) {
@@ -3477,8 +3566,11 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
       ViewProjZeroToOne,
       HighlightedHandle,
       TimeSec = 0,
+      VehicleAssets = null,
+      GiEnabled = true,
     }) {
       if (!CanvasCtx) return false;
+      let GiConverging = false;
 
       const RsU = EncodeRenderSettingsUniforms(ActiveScene.RenderSettings);
       if (RsU.shadowMapRes !== SunShadowRes) {
@@ -3656,9 +3748,40 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
 
         SceneUniformI32[36] = SelectedCode;
         SceneUniformI32[37] = RsU.shadowAlg;
-        // C++ engines fall back to the ambient fill until their bake has been uploaded.
-        SceneUniformI32[38] =
-          (RsU.giAlg === 3 && !RadianceFieldFlags.Clip) || (RsU.giAlg === 4 && !RadianceFieldFlags.Probe) ? 2 : RsU.giAlg;
+        // GPU global distance field engines: advance the persistent field / surface cache / probes in this frame's encoder.
+        let GiAlgEffective = RsU.giAlg;
+        if (RsU.giAlg === 3 || RsU.giAlg === 4) {
+          let Ready = false;
+          if (Gdf.Ok && GiEnabled) {
+            if (GdfStatus.ResetSerial !== GdfResetSeen) {
+              GdfResetSeen = GdfStatus.ResetSerial;
+              Gdf.Invalidate();
+            }
+            const Gi = Gdf.Advance(Encoder, {
+              Scene: ActiveScene,
+              Rs: ActiveScene.RenderSettings || {},
+              SceneCpu: SceneDataCpuBuf,
+              SceneBuf: SceneDataStorageBuf,
+              PCount: PrimCount,
+              LCount: LightCount,
+              Assets: VehicleTriUploaded ? VehicleAssets || CachedVehAssets : null,
+              BvhNodesBuf,
+              BvhTrisBuf,
+              SkyView: SkyViewTex.createView(),
+              Engine: RsU.giAlg,
+            });
+            Ready = RsU.giAlg === 4 ? Gi.ProbeReady : Gi.FieldReady;
+            GiConverging = Gi.Converging;
+            GdfStatus.Publish("WebGPU", RsU.giAlg, Gi, Gdf);
+            const Next = { Field: Gdf.FieldBuffer, Dist: Gdf.FieldView, Rad: Gdf.RadianceView };
+            if (Next.Field !== GdfBound.Field || Next.Dist !== GdfBound.Dist || Next.Rad !== GdfBound.Rad) {
+              Object.assign(GdfBound, Next);
+              RebuildSceneBindGroup();
+            }
+          }
+          if (!Ready) GiAlgEffective = 2;
+        }
+        SceneUniformI32[38] = GiAlgEffective;
         SceneUniformI32[39] = RsU.reflAlg;
 
         SceneUniformI32[40] = RsU.pcssTaps;
@@ -3825,7 +3948,7 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
       OutlineUniformI32[0] = SelectedCode;
       OutlineUniformI32[1] = Width;
       OutlineUniformI32[2] = Height;
-      OutlineUniformI32[3] = 0;
+      OutlineUniformI32[3] = RsU.antiAliasing;
       Device.queue.writeBuffer(OutlineUniformBuf, 0, OutlineUniformI32);
 
       const Pass2 = Encoder.beginRenderPass({
@@ -3934,10 +4057,13 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
       }
 
       Device.queue.submit([Encoder.finish()]);
-      return true;
+      return { GiConverging };
     },
 
     Destroy() {
+      try { Gdf.Ok && Gdf.Destroy(); } catch {}
+      try { GdfEmptyField.destroy(); } catch {}
+      try { GdfEmptyVolume.destroy(); } catch {}
       try { OffscreenSceneTex?.destroy(); } catch {}
       try { DepthTex?.destroy(); } catch {}
       try { SunShadowTex?.destroy(); } catch {}

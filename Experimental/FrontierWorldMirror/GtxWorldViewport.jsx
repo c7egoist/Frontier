@@ -82,9 +82,10 @@ import {
   GetCachedVehicleBvhAssets,
   LoadVehicleBvhAssets,
 } from "./VehicleBvhAssets.js";
-import { SharedRadianceFieldBaker } from "./RadianceFieldBaker.js";
+import { PackSceneDataBuffer } from "./ScenePack.js";
 import { RADIANCE_FIELD_GLSL } from "./RadianceFieldShaders.js";
-import { BuildRadianceVolumes, RADIANCE_FIELD_TEXTURE_WIDTH } from "./RadianceFieldLayout.js";
+import { CreateGlobalDistanceFieldGiGl } from "./GlobalDistanceFieldGiGl.js";
+import { GdfStatus } from "./GlobalDistanceFieldStatus.js";
 import {
   BuildAreaShadowMatrix,
   BuildPrimModelMatrix,
@@ -189,9 +190,9 @@ uniform sampler2D uSceneData;
 // RenderSettings & Shadow Map uniforms (zero SDF shadows)
 uniform int       uShadowAlg;
 uniform int       uGiAlg;
-uniform highp sampler2D uRadianceField; // packed C++ GI field (RadianceFieldLayout.js), RGBA32F, unit 9
-uniform mediump sampler3D uRfDistTex; // clipmap distance tiers, R16F trilinear, unit 10
-uniform mediump sampler3D uRfRadTex; // stacked cascade radiance mips, RGBA16F trilinear, unit 11
+uniform highp sampler2D uRadianceField; // GPU global distance field header + probe block (GlobalDistanceFieldGiGl.js), RGBA32F, unit 9
+uniform mediump sampler3D uRfDistTex; // persistent global distance field, stacked clip levels, RGBA16F trilinear, unit 10
+uniform mediump sampler3D uRfRadTex; // surface cache radiance (premultiplied, coverage a), RGBA16F trilinear, unit 11
 uniform vec4      uGiCfg;               // x=cone count, y=AO contact, z=AO chassis, w=AO rays
 uniform int       uReflAlg;
 uniform int       uPcssTaps;
@@ -1923,6 +1924,24 @@ vec3 evaluateOpenPbrDirect(
 //------------------------------------------------------------------------------------------------------------------------------------------
 // C1-SMOOTH ANALYTICAL SOLID-ANGLE GI + AO (ZERO DISCRETE RAY GHOST CIRCLES, ZERO BANDS, ZERO SDF RINGS!)
 //------------------------------------------------------------------------------------------------------------------------------------------
+// Sky visibility through GiCones cosine-distributed directions, BVH traced against primitives and the vehicle (2.5 m reach).
+float coneSkyVisibility(vec3 pos, vec3 N, int selfPrimIdx, int cones) {
+  int cnt = clamp(cones, 4, 14);
+  vec3 bT, bB;
+  buildBasis(N, bT, bB);
+  float phi = ignHash(gl_FragCoord.xy + 17.0) * 6.2831853;
+  float vis = 0.0;
+  for (int k = 0; k < 14; ++k) {
+    if (k >= cnt) break;
+    float u = (float(k) + 0.5) / float(cnt);
+    float r = sqrt(u);
+    float a = phi + float(k) * 2.39996323;
+    vec3 d = normalize(bT * (cos(a) * r) + bB * (sin(a) * r) + N * sqrt(max(0.0, 1.0 - u)));
+    if (!traceShadowOccluderAnyHit(pos + N * 0.01, d, 2.5, selfPrimIdx, -1)) vis += 1.0;
+  }
+  return vis / float(cnt);
+}
+
 void evaluateGtxConeGiAndAo(vec3 pos, vec3 N, int selfPrimIdx, out vec3 indirectIrradiance, out float aoOut) {
   float skyWeight = clamp(N.z * 0.5 + 0.5, 0.0, 1.0);
   float dayFactor = clamp(uSunDir.z * 4.0 + 0.25, 0.0, 1.0);
@@ -2073,7 +2092,7 @@ void evaluateGtxConeGiAndAo(vec3 pos, vec3 N, int selfPrimIdx, out vec3 indirect
   }
 
   aoOut = clamp(1.0 - aoOcc, 0.26, 1.0);
-  indirectIrradiance = (skyAmb + evalStarlightAmbient(N)) * mix(0.45, 1.0, aoOut) + bounceAccum;
+  indirectIrradiance = (skyAmb + evalStarlightAmbient(N)) * coneSkyVisibility(pos, N, selfPrimIdx, uGiCones) + bounceAccum;
 }
 
 void buildShadingFrame(HitInfo hit, SampledMaterial mat, out vec3 Nshade, out vec3 Ncoat, out vec3 Tshade, out vec3 Bshade) {
@@ -2252,13 +2271,79 @@ float rfTraceDistance(vec3 o, vec3 d, float maxD) {
   HitInfo h = traceOpaqueSceneIgnoring(o, d, maxD, -1);
   return h.hit ? h.t : -1.0;
 }
+vec3 rfSkyRadiance(vec3 d) {
+  return evalSky(d) * uFillBoost + evalStarlightAmbient(d);
+}
 ${RADIANCE_FIELD_GLSL}
+
+// Exact illuminance factor of emissive primitive ei at (p, N); E = Le * result (see WebgpuGtxRenderer.js emitterIlluminance).
+float emitterIlluminance(vec3 p, vec3 N, int ei) {
+  vec4 ps = sdFetch(0, ei);
+  vec3 h = sdFetch(1, ei).xyz;
+  int shape = int(ps.w + 0.5);
+  vec3 toE = ps.xyz - p;
+  float dist = length(toE);
+  if (shape == 1) {
+    float r = (h.x + h.y + h.z) / 3.0;
+    if (dist <= r * 1.001) return 0.0;
+    float s2 = clamp(r * r / (dist * dist), 0.0, 0.9999);
+    return gdfSphereIlluminance(dot(N, toE / dist), s2);
+  }
+  vec3 c0, c1, c2;
+  loadPrimRot(ei, c0, c1, c2);
+  float scale = shape == 0 ? 1.0 : 0.785398;
+  float e = 0.0;
+  for (int f = 0; f < 6; ++f) {
+    int ax = f >> 1;
+    float sg = (f & 1) == 1 ? 1.0 : -1.0;
+    vec3 na = ax == 0 ? c0 : (ax == 1 ? c1 : c2);
+    vec3 ua = ax == 0 ? c1 : (ax == 1 ? c2 : c0);
+    vec3 va = ax == 0 ? c2 : (ax == 1 ? c0 : c1);
+    float ha = ax == 0 ? h.x : (ax == 1 ? h.y : h.z);
+    float hu = ax == 0 ? h.y : (ax == 1 ? h.z : h.x);
+    float hv = ax == 0 ? h.z : (ax == 1 ? h.x : h.y);
+    vec3 fc = ps.xyz + na * (sg * ha);
+    if (dot(p - fc, na * sg) <= 0.0) continue;
+    e += 3.14159265 * gdfQuadFF(p, N, fc, ua * hu, va * hv) * scale;
+  }
+  return e;
+}
+
+// Fraction of the emitter visible from o: shadow rays to stratified points over the sphere's facing disk / the box volume.
+float emitterAreaVisibility(vec3 o, int ei, int shape, vec3 c, vec3 h, int rays, int selfIdx) {
+  int ePick = int(sdFetch(3, ei).w + 0.5);
+  vec3 c0, c1, c2;
+  loadPrimRot(ei, c0, c1, c2);
+  vec3 toC = c - o;
+  vec3 bT, bB;
+  buildBasis(toC / max(length(toC), 1e-4), bT, bB);
+  float j = ignHash(gl_FragCoord.xy);
+  float vis = 0.0;
+  for (int k = 0; k < 8; ++k) {
+    if (k >= rays) break;
+    float a = fract(float(k) * 0.61803399 + j);
+    float b = fract(float(k) * 0.75487767 + j * 1.37);
+    float w = fract(float(k) * 0.56984029 + j * 2.11);
+    vec3 s;
+    if (shape == 1) {
+      float r = (h.x + h.y + h.z) / 3.0 * 0.95 * sqrt(a);
+      float ang = 6.2831853 * b;
+      s = c + (bT * cos(ang) + bB * sin(ang)) * r;
+    } else {
+      s = c + fwdRotateCols((vec3(a, b, w) * 2.0 - 1.0) * h * 0.95, c0, c1, c2);
+    }
+    vec3 d = s - o;
+    float len = length(d);
+    if (len < 1e-3 || !traceShadowOccluderAnyHit(o, d / len, len - 0.01, selfIdx, ePick)) vis += 1.0;
+  }
+  return vis / float(rays);
+}
 
 void evaluateMultiModeGi(vec3 pos, vec3 N, int selfPrimIdx, out vec3 giIrr, out float sceneAo) {
   if (uGiAlg == 3 || uGiAlg == 4) {
-    // C++ engines: SdfGlobalIllumination (VoxelSdfClipmap cone GI) / DdgiRaytracing (DynamicProbeCache) + LinearCosine AO
+    // GPU global distance field engines: surface-cache final gather (voxel_sdf) / world radiance cache probes (ddgi) + exact AO
     vec3 Vv = normalize(uCamOrigin - pos);
-    giIrr = (uGiAlg == 4 ? rfProbeIrradiance(pos, N, Vv) : rfConeGi(pos, N, uSkyRadiance, int(uGiCfg.x))) * uGiIntensity;
+    giIrr = (uGiAlg == 4 ? rfProbeIrradiance(pos, N, Vv) : rfFieldGather(pos, N, gl_FragCoord.xy, int(uGiCfg.x))) * uGiIntensity;
     sceneAo = 0.35 + 0.65 * rfAmbientOcclusion(pos, N, gl_FragCoord.xy, int(uGiCfg.w), uGiCfg.y, uGiCfg.z);
     return;
   }
@@ -2330,8 +2415,7 @@ void evaluateMultiModeGi(vec3 pos, vec3 N, int selfPrimIdx, out vec3 giIrr, out 
     return;
   }
   evaluateGtxConeGiAndAo(pos, N, selfPrimIdx, giIrr, sceneAo);
-  float coneGain = clamp(float(uGiCones) / 6.0, 0.75, 1.25);
-  giIrr *= uGiIntensity * mix(0.85, 1.0, coneGain) * (0.35 + 0.65 * uFillBoost);
+  giIrr *= uGiIntensity * uFillBoost;
 }
 
 vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
@@ -2386,41 +2470,32 @@ vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
     }
   }
 
-  // 1C. Direct shadowed lighting from emissive primitives (closest-point + soft penumbra + specular GGX)
+  // 1C. Direct lighting from emissive primitives: exact illuminance (horizon-clipped sphere integral / Lambert polygon form factors
+  // of the facing box faces, as injected by the GPU surface cache) with visibility traced to stratified points over the emitter.
+  int eRays = clamp(max(2, uShadowRays), 2, 8);
   for (int ei = 0; ei < uPrimCount; ++ei) {
     if (ei == idx) continue;
     vec4 gb = sdFetch(6, ei);
-    float bEmit = gb.w;
-    if (bEmit > 0.05) {
-      vec4 ps = sdFetch(0, ei);
-      vec4 hf = sdFetch(1, ei);
-      int eShape = int(ps.w + 0.5);
-      vec3 targetP = ps.xyz;
-      if (eShape != 1) {
-        vec3 e0, e1, e2;
-        loadPrimRot(ei, e0, e1, e2);
-        vec3 lp = invRotateCols(hit.pos - ps.xyz, e0, e1, e2);
-        targetP = ps.xyz + fwdRotateCols(clamp(lp, -hf.xyz, hf.xyz), e0, e1, e2);
-      }
-      vec3 toE = targetP - hit.pos;
-      float d2 = max(0.04, dot(toE, toE));
-      float dist = sqrt(d2);
-      vec3 eDir = toE / dist;
-      float NdotE = max(0.0, dot(N, eDir));
-      if (NdotE > 0.0) {
-        float rEff = max(0.08, (hf.x + hf.y + hf.z) * 0.3333333);
-        float solidOmega = min(2.0, (rEff * rEff) / max(0.04, d2));
-        float eVis = 1.0;
-        if (uEmissiveShadowed != 0) {
-          int ePick = int(sdFetch(3, ei).w + 0.5);
-          float coneSin = clamp(rEff / max(dist, 0.35), 0.04, 0.24) * uShadowSoftness;
-          float rawV = evalBvhRayShadow(hit.pos, N, eDir, max(0.02, dist - 0.03), coneSin, 2, idx, ePick);
-          eVis = mix(0.03, 1.0, rawV);
-        }
-        vec3 eIrr = gb.rgb * bEmit * solidOmega * 1.45 * eVis;
-        Lo += evaluateOpenPbrDirect(N, Nc, T, B, V, eDir, mat, edgeTint) * eIrr;
-      }
+    if (gb.w <= 0.05) continue;
+    float eFac = emitterIlluminance(hit.pos, N, ei);
+    if (eFac <= 1e-6) continue;
+    vec4 ps = sdFetch(0, ei);
+    vec4 hf = sdFetch(1, ei);
+    int eShape = int(ps.w + 0.5);
+    vec3 targetP = ps.xyz;
+    if (eShape != 1) {
+      vec3 e0, e1, e2;
+      loadPrimRot(ei, e0, e1, e2);
+      vec3 lp = invRotateCols(hit.pos - ps.xyz, e0, e1, e2);
+      targetP = ps.xyz + fwdRotateCols(clamp(lp, -hf.xyz, hf.xyz), e0, e1, e2);
     }
+    vec3 eDir = normalize(targetP - hit.pos);
+    float nl = dot(N, eDir);
+    if (nl < 0.05) eDir = normalize(eDir + N * (0.05 - nl));
+    float ndl = max(dot(N, eDir), 0.05);
+    float eVis = uEmissiveShadowed != 0 ? emitterAreaVisibility(hit.pos + N * 0.012, ei, eShape, ps.xyz, hf.xyz, eRays, idx) : 1.0;
+    vec3 eIrr = gb.rgb * gb.w * (eFac * eVis / ndl);
+    Lo += evaluateOpenPbrDirect(N, Nc, T, B, V, eDir, mat, edgeTint) * eIrr;
   }
 
   // 2. Clipped-polygon LTC area lights + ShadowAlgorithmLab emissive shadow visibility
@@ -2701,6 +2776,36 @@ out vec4 fragColor;
 
 uniform sampler2D uSceneTex;
 uniform int       uSelectedCode;
+uniform int       uAntiAlias;
+
+float aaLuma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+vec3 aaFetch(ivec2 p, ivec2 sz) { return texelFetch(uSceneTex, clamp(p, ivec2(0), sz - ivec2(1)), 0).rgb; }
+vec3 aaBilinear(vec2 xy, ivec2 sz) {
+  vec2 f = xy - 0.5;
+  ivec2 i = ivec2(floor(f));
+  vec2 t = fract(f);
+  return mix(mix(aaFetch(i, sz), aaFetch(i + ivec2(1, 0), sz), t.x), mix(aaFetch(i + ivec2(0, 1), sz), aaFetch(i + ivec2(1, 1), sz), t.x), t.y);
+}
+// FXAA (console quality) on the tonemapped colour: luma edge detection, then a 2/4-tap blend along the local edge direction.
+vec3 edgeAntiAlias(ivec2 p, ivec2 sz, vec3 cM) {
+  vec2 xy = vec2(p) + 0.5;
+  float lNW = aaLuma(aaFetch(p + ivec2(-1, -1), sz));
+  float lNE = aaLuma(aaFetch(p + ivec2(1, -1), sz));
+  float lSW = aaLuma(aaFetch(p + ivec2(-1, 1), sz));
+  float lSE = aaLuma(aaFetch(p + ivec2(1, 1), sz));
+  float lM = aaLuma(cM);
+  float lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)));
+  float lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+  if (lMax - lMin < max(0.0312, lMax * 0.125)) return cM;
+  vec2 dir = vec2(-((lNW + lNE) - (lSW + lSE)), (lNW + lSW) - (lNE + lSE));
+  float reduce = max((lNW + lNE + lSW + lSE) * 0.03125, 1.0 / 128.0);
+  float rcpMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + reduce);
+  dir = clamp(dir * rcpMin, vec2(-8.0), vec2(8.0));
+  vec3 a = 0.5 * (aaBilinear(xy + dir * (1.0 / 3.0 - 0.5), sz) + aaBilinear(xy + dir * (2.0 / 3.0 - 0.5), sz));
+  vec3 b = a * 0.5 + 0.25 * (aaBilinear(xy - dir * 0.5, sz) + aaBilinear(xy + dir * 0.5, sz));
+  float lB = aaLuma(b);
+  return (lB < lMin || lB > lMax) ? a : b;
+}
 
 void decodeSelAndDepth(float a, out bool isSel, out float depth) {
   int raw = int(floor(a * 255.0 + 0.5));
@@ -2720,7 +2825,7 @@ void main() {
   ivec2 texSize = textureSize(uSceneTex, 0);
   ivec2 p = clamp(ivec2(gl_FragCoord.xy), ivec2(0), texSize - ivec2(1));
   vec4 center = texelFetch(uSceneTex, p, 0);
-  vec3 color = center.rgb;
+  vec3 color = uAntiAlias != 0 ? edgeAntiAlias(p, texSize, center.rgb) : center.rgb;
 
   if (uSelectedCode > 0) {
     bool centerSelected;
@@ -2802,96 +2907,6 @@ const VIEW_MODE_CODES = {
   NORMALS: 2,
   WIREFRAME: 3,
 };
-
-function PackSceneDataBuffer(ActiveScene, PCount, LCount, Out) {
-  Out.fill(0);
-  for (let I = 0; I < PCount; ++I) {
-    const P = ActiveScene.Primitives[I];
-    const Base = I * SCENE_DATA_W * 4;
-    const Flags =
-      (P.CastShadows ? 1 : 0) |
-      (P.GiContributor ? 2 : 0) |
-      (P.GlassShell ? 4 : 0) |
-      (P.FaceAtlas ? 8 : 0);
-    Out[Base + 0] = P.Center[0];
-    Out[Base + 1] = P.Center[1];
-    Out[Base + 2] = P.Center[2];
-    Out[Base + 3] = P.Shape;
-
-    Out[Base + 4] = P.HalfExtents[0];
-    Out[Base + 5] = P.HalfExtents[1];
-    Out[Base + 6] = P.HalfExtents[2];
-    Out[Base + 7] = Flags;
-
-    const [Rx, Ry, Rz] = P.RotationRad;
-    const Cx = Math.cos(Rx), Sx = Math.sin(Rx);
-    const Cy = Math.cos(Ry), Sy = Math.sin(Ry);
-    const Cz = Math.cos(Rz), Sz = Math.sin(Rz);
-
-    Out[Base + 8] = Cz * Cy;
-    Out[Base + 9] = Sz * Cy;
-    Out[Base + 10] = -Sy;
-    Out[Base + 11] = P.Abbe;
-
-    Out[Base + 12] = Cz * Sy * Sx - Sz * Cx;
-    Out[Base + 13] = Sz * Sy * Sx + Cz * Cx;
-    Out[Base + 14] = Cy * Sx;
-    Out[Base + 15] = P.PickCode || 1 + I;
-
-    Out[Base + 16] = Cz * Sy * Cx + Sz * Sx;
-    Out[Base + 17] = Sz * Sy * Cx - Cz * Sx;
-    Out[Base + 18] = Cy * Cx;
-    Out[Base + 19] = 0.0;
-
-    Out[Base + 20] = P.EdgeTintF82[0];
-    Out[Base + 21] = P.EdgeTintF82[1];
-    Out[Base + 22] = P.EdgeTintF82[2];
-    Out[Base + 23] = P.Transmission;
-
-    const DiffWeight = P.Emission > 0.01 ? 1.0 : 1.0 - P.Metallic * 0.75;
-    Out[Base + 24] = P.BaseColor[0] * DiffWeight;
-    Out[Base + 25] = P.BaseColor[1] * DiffWeight;
-    Out[Base + 26] = P.BaseColor[2] * DiffWeight;
-    Out[Base + 27] = P.Emission;
-  }
-
-  for (let Li = 0; Li < LCount; ++Li) {
-    const L = ActiveScene.AreaLights[Li];
-    const Base = (LIGHT_ROW_BASE + Li) * SCENE_DATA_W * 4;
-    const Right = L.Right || [1, 0, 0];
-    const Up = L.Up || [0, 1, 0];
-    const Normal = L.Normal || [0, 0, -1];
-    Out[Base + 0] = L.Center[0];
-    Out[Base + 1] = L.Center[1];
-    Out[Base + 2] = L.Center[2];
-    Out[Base + 3] = L.HalfWidth;
-
-    Out[Base + 4] = L.HalfHeight;
-    Out[Base + 5] = L.Radiance[0];
-    Out[Base + 6] = L.Radiance[1];
-    Out[Base + 7] = L.Radiance[2];
-
-    Out[Base + 8] = L.QuadVisible === false ? 0.0 : 1.0;
-    Out[Base + 9] = L.PickCode || (400 + Li);
-    Out[Base + 10] = L.Omni ? 1.0 : 0.0;
-    Out[Base + 11] = 0.0;
-
-    Out[Base + 12] = Right[0];
-    Out[Base + 13] = Right[1];
-    Out[Base + 14] = Right[2];
-    Out[Base + 15] = 0.0;
-
-    Out[Base + 16] = Up[0];
-    Out[Base + 17] = Up[1];
-    Out[Base + 18] = Up[2];
-    Out[Base + 19] = 0.0;
-
-    Out[Base + 20] = Normal[0];
-    Out[Base + 21] = Normal[1];
-    Out[Base + 22] = Normal[2];
-    Out[Base + 23] = 0.0;
-  }
-}
 
 function ComputeNonCameraSceneSignature(Scene) {
   let Parts = `${Scene.OrthoHalfHeight.toFixed(3)}|${Scene.VerticalFovRad.toFixed(3)}|${Scene.ExposureGain.toFixed(3)}|`;
@@ -3100,21 +3115,8 @@ export default function GtxWorldViewport({
   const VehicleBvhRef = useRef(GetCachedVehicleBvhAssets());
   const VehicleBvhDirtyRef = useRef(true);
   const [LiveDragPreview, SetLiveDragPreview] = useState(null);
-  // C++ GI engines (voxel_sdf / ddgi): packed radiance field from the async baker, shared by CPU / WebGPU / WebGL.
-  const RadianceFieldVersionRef = useRef(-1);
-
-  useEffect(
-    () =>
-      SharedRadianceFieldBaker.Subscribe((Baker) => {
-        if (Baker.Epoch === RadianceFieldVersionRef.current) return;
-        RadianceFieldVersionRef.current = Baker.Epoch;
-        SceneDataDirtyRef.current = true;
-        SceneDirtyRef.current = true;
-        RequestRedrawRef.current?.(true);
-      }),
-    [],
-  );
-
+  // Inspector "Reset" restarts GPU GI accumulation: draw a frame so the renderer consumes the reset.
+  useEffect(() => GdfStatus.Subscribe((Reason) => Reason === "reset" && RequestRedrawRef.current?.(true)), []);
   useEffect(() => {
     let Cancelled = false;
     LoadVehicleBvhAssets()
@@ -3637,11 +3639,6 @@ export default function GtxWorldViewport({
         AtlasVersionRef.current += 1;
         SceneDirtyRef.current = true;
       }
-      Gpu.UploadRadianceField(
-        SessionGiSafeMode
-          ? null
-          : SharedRadianceFieldBaker.Request(ActiveScene, AtlasSync.Pixels, AtlasVersionRef.current, VehicleBvhRef.current),
-      );
 
       const PCount = Math.min(MAX_PRIMS, ActiveScene.Primitives.length);
       const LCount = Math.min(MAX_LIGHTS, ActiveScene.AreaLights.length);
@@ -3743,7 +3740,7 @@ export default function GtxWorldViewport({
       const NeedScenePass = SceneDirtyRef.current;
       SceneDirtyRef.current = false;
 
-      Gpu.RenderFrame({
+      const Frame = Gpu.RenderFrame({
         Width,
         Height,
         NeedScenePass,
@@ -3763,9 +3760,14 @@ export default function GtxWorldViewport({
         ViewProjZeroToOne,
         HighlightedHandle: Highlighted,
         TimeSec: ForceTimeRef.current,
+        VehicleAssets: VehAssets,
+        GiEnabled: !SessionGiSafeMode,
       });
 
       SampleViewportFps();
+      // The GPU surface cache / probes converge over a few dozen frames after any light or geometry change; keep drawing
+      // until they settle, then the viewport goes idle again.
+      if (Frame && Frame.GiConverging) ScheduleWgpuDraw(true);
     };
 
     const ScheduleWgpuDraw = (ForceInvalidate = false) => {
@@ -3986,30 +3988,20 @@ export default function GtxWorldViewport({
     const InitMoon = GetMoonAtlasSnapshot();
     Gl.texImage2D(Gl.TEXTURE_2D, 0, Gl.RGBA8, MOON_ATLAS_W, MOON_ATLAS_H, 0, Gl.RGBA, Gl.UNSIGNED_BYTE, InitMoon.pixels);
 
-    // C++ GI radiance field: RGBA32F, texelFetch only (no filtering), empty header until the first bake lands.
-    const RadianceFieldTex = Gl.createTexture();
-    Gl.bindTexture(Gl.TEXTURE_2D, RadianceFieldTex);
+    // Lumen-style GI: persistent GPU global distance field + surface cache + probe final gather, built and updated by GPU
+    // passes only (GlobalDistanceFieldGiGl.js). Empty 1x1 textures keep units 9-11 complete until the field exists.
+    const Gdf = CreateGlobalDistanceFieldGiGl(Gl);
+    if (!Gdf.Ok) console.warn("[WebGL] global distance field GI unavailable:", Gdf.Reason);
+    const GdfEmptyField = Gl.createTexture();
+    Gl.bindTexture(Gl.TEXTURE_2D, GdfEmptyField);
     Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MIN_FILTER, Gl.NEAREST);
     Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MAG_FILTER, Gl.NEAREST);
-    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_S, Gl.CLAMP_TO_EDGE);
-    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_T, Gl.CLAMP_TO_EDGE);
-    Gl.texImage2D(Gl.TEXTURE_2D, 0, Gl.RGBA32F, RADIANCE_FIELD_TEXTURE_WIDTH, 1, 0, Gl.RGBA, Gl.FLOAT, new Float32Array(RADIANCE_FIELD_TEXTURE_WIDTH * 4));
-    // Half-float 3D volumes (BuildRadianceVolumes): half floats are linearly filterable in core WebGL2.
-    const MakeVolume = (InternalFormat, Format, Dims, Pixels) => {
-      const Tex = Gl.createTexture();
-      Gl.bindTexture(Gl.TEXTURE_3D, Tex);
-      Gl.texParameteri(Gl.TEXTURE_3D, Gl.TEXTURE_MIN_FILTER, Gl.LINEAR);
-      Gl.texParameteri(Gl.TEXTURE_3D, Gl.TEXTURE_MAG_FILTER, Gl.LINEAR);
-      Gl.texParameteri(Gl.TEXTURE_3D, Gl.TEXTURE_WRAP_S, Gl.CLAMP_TO_EDGE);
-      Gl.texParameteri(Gl.TEXTURE_3D, Gl.TEXTURE_WRAP_T, Gl.CLAMP_TO_EDGE);
-      Gl.texParameteri(Gl.TEXTURE_3D, Gl.TEXTURE_WRAP_R, Gl.CLAMP_TO_EDGE);
-      Gl.pixelStorei(Gl.UNPACK_ALIGNMENT, 1);
-      Gl.texImage3D(Gl.TEXTURE_3D, 0, InternalFormat, Dims[0], Dims[1], Dims[2], 0, Format, Gl.HALF_FLOAT, Pixels);
-      Gl.pixelStorei(Gl.UNPACK_ALIGNMENT, 4);
-      return Tex;
-    };
-    const RfDistTex = MakeVolume(Gl.R16F, Gl.RED, [1, 1, 1], new Uint16Array(1));
-    const RfRadTex = MakeVolume(Gl.RGBA16F, Gl.RGBA, [1, 1, 1], new Uint16Array(4));
+    Gl.texImage2D(Gl.TEXTURE_2D, 0, Gl.RGBA32F, 1, 1, 0, Gl.RGBA, Gl.FLOAT, new Float32Array(4));
+    const GdfEmptyVolume = Gl.createTexture();
+    Gl.bindTexture(Gl.TEXTURE_3D, GdfEmptyVolume);
+    Gl.texParameteri(Gl.TEXTURE_3D, Gl.TEXTURE_MIN_FILTER, Gl.LINEAR);
+    Gl.texParameteri(Gl.TEXTURE_3D, Gl.TEXTURE_MAG_FILTER, Gl.LINEAR);
+    Gl.texImage3D(Gl.TEXTURE_3D, 0, Gl.RGBA16F, 1, 1, 1, 0, Gl.RGBA, Gl.HALF_FLOAT, new Uint16Array(4));
 
     AtlasSyncRef.current?.InvalidateAll();
     SceneDataDirtyRef.current = true;
@@ -4058,12 +4050,12 @@ export default function GtxWorldViewport({
       LastSkyLutKey: "",
       LastSkyW: SKY_VIEW_WIDTH,
       MoonAtlasTex,
-      RadianceFieldTex,
-      RfDistTex,
-      RfRadTex,
-      MakeVolume,
-      RadianceFieldSynced: null,
-      RadianceFieldFlags: { Probe: false, Clip: false },
+      Gdf,
+      GdfEmptyField,
+      GdfEmptyVolume,
+      GiReady: false,
+      GiConverging: false,
+      GdfResetSeen: GdfStatus.ResetSerial,
       SyncedMoonVersion: InitMoon.version,
       VehicleInstCount: 0,
       SunShadowVP: new Float32Array(16),
@@ -4162,9 +4154,9 @@ export default function GtxWorldViewport({
         State.Gl.deleteTexture(State.BvhInstTex);
         State.Gl.deleteTexture(State.SkyViewTex);
         State.Gl.deleteTexture(State.MoonAtlasTex);
-        State.Gl.deleteTexture(State.RadianceFieldTex);
-        State.Gl.deleteTexture(State.RfDistTex);
-        State.Gl.deleteTexture(State.RfRadTex);
+        if (State.Gdf.Ok) State.Gdf.Destroy();
+        State.Gl.deleteTexture(State.GdfEmptyField);
+        State.Gl.deleteTexture(State.GdfEmptyVolume);
         State.Gl.deleteVertexArray(State.EmptyVao);
         State.Gl.deleteTexture(State.AtlasTex);
         State.Gl.deleteTexture(State.SceneDataTex);
@@ -4304,6 +4296,7 @@ export default function GtxWorldViewport({
             CurState.OutlineUniforms = {
               uSceneTex: Gl.getUniformLocation(OutlineProg, "uSceneTex"),
               uSelectedCode: Gl.getUniformLocation(OutlineProg, "uSelectedCode"),
+              uAntiAlias: Gl.getUniformLocation(OutlineProg, "uAntiAlias"),
             };
             CurState.GizmoUniforms = {
               uViewProj: Gl.getUniformLocation(GizmoProg, "uViewProj"),
@@ -4617,6 +4610,50 @@ export default function GtxWorldViewport({
           }
         }
 
+        // Sky view LUT first: the GI surface cache gathers sky light from it in the same frame.
+        {
+          const SkyKey = GetSkyViewCacheKey(ActiveScene.SunDir, ActiveScene.Atmosphere || {});
+          if (SkyKey !== CurState.LastSkyLutKey) {
+            CurState.LastSkyLutKey = SkyKey;
+            BuildSkyViewLut(ActiveScene.SunDir, ActiveScene.Atmosphere || {}, CurState.SkyLutFloat);
+            PackSkyViewRgba16f(CurState.SkyLutFloat, CurState.SkyLutHalf);
+            Gl.bindTexture(Gl.TEXTURE_2D, CurState.SkyViewTex);
+            Gl.texSubImage2D(Gl.TEXTURE_2D, 0, 0, 0, SKY_VIEW_WIDTH, SKY_VIEW_HEIGHT, Gl.RGBA, Gl.HALF_FLOAT, CurState.SkyLutHalf);
+            SceneDirtyRef.current = true;
+          }
+        }
+
+        // ---------------- GPU GLOBAL DISTANCE FIELD GI (persistent field, dirty-box updates, surface cache, probes) ----------------
+        // Runs before Pass 1, which rebinds every texture unit it samples. An idle frame does no field work inside Advance.
+        if ((RsU.giAlg === 3 || RsU.giAlg === 4) && CurState.Gdf.Ok && !SessionGiSafeMode) {
+          if (SceneDirtyRef.current || CurState.GiConverging) {
+            if (GdfStatus.ResetSerial !== CurState.GdfResetSeen) {
+              CurState.GdfResetSeen = GdfStatus.ResetSerial;
+              CurState.Gdf.Invalidate();
+            }
+            const Gi = CurState.Gdf.Advance({
+              Scene: ActiveScene,
+              Rs: ActiveScene.RenderSettings || {},
+              SceneCpu: CurState.SceneDataBuf,
+              SceneTex: CurState.SceneDataTex,
+              PCount,
+              LCount,
+              Assets: VehAssets && !VehicleBvhDirtyRef.current ? VehAssets : null,
+              BvhNodeTex: CurState.BvhNodeTex,
+              BvhTriTex: CurState.BvhTriTex,
+              SkyTex: CurState.SkyViewTex,
+              Engine: RsU.giAlg,
+            });
+            CurState.GiReady = RsU.giAlg === 4 ? Gi.ProbeReady : Gi.FieldReady;
+            CurState.GiConverging = Gi.Converging;
+            GdfStatus.Publish("WebGL2", RsU.giAlg, Gi, CurState.Gdf);
+            SceneDirtyRef.current = true;
+          }
+        } else {
+          CurState.GiReady = false;
+          CurState.GiConverging = false;
+        }
+
         // ---------------- PASS 1: GTX WORLD RENDER (ZERO ALLOCATIONS PER CAMERA FRAME!) ----------------
         if (SceneDirtyRef.current) {
           SceneDirtyRef.current = false;
@@ -4658,28 +4695,8 @@ export default function GtxWorldViewport({
           const Cl = ActiveScene.Clouds || {};
           const Mn = ActiveScene.Moon || {};
           const St = ActiveScene.Stars || {};
-          const SkyKey = GetSkyViewCacheKey(ActiveScene.SunDir, Atmo);
-          if (SkyKey !== CurState.LastSkyLutKey) {
-            CurState.LastSkyLutKey = SkyKey;
-            BuildSkyViewLut(ActiveScene.SunDir, Atmo, CurState.SkyLutFloat);
-            PackSkyViewRgba16f(CurState.SkyLutFloat, CurState.SkyLutHalf);
-            Gl.activeTexture(Gl.TEXTURE7);
-            Gl.bindTexture(Gl.TEXTURE_2D, CurState.SkyViewTex);
-            Gl.texSubImage2D(
-              Gl.TEXTURE_2D,
-              0,
-              0,
-              0,
-              SKY_VIEW_WIDTH,
-              SKY_VIEW_HEIGHT,
-              Gl.RGBA,
-              Gl.HALF_FLOAT,
-              CurState.SkyLutHalf,
-            );
-          } else {
-            Gl.activeTexture(Gl.TEXTURE7);
-            Gl.bindTexture(Gl.TEXTURE_2D, CurState.SkyViewTex);
-          }
+          Gl.activeTexture(Gl.TEXTURE7);
+          Gl.bindTexture(Gl.TEXTURE_2D, CurState.SkyViewTex);
           Gl.uniform1i(U.uSkyViewTex, 7);
           const MoonSnap = GetMoonAtlasSnapshot();
           Gl.activeTexture(Gl.TEXTURE8);
@@ -4704,40 +4721,23 @@ export default function GtxWorldViewport({
           Gl.uniform4f(U.uStarCfg1, St.twinkle !== false ? 1.0 : 0.0, St.twinkleDepth ?? 30, St.twinkleRate ?? 1.2, St.rotationRad ?? 0.0);
 
           {
-            const Field = SessionGiSafeMode
-              ? null
-              : SharedRadianceFieldBaker.Request(
-                  ActiveScene, AtlasSyncRef.current?.Pixels, AtlasVersionRef.current, VehicleBvhRef.current,
-                );
+            const Gdf = CurState.Gdf;
+            const Live = Gdf.Ok && CurState.GiReady;
             Gl.activeTexture(Gl.TEXTURE9);
-            Gl.bindTexture(Gl.TEXTURE_2D, CurState.RadianceFieldTex);
-            if (Field && Field !== CurState.RadianceFieldSynced) {
-              CurState.RadianceFieldSynced = Field;
-              const Rows = Field.length / 4 / RADIANCE_FIELD_TEXTURE_WIDTH;
-              Gl.texImage2D(Gl.TEXTURE_2D, 0, Gl.RGBA32F, RADIANCE_FIELD_TEXTURE_WIDTH, Rows, 0, Gl.RGBA, Gl.FLOAT, Field);
-              const Volumes = BuildRadianceVolumes(Field);
-              if (Volumes) {
-                Gl.deleteTexture(CurState.RfDistTex);
-                Gl.deleteTexture(CurState.RfRadTex);
-                CurState.RfDistTex = CurState.MakeVolume(Gl.R16F, Gl.RED, Volumes.DistDims, Volumes.Dist);
-                CurState.RfRadTex = CurState.MakeVolume(Gl.RGBA16F, Gl.RGBA, Volumes.RadDims, Volumes.Rad);
-              }
-              CurState.RadianceFieldFlags = { Probe: Field[1] > 0.5, Clip: Field[2] > 0.5 && !!Volumes };
-            }
+            Gl.bindTexture(Gl.TEXTURE_2D, Live ? Gdf.FieldTexture : CurState.GdfEmptyField);
             Gl.uniform1i(U.uRadianceField, 9);
             Gl.activeTexture(Gl.TEXTURE10);
-            Gl.bindTexture(Gl.TEXTURE_3D, CurState.RfDistTex);
+            Gl.bindTexture(Gl.TEXTURE_3D, Live ? Gdf.FieldVolume : CurState.GdfEmptyVolume);
             Gl.uniform1i(U.uRfDistTex, 10);
             Gl.activeTexture(Gl.TEXTURE11);
-            Gl.bindTexture(Gl.TEXTURE_3D, CurState.RfRadTex);
+            Gl.bindTexture(Gl.TEXTURE_3D, Live ? Gdf.RadianceVolume : CurState.GdfEmptyVolume);
             Gl.uniform1i(U.uRfRadTex, 11);
             Gl.uniform4f(U.uGiCfg, RsU.coneCount ?? 16, RsU.aoContact ?? 0.25, RsU.aoChassis ?? 2.2, RsU.aoRays ?? 12);
           }
-          const Flags = SessionGiSafeMode ? { Probe: false, Clip: false } : CurState.RadianceFieldFlags;
           Gl.uniform1i(U.uShadowAlg, RsU.shadowAlg);
           Gl.uniform1i(
             U.uGiAlg,
-            (RsU.giAlg === 3 && !Flags.Clip) || (RsU.giAlg === 4 && !Flags.Probe) ? 2 : RsU.giAlg,
+            (RsU.giAlg === 3 || RsU.giAlg === 4) && !CurState.GiReady ? 2 : RsU.giAlg,
           );
           Gl.uniform1i(U.uReflAlg, RsU.reflAlg);
           Gl.uniform1i(U.uPcssTaps, RsU.pcssTaps);
@@ -4833,6 +4833,7 @@ export default function GtxWorldViewport({
         Gl.bindTexture(Gl.TEXTURE_2D, CurState.SceneTex);
         Gl.uniform1i(CurState.OutlineUniforms.uSceneTex, 0);
         Gl.uniform1i(CurState.OutlineUniforms.uSelectedCode, SelectedCode);
+        Gl.uniform1i(CurState.OutlineUniforms.uAntiAlias, RsU.antiAliasing);
         Gl.bindVertexArray(CurState.EmptyVao);
         Gl.drawArrays(Gl.TRIANGLES, 0, 3);
 
@@ -4930,6 +4931,8 @@ export default function GtxWorldViewport({
         }
 
         SampleViewportFps();
+        // The surface cache / probes accumulate over GDF_CONVERGE_FRAMES; keep drawing until they settle.
+        if (CurState.GiConverging) ScheduleDraw(true);
       });
     };
 

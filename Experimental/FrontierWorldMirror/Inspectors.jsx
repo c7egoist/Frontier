@@ -25,7 +25,7 @@ import {
   SHADOW_ALGORITHMS,
 } from "./ShowcaseGalleryScene.js";
 import { WindInspector, WindBinding } from "./WindPanel.jsx";
-import { SharedRadianceFieldBaker } from "./RadianceFieldBaker.js";
+import { GdfStatus } from "./GlobalDistanceFieldStatus.js";
 import TransformPanel from "./TransformPanel.jsx";
 import MaterialPanel from "./MaterialPanel.jsx";
 import { ColourSlotDropProps } from "./ColourCodex.js";
@@ -450,26 +450,30 @@ export function Tile({
     </button>
   );
 }
-// Live status of the async C++ GI bake (VoxelSdfClipmap / DynamicProbeCache) shared by every renderer.
-function RadianceFieldBakeStatus({ Engine }) {
+// Live state of the GPU global distance field GI (persistent field, dirty-box updates, surface cache, probes), published by the
+// active viewport renderer. Reset restarts the radiance accumulation; the distance field itself is never rebuilt wholesale.
+function GlobalDistanceFieldGiStatus({ Engine }) {
   const [, Bump] = useState(0);
-  useEffect(() => SharedRadianceFieldBaker.Subscribe(() => Bump((N) => N + 1)), []);
-  const Baker = SharedRadianceFieldBaker;
-  const Stats = Baker.FieldEngine === Engine ? Baker.Stats : null;
-  const Busy = Baker.Status.startsWith("baking");
-  const Pct = Math.round((Busy ? Baker.Progress : 1) * 100);
+  useEffect(() => GdfStatus.Subscribe(() => Bump((N) => N + 1)), []);
+  const Cur = GdfStatus.Current;
+  const EngineCode = Engine === "ddgi" ? 4 : 3;
+  const Live = Cur.Backend && Cur.Engine === EngineCode;
+  const Ready = Live && (EngineCode === 4 ? Cur.ProbeReady : Cur.FieldReady);
+  const Pct = Live ? Math.round((Cur.Converging ? Cur.LightFrames / GdfStatus.ConvergeFrames : 1) * 100) : 0;
+  const L = Cur.Layout;
   let Detail = "";
-  if (Stats && Engine === "voxel_sdf") {
-    Detail = `${Stats.Dims.map((D) => D.join("×")).join(" + ")} voxels · surface ${Stats.SurfaceVoxels.join(" / ")}`;
-  } else if (Stats && Engine === "ddgi") {
-    Detail = `${Stats.Cells} probes · ${Stats.GatedCells} backface-gated`;
+  if (Live && L) {
+    Detail = `${Cur.Backend} · clips ${L.Res0}³ / ${L.Res1}³ (${L.Voxel0.toFixed(3)} / ${L.Voxel1.toFixed(3)} m)`;
+    if (EngineCode === 4) Detail += ` · ${L.Probe.Cells} probes × ${L.Probe.Rays} rays`;
+    if (Cur.Stats) Detail += ` · ${Cur.Stats.ComposeVoxels.toLocaleString()} voxels composed so far`;
   }
+  const Label = !Live ? "Waiting for the viewport" : !Ready ? "Building field on GPU" : Cur.Converging ? "Converging" : "Converged";
   return (
-    <div className="rs-desc-banner" style={{ display: "grid", gap: 6 }} data-radiance-field-status={Busy ? "baking" : "ready"}>
+    <div className="rs-desc-banner" style={{ display: "grid", gap: 6 }} data-radiance-field-status={Ready && !Cur.Converging ? "ready" : "converging"}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-        <span>{Baker.Status === "idle" ? "Bake pending" : Baker.Status}</span>
-        <button type="button" className="mini" onClick={() => Baker.Invalidate()} disabled={Busy}>
-          Rebake
+        <span>{Label}</span>
+        <button type="button" className="mini" onClick={() => GdfStatus.RequestReset()} disabled={!Live}>
+          Reset
         </button>
       </div>
       <div style={{ height: 3, borderRadius: 2, background: "rgba(255,255,255,0.08)" }}>
@@ -1580,7 +1584,7 @@ export function Inspector({
               ActiveGi.desc,
             )}
             {(Rs.GiAlgorithm === "voxel_sdf" || Rs.GiAlgorithm === "ddgi") && (
-              <RadianceFieldBakeStatus Engine={Rs.GiAlgorithm} />
+              <GlobalDistanceFieldGiStatus Engine={Rs.GiAlgorithm} />
             )}
             {Rs.GiAlgorithm === "voxel_sdf" && (
               <>
@@ -1590,7 +1594,7 @@ export function Inspector({
                 {RsFieldSlider("Clip 0 Resolution", "ClipmapResolution0", Rs.ClipmapResolution0, 16, 64, 4, "vox", 0)}
                 {RsFieldSlider("Clip 1 Resolution", "ClipmapResolution1", Rs.ClipmapResolution1, 16, 64, 4, "vox", 0)}
                 {RsFieldSlider("Radiosity Bounces", "ClipmapRadiosityBounces", Rs.ClipmapRadiosityBounces, 0, 4, 1, "", 0)}
-                {RsFieldSlider("Cone Directions", "ClipmapConeCount", Rs.ClipmapConeCount, 12, 24, 1, "cones", 0)}
+                {RsFieldSlider("Final Gather Rays", "ClipmapConeCount", Rs.ClipmapConeCount, 4, 32, 1, "rays", 0)}
                 {RsSwitch("Inject Emissive", "ClipmapLightEmissive", Rs.ClipmapLightEmissive)}
                 {RsSwitch("Inject Sun", "ClipmapLightSun", Rs.ClipmapLightSun)}
                 {RsSwitch("Inject Area Lights", "ClipmapLightArea", Rs.ClipmapLightArea)}
@@ -1623,7 +1627,7 @@ export function Inspector({
                 {(Rs.GiAlgorithm === "sdf" || Rs.GiAlgorithm === "bvh") &&
                   RsSelect("GI Quality", QUALITY_PRESETS, Rs.GiQuality, ApplyGiQuality)}
                 {Rs.GiAlgorithm === "sdf" &&
-                  RsFieldSlider("Cone GI Directions", "GiCones", Rs.GiCones, 4, 14, 1, "dirs", 0)}
+                  RsFieldSlider("Sky Visibility Cones", "GiCones", Rs.GiCones, 4, 14, 1, "rays", 0)}
                 {Rs.GiAlgorithm === "bvh" &&
                   RsFieldSlider("BVH GI Samples / Pixel", "GiSamples", Rs.GiSamples, 2, 20, 1, "spp", 0)}
                 {RsFieldSlider("Bounce Intensity", "GiIntensity", Rs.GiIntensity, 0, 2.5, 0.05, "×", 2)}

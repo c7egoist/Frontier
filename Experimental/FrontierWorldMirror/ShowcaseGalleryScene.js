@@ -105,14 +105,14 @@ export const SHADOW_ALGORITHMS = [
 ];
 
 export const GI_ALGORITHMS = [
-  { id: "voxel_sdf", label: "SDF Cone GI · Voxel Clipmap", desc: "C++ SdfGlobalIllumination: VoxelSdfClipmap surface cache + radiosity bounces + 16 deterministic cones + 7×7 bilateral" },
-  { id: "ddgi", label: "DDGI · Dynamic Probe Cache", desc: "C++ DdgiRaytracing: DynamicProbeCache 8×8 octahedral irradiance + 16×16 Chebyshev depth moments + backface gating" },
+  { id: "voxel_sdf", label: "Global SDF · Surface Cache Gather", desc: "GPU global distance field (persistent 2-level clipmap, dirty-box updates) + radiosity surface cache + per-pixel final-gather rays traced through the field + 7×7 bilateral" },
+  { id: "ddgi", label: "Global SDF · Radiance Cache Probes", desc: "GPU global distance field + surface cache, probe rays traced through the field into 8×8 octahedral irradiance + 16×16 Chebyshev depth moments with backface gating" },
   { id: "sdf", label: "Analytic Cone GI", desc: "ShadowAlgorithmLab Cone GI: multi-bounce radiosity + solid-angle diffuse GI" },
   { id: "bvh", label: "BVH Raytraced GI", desc: "ShadowAlgorithmLab BVH GI: 2-bounce cosine-hemisphere multi-light path tracing" },
   { id: "off", label: "Off (Ambient Fill)", desc: "Direct lighting + calibrated sky/moon/star ambient fill only" },
 ];
 
-// C++ ShowcaseGalleryScene GI configuration (DynamicProbeCacheConfiguration + VoxelSdfClipmap + LinearCosine AO)
+// GI configuration of the GPU global distance field engines (probe grid, clipmap levels, surface-cache injection, final gather, AO)
 export const CanonicalGiFieldSettings = Object.freeze({
   ProbeGridMinimum: [-2.02, -1.2, -0.58],
   ProbeGridMaximum: [2.02, 2.15, 1.75],
@@ -210,8 +210,6 @@ export function ResolveRenderSettings(Values = {}) {
   Merged.EmissiveShadowMode = Merged.EmissiveShadowMode === "unshadowed" ? "unshadowed" : "shadowed";
   Merged.GiSamples = Math.max(2, Math.min(20, Math.round(Number(Merged.GiSamples) || 6)));
   Merged.GiCones = Math.max(4, Math.min(14, Math.round(Number(Merged.GiCones) || 6)));
-  Merged.GiIntensity = Math.max(0, Math.min(2.5, Number(Merged.GiIntensity) ?? 1.25));
-  Merged.FillBoost = Math.max(0.2, Math.min(2.5, Number(Merged.FillBoost) ?? 1.15));
   const Vec3Or = (V, D) =>
     Array.isArray(V) && V.length >= 3 && V.every((C) => Number.isFinite(Number(C)))
       ? [Number(V[0]), Number(V[1]), Number(V[2])]
@@ -224,6 +222,8 @@ export function ResolveRenderSettings(Values = {}) {
     const N = Number(V);
     return Number.isFinite(N) ? Math.max(Lo, Math.min(Hi, N)) : D;
   };
+  Merged.GiIntensity = NumIn(Merged.GiIntensity, 0, 2.5, CanonicalRenderSettings.GiIntensity);
+  Merged.FillBoost = NumIn(Merged.FillBoost, 0.2, 2.5, CanonicalRenderSettings.FillBoost);
   const G = CanonicalGiFieldSettings;
   Merged.ProbeGridMinimum = Vec3Or(Merged.ProbeGridMinimum, G.ProbeGridMinimum);
   Merged.ProbeGridMaximum = Vec3Or(Merged.ProbeGridMaximum, G.ProbeGridMaximum);
@@ -235,22 +235,22 @@ export function ResolveRenderSettings(Values = {}) {
   Merged.ProbeCountX = IntIn(Merged.ProbeCountX, 2, 16, G.ProbeCountX);
   Merged.ProbeCountY = IntIn(Merged.ProbeCountY, 2, 16, G.ProbeCountY);
   Merged.ProbeCountZ = IntIn(Merged.ProbeCountZ, 2, 16, G.ProbeCountZ);
-  Merged.ProbeRayCount = IntIn(Merged.ProbeRayCount, 32, 256, G.ProbeRayCount);
+  Merged.ProbeRayCount = IntIn(Merged.ProbeRayCount, 16, 256, G.ProbeRayCount);
   Merged.ProbeBouncePasses = IntIn(Merged.ProbeBouncePasses, 1, 4, G.ProbeBouncePasses);
-  Merged.ProbeTemporalBlend = NumIn(Merged.ProbeTemporalBlend, 0, 0.95, G.ProbeTemporalBlend);
+  Merged.ProbeTemporalBlend = NumIn(Merged.ProbeTemporalBlend, 0, 0.98, G.ProbeTemporalBlend);
   Merged.ClipmapCenter = Vec3Or(Merged.ClipmapCenter, G.ClipmapCenter);
   Merged.ClipmapHalfExtent0 = NumIn(Merged.ClipmapHalfExtent0, 0.5, 12, G.ClipmapHalfExtent0);
   Merged.ClipmapHalfExtent1 = NumIn(Merged.ClipmapHalfExtent1, Merged.ClipmapHalfExtent0, 24, Math.max(Merged.ClipmapHalfExtent0, G.ClipmapHalfExtent1));
-  Merged.ClipmapResolution0 = IntIn(Merged.ClipmapResolution0, 0, 64, G.ClipmapResolution0);
-  Merged.ClipmapResolution1 = IntIn(Merged.ClipmapResolution1, 0, 64, G.ClipmapResolution1);
+  Merged.ClipmapResolution0 = IntIn(Merged.ClipmapResolution0, 16, 64, G.ClipmapResolution0);
+  Merged.ClipmapResolution1 = IntIn(Merged.ClipmapResolution1, 16, 64, G.ClipmapResolution1);
   Merged.ClipmapRadiosityBounces = IntIn(Merged.ClipmapRadiosityBounces, 0, 4, G.ClipmapRadiosityBounces);
-  Merged.ClipmapConeCount = IntIn(Merged.ClipmapConeCount, 12, 24, G.ClipmapConeCount);
+  Merged.ClipmapConeCount = IntIn(Merged.ClipmapConeCount, 4, 32, G.ClipmapConeCount);
   for (const Key of ["ClipmapLightEmissive", "ClipmapLightPoint", "ClipmapLightSun", "ClipmapLightArea", "ClipmapLightSkyFill", "SdfGiBilateral"]) {
     Merged[Key] = Merged[Key] !== false;
   }
   Merged.AoContactDistance = NumIn(Merged.AoContactDistance, 0.02, 1.5, G.AoContactDistance);
   Merged.AoChassisDistance = NumIn(Merged.AoChassisDistance, 0.2, 6, G.AoChassisDistance);
-  Merged.AoRaysPerPixel = IntIn(Merged.AoRaysPerPixel, 1, 32, G.AoRaysPerPixel);
+  Merged.AoRaysPerPixel = IntIn(Merged.AoRaysPerPixel, 4, 32, G.AoRaysPerPixel);
   Merged.ReflectionRays = Math.max(1, Math.min(8, Math.round(Number(Merged.ReflectionRays) || 2)));
   Merged.ReflectionBounces = Math.max(1, Math.min(3, Math.round(Number(Merged.ReflectionBounces) || 2)));
   Merged.ExposureGain = Math.max(0.2, Math.min(3.5, Number(Merged.ExposureGain) || CanonicalEditorCamera.ExposureGain));

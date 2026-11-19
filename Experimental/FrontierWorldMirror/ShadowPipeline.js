@@ -6,6 +6,15 @@
 
 import { VEHICLE_AXLE_MOUNTS } from "./VehicleBvhAssets.js";
 
+// Finite number in [Lo, Hi], else the default (Number(undefined) is NaN, which `??` does not catch).
+function NumIn(V, Lo, Hi, D) {
+  const N = Number(V);
+  return Number.isFinite(N) ? Math.max(Lo, Math.min(Hi, N)) : D;
+}
+function IntIn(V, Lo, Hi, D) {
+  return Math.round(NumIn(V, Lo, Hi, D));
+}
+
 export function EncodeRenderSettingsUniforms(Rs = {}) {
   const ShadowMap = {
     contact_pcss: 0,
@@ -25,30 +34,33 @@ export function EncodeRenderSettingsUniforms(Rs = {}) {
     bvh: 1,
     env: 2,
   };
+  const SelectedShadowRes = Number(Rs.ShadowMapRes) === 1024 ? 1024 : 2048;
   return {
     shadowAlg: ShadowMap[Rs.ShadowAlgorithm] ?? 0,
     giAlg: GiMap[Rs.GiAlgorithm] ?? 0,
     reflAlg: ReflMap[Rs.ReflectionAlgorithm] ?? 1,
-    shadowMapRes: Number(Rs.ShadowMapRes) === 1024 ? 1024 : 2048,
-    pcssTaps: Math.max(8, Math.min(48, Math.round(Number(Rs.PcssTaps) || 16))),
-    smrtRays: Math.max(2, Math.min(12, Math.round(Number(Rs.SmrtRays) || 4))),
-    shadowRays: Math.max(1, Math.min(16, Math.round(Number(Rs.ShadowRays) || 2))),
-    shadowSoftness: Math.max(0.25, Math.min(2.5, Number(Rs.ShadowSoftness) || 1.0)),
+    // Half-resolution shadow pass: the sun depth map is rendered at half the selected resolution.
+    shadowMapRes: Rs.HalfResShadows ? SelectedShadowRes / 2 : SelectedShadowRes,
+    pcssTaps: IntIn(Rs.PcssTaps, 8, 48, 16),
+    smrtRays: IntIn(Rs.SmrtRays, 2, 12, 4),
+    shadowRays: IntIn(Rs.ShadowRays, 1, 16, 2),
+    shadowSoftness: NumIn(Rs.ShadowSoftness, 0.25, 2.5, 1.0),
     planeFilter: Rs.PlaneFilter !== false ? 1 : 0,
     halfResShadows: Rs.HalfResShadows ? 1 : 0,
     emissiveShadowed: Rs.EmissiveShadowMode === "unshadowed" ? 0 : 1,
-    giSamples: Math.max(2, Math.min(20, Math.round(Number(Rs.GiSamples) || 6))),
-    giCones: Math.max(4, Math.min(14, Math.round(Number(Rs.GiCones) || 6))),
-    giIntensity: Math.max(0, Math.min(2.5, Number(Rs.GiIntensity) ?? 1.25)),
-    fillBoost: Math.max(0.2, Math.min(2.5, Number(Rs.FillBoost) ?? 1.15)),
-    reflRays: Math.max(1, Math.min(8, Math.round(Number(Rs.ReflectionRays) || 2))),
-    reflBounces: Math.max(1, Math.min(3, Math.round(Number(Rs.ReflectionBounces) || 2))),
+    giSamples: IntIn(Rs.GiSamples, 2, 20, 6),
+    giCones: IntIn(Rs.GiCones, 4, 14, 6),
+    giIntensity: NumIn(Rs.GiIntensity, 0, 2.5, 1.25),
+    fillBoost: NumIn(Rs.FillBoost, 0.2, 2.5, 1.15),
+    reflRays: IntIn(Rs.ReflectionRays, 1, 8, 2),
+    reflBounces: IntIn(Rs.ReflectionBounces, 1, 3, 2),
     renderScale: [50, 75, 100, 125].includes(Number(Rs.RenderScale)) ? Number(Rs.RenderScale) : 100,
     antiAliasing: Rs.AntiAliasing !== false ? 1 : 0,
-    coneCount: Math.max(12, Math.min(24, Math.round(Number(Rs.ClipmapConeCount) || 16))),
-    aoContact: Math.max(0.02, Math.min(1.5, Number(Rs.AoContactDistance) || 0.25)),
-    aoChassis: Math.max(0.2, Math.min(6, Number(Rs.AoChassisDistance) || 2.2)),
-    aoRays: Math.max(12, Math.min(32, Math.max(12, Math.round(Number(Rs.AoRaysPerPixel) || 8)))),
+    // Final-gather rays per pixel through the global distance field (setting key kept from the clipmap era).
+    coneCount: IntIn(Rs.ClipmapConeCount, 4, 32, 16),
+    aoContact: NumIn(Rs.AoContactDistance, 0.02, 1.5, 0.25),
+    aoChassis: NumIn(Rs.AoChassisDistance, 0.2, 6, 2.2),
+    aoRays: IntIn(Rs.AoRaysPerPixel, 4, 32, 8),
   };
 }
 

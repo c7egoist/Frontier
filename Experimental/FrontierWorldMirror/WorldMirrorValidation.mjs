@@ -606,10 +606,11 @@ assert.ok(
   "ComputeCurrentGizmo defined in GtxWorldViewport component scope for pointer hover & down",
 );
 {
-  globalThis.GPUBufferUsage = { UNIFORM: 1, STORAGE: 2, COPY_DST: 4, VERTEX: 8 };
-  globalThis.GPUTextureUsage = { TEXTURE_BINDING: 1, COPY_DST: 2, RENDER_ATTACHMENT: 4 };
-  globalThis.GPUShaderStage = { VERTEX: 1, FRAGMENT: 2 };
+  globalThis.GPUBufferUsage = { UNIFORM: 1, STORAGE: 2, COPY_DST: 4, VERTEX: 8, COPY_SRC: 16 };
+  globalThis.GPUTextureUsage = { TEXTURE_BINDING: 1, COPY_DST: 2, RENDER_ATTACHMENT: 4, STORAGE_BINDING: 8, COPY_SRC: 16 };
+  globalThis.GPUShaderStage = { VERTEX: 1, FRAGMENT: 2, COMPUTE: 4 };
   const ExecutedDraws = [];
+  const ExecutedDispatches = [];
   const StrictMockDevice = {
     lost: new Promise(() => {}),
     createShaderModule: ({ code }) => ({ code, getCompilationInfo: async () => ({ messages: [] }) }),
@@ -620,6 +621,13 @@ assert.ok(
       assert.equal(desc.layout?.__kind, "PL");
       return { __kind: "Pipeline", label: desc.label, layout: desc.layout };
     },
+    // GPU global distance field passes: "auto" layouts, one bind group each.
+    createComputePipeline: (desc) => ({
+      __kind: "ComputePipeline",
+      label: desc.label,
+      Bgl: { __kind: "BGL", label: desc.label },
+      getBindGroupLayout(I) { assert.equal(I, 0); return this.Bgl; },
+    }),
     createBuffer: (desc) => ({ __kind: "Buffer", size: desc.size, destroy() {} }),
     createTexture: (desc) => ({ __kind: "Texture", desc, createView: () => ({ __kind: "TexView" }), destroy() {} }),
     createSampler: () => ({ __kind: "Sampler" }),
@@ -628,6 +636,20 @@ assert.ok(
       return { __kind: "BG", label: desc.label, layout: desc.layout };
     },
     createCommandEncoder: () => ({
+      beginComputePass: () => {
+        let curPipe = null;
+        let curBg = null;
+        return {
+          setPipeline(P) { curPipe = P; },
+          setBindGroup(I, Bg) { curBg = Bg; },
+          dispatchWorkgroups(X, Y = 1, Z = 1) {
+            assert.strictEqual(curBg?.layout, curPipe.Bgl, `BindGroupLayout mismatch on compute ${curPipe.label}`);
+            assert.ok(X >= 1 && Y >= 1 && Z >= 1, `${curPipe.label} dispatches a non-empty grid`);
+            ExecutedDispatches.push(curPipe.label);
+          },
+          end() {},
+        };
+      },
       beginRenderPass: () => {
         let curPipe = null;
         const curBgs = {};
@@ -677,8 +699,7 @@ assert.ok(
     }),
     true,
   );
-  assert.equal(
-    GpuRenderer.RenderFrame({
+  const GpuFrame = GpuRenderer.RenderFrame({
       Width: 1280,
       Height: 720,
       NeedScenePass: true,
@@ -696,13 +717,15 @@ assert.ok(
       ForceOverlay: BuiltForceOverlay,
       ViewProjZeroToOne: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
       HighlightedHandle: 1,
-    }),
-    true,
-  );
+    });
+  assert.ok(GpuFrame && GpuFrame.GiConverging === true, "WebGPU frame renders and reports GI convergence in progress (keeps redrawing)");
   const ShadowDraws = ExecutedDraws.filter((D) => D.pipeline === "GtxShadowPipeline");
   const MainDraws = ExecutedDraws.filter((D) => D.pipeline !== "GtxShadowPipeline");
   assert.ok(ShadowDraws.length >= 9, `WebGPU Pass 0 rendered ${ShadowDraws.length} shadow-map caster draws`);
   assert.equal(MainDraws.length, 6, "All 6 WebGPU main/overlay passes (Scene, Outline, ForceOpaque, ForceTrans, GizmoOpaque, GizmoTrans) executed cleanly");
+  for (const E of ["StaticBuildEntry", "ComposeEntry", "SurfaceLightEntry"]) {
+    assert.ok(ExecutedDispatches.includes(E), `WebGPU first frame builds the global distance field on the GPU (${E})`);
+  }
 }
 
 // 12. Verify Automotive Traffic Cone (cone-like) & Cylinder Cone (cylinder-like), Unreal-Style Surface Raycast Placement, and Cone Slalom Level
@@ -1746,115 +1769,99 @@ assert.ok(
 }
 
 // ============================================================================
-// Suite 20: C++ GI engines — VoxelSdfClipmap cone GI + DynamicProbeCache DDGI + LinearCosine AO across CPU / WGSL / GLSL
+// Suite 20: GPU global distance field GI — persistent field, dirty-box updates, surface cache, probe gather, exact emitters
 // ============================================================================
 {
-  const { CanonicalGiFieldSettings, CanonicalRenderSettings: Crs } = await import("./ShowcaseGalleryScene.js");
-  const { BakeRadianceFieldSync, DescribeRadianceFieldRequest } = await import("./RadianceFieldBaker.js");
-  const { BuildRadianceVolumes, CreateRadianceFieldSampler, RADIANCE_FIELD_TEXTURE_WIDTH } = await import("./RadianceFieldLayout.js");
-  const { EncodeRenderSettingsUniforms } = await import("./ShadowPipeline.js");
-  assert.strictEqual(Crs.GiAlgorithm, "voxel_sdf", "Default GI engine is the C++ default SdfGlobalIllumination");
-  assert.deepStrictEqual(
-    [CanonicalGiFieldSettings.ProbeCountX, CanonicalGiFieldSettings.ProbeCountY, CanonicalGiFieldSettings.ProbeCountZ, CanonicalGiFieldSettings.ProbeRayCount],
-    [7, 6, 4, 64],
-    "DDGI lattice matches C++ ShowcaseGalleryScene (7x6x4, 64 rays)",
-  );
+  const { CanonicalGiFieldSettings, CanonicalRenderSettings: Crs, GI_ALGORITHMS } = await import("./ShowcaseGalleryScene.js");
+  const Gdl = await import("./GlobalDistanceFieldLayout.js");
+  const { GDF_GI_COMPUTE_WGSL } = await import("./GlobalDistanceFieldShaders.js");
+  const { GDF_GL_KERNELS } = await import("./GlobalDistanceFieldGiGl.js");
+  const { PackSceneDataBuffer } = await import("./ScenePack.js");
+  assert.strictEqual(Crs.GiAlgorithm, "voxel_sdf", "Default GI engine is the global distance field final gather");
   assert.strictEqual(EncodeRenderSettingsUniforms({ GiAlgorithm: "voxel_sdf" }).giAlg, 3, "voxel_sdf encodes to giAlg 3");
   assert.strictEqual(EncodeRenderSettingsUniforms({ GiAlgorithm: "ddgi" }).giAlg, 4, "ddgi encodes to giAlg 4");
+  assert.ok(GI_ALGORITHMS.every((A) => !/VoxelSdfClipmap|DynamicProbeCache|C\+\+/.test(A.desc)), "GI menu describes the GPU engines, not the retired CPU bakers");
 
-  const SceneFor = (GiAlgorithm, Extra = {}) => {
-    const Vals = { ...ShowcaseInitialValues, "render-settings": { ...Crs, GiAlgorithm, ...Extra } };
-    return CompileLiveGtxScene(ShowcaseInitialRows, Vals, {}, "PERSP");
-  };
-  // Camera / exposure changes must not invalidate the bake (orbiting never re-bakes)
-  const KeyA = DescribeRadianceFieldRequest(SceneFor("voxel_sdf")).Key;
-  const KeyB = DescribeRadianceFieldRequest({ ...SceneFor("voxel_sdf"), CameraOrigin: [9, 9, 9], ExposureGain: 3 }).Key;
-  assert.strictEqual(KeyA, KeyB, "Radiance field key ignores camera and exposure");
-  assert.notStrictEqual(KeyA, DescribeRadianceFieldRequest(SceneFor("voxel_sdf", { ClipmapRadiosityBounces: 1 })).Key, "Radiance field key tracks clipmap settings");
-  assert.strictEqual(DescribeRadianceFieldRequest(SceneFor("sdf")), null, "Legacy engines need no radiance field");
+  // Layout + header: the persistent field is a stacked 2-level clipmap whose header the scene shaders decode.
+  const L = Gdl.ResolveGdfLayout(Crs);
+  assert.deepStrictEqual([L.Res0, L.Res1, L.StackW, L.StackD, L.ZOffset1], [48, 48, 48, 96, 48], "Canonical clipmap: two 48³ levels stacked along z");
+  assert.ok(Math.abs(L.Voxel0 - 2 * 2.8 / 48) < 1e-9 && Math.abs(L.Voxel1 - 2 * 5.6 / 48) < 1e-9, "Clip voxel sizes follow the half extents");
+  assert.strictEqual(L.Probe.Cells, 7 * 6 * 4, "Probe lattice matches the 7x6x4 settings");
+  const Hdr = Gdl.WriteGdfFieldHeader(L, undefined, { ProbeOn: true, FieldOn: false });
+  assert.deepStrictEqual([Hdr[1], Hdr[2], Hdr[20], Hdr[21], Hdr[22], Hdr[23], Hdr[31]], [1, 0, 48, 48, 48, 96, 48], "Field header carries readiness flags + clip layout");
+  assert.ok(L.FieldRows * Gdl.GDF_FIELD_TEXTURE_WIDTH >= L.Probe.TotalVec4, "Header + probe block fit the WebGL field texture rows");
+  assert.notStrictEqual(Gdl.ResolveGdfLayout({ ...Crs, ClipmapResolution0: 32 }).Key, L.Key, "Clip settings re-allocate the field");
+  assert.strictEqual(Gdl.ResolveGdfLayout({ ...Crs, ExposureGain: 3, CameraOrigin: [9, 9, 9] }).Key, L.Key, "Camera / exposure never touch the field");
 
-  const Sampler = CreateRadianceFieldSampler();
-  const RenderFloor = (Sc, Field) => {
-    const Atl = new MaterialAtlasSynchronizer();
-    Atl.UpdatePrimitives(Sc.Primitives);
-    const Cpu = new GtxReferenceTracer();
-    Cpu.RenderFullFrame({ CompiledScene: Sc, AtlasPixels: Atl.Pixels, Width: 96, Height: 64, ViewModeCode: 0, ShowGrid: false, RadianceField: Field });
-    let Sum = 0;
-    for (let I = 0; I < Cpu.OffscreenImg.data.length; I += 4) Sum += Cpu.OffscreenImg.data[I] + Cpu.OffscreenImg.data[I + 1] + Cpu.OffscreenImg.data[I + 2];
-    return Sum / (Cpu.OffscreenImg.data.length * 0.75 * 255);
-  };
+  // Dirty regions: an unchanged scene diffs to nothing, a moved primitive dirties only its old + new bounds.
+  const SceneA = CompileLiveGtxScene(ShowcaseInitialRows, ShowcaseInitialValues, {}, "PERSP");
+  const PC = SceneA.Primitives.length, LC = SceneA.AreaLights.length;
+  const BufA = new Float32Array(8 * 396 * 4);
+  PackSceneDataBuffer(SceneA, PC, LC, BufA);
+  const Snap = {};
+  assert.strictEqual(Gdl.DiffPrimitiveRows(Snap, BufA, PC), "all", "First sight of the scene builds the whole field");
+  assert.deepStrictEqual(Gdl.DiffPrimitiveRows(Snap, BufA, PC), [], "Idle frame: zero dirty primitives, zero field work");
+  const Moved = { ...SceneA, Primitives: SceneA.Primitives.map((P, I) => (I === 3 ? { ...P, Center: [P.Center[0] + 0.25, P.Center[1], P.Center[2]] } : P)) };
+  const BufB = new Float32Array(BufA.length);
+  PackSceneDataBuffer(Moved, PC, LC, BufB);
+  const Dirty = Gdl.DiffPrimitiveRows(Snap, BufB, PC);
+  assert.strictEqual(Dirty.length, 2, "One moved primitive -> its old and new bounds");
+  const Box = Dirty.reduce((Acc, Bx) => Gdl.UnionVoxelBox(Acc, Gdl.ComputeDirtyVoxelBox(L, 0, Bx.Min, Bx.Max)), null);
+  const BoxVox = (Box.Max[0] - Box.Min[0]) * (Box.Max[1] - Box.Min[1]) * (Box.Max[2] - Box.Min[2]);
+  assert.ok(Box && BoxVox > 0 && BoxVox < 0.35 * 48 ** 3, `Moved primitive re-composes a local box only (${BoxVox} of ${48 ** 3} voxels)`);
+  assert.strictEqual(Gdl.ComputeDirtyVoxelBox(L, 0, [40, 40, 40], [41, 41, 41]), null, "Changes outside a clip leave it untouched");
+  const Sig = Gdl.LightingSignature(SceneA, BufA, LC, Crs);
+  assert.strictEqual(Gdl.LightingSignature({ ...SceneA, CameraOrigin: [5, 5, 5] }, BufA, LC, Crs), Sig, "Camera moves keep the converged radiance");
+  assert.notStrictEqual(Gdl.LightingSignature({ ...SceneA, SunDir: [0.3, 0.1, 0.95] }, BufA, LC, Crs), Sig, "Sun changes restart radiance convergence");
+  assert.notStrictEqual(Gdl.LightingSignature(SceneA, BufA, LC, { ...Crs, ClipmapLightEmissive: false }), Sig, "Inject toggles restart radiance convergence");
 
-  for (const Engine of ["ddgi", "voxel_sdf"]) {
-    const Sc = SceneFor(Engine);
-    const Atl = new MaterialAtlasSynchronizer();
-    Atl.UpdatePrimitives(Sc.Primitives);
-    const Out = BakeRadianceFieldSync(Sc, Atl.Pixels, null);
-    const F = Out.Field;
-    assert.strictEqual(F.length % (RADIANCE_FIELD_TEXTURE_WIDTH * 4), 0, `${Engine} field packs into whole ${RADIANCE_FIELD_TEXTURE_WIDTH}-wide RGBA32F rows`);
-    assert.ok(F.every(Number.isFinite), `${Engine} field is finite`);
-    assert.strictEqual(Engine === "ddgi" ? F[1] : F[2], 1, `${Engine} header flag set`);
-    const G = [0, 0, 0];
-    if (Engine === "ddgi") Sampler.ProbeIrradiance(F, 1, 0.5, 0.01, 0, 0, 1, 0, 0, 1, G);
-    else Sampler.ConeGi(F, 1, 0.5, 0.01, 0, 0, 1, ...Sc.SkyRadiance, 16, G);
-    assert.ok(G.every((V) => V > 0.005 && V < 18), `${Engine} irradiance at the gallery floor is plausible (${G.map((V) => V.toFixed(3))})`);
-    if (Engine === "voxel_sdf") {
-      // GPU 3D volumes: emulate the hardware-trilinear fetch the shaders do and match the packed CPU reference lookups.
-      const V = BuildRadianceVolumes(F);
-      assert.ok(V && V.DistDims[2] === 48 * F[23] && V.RadDims.every((D) => D >= 1), "Clipmap volumes built for the GPU");
-      const HalfToFloat = (H) => {
-        const E = (H >> 10) & 31, M = H & 1023, Sg = H & 0x8000 ? -1 : 1;
-        return E === 0 ? Sg * M * 2 ** -24 : Sg * (1 + M / 1024) * 2 ** (E - 15);
-      };
-      const Trilinear = (Tex, Dims, C, Ch, U, Vv, W) => {
-        const Fx = U * Dims[0] - 0.5, Fy = Vv * Dims[1] - 0.5, Fz = W * Dims[2] - 0.5;
-        const X0 = Math.floor(Fx), Y0 = Math.floor(Fy), Z0 = Math.floor(Fz);
-        let R = 0;
-        for (let K = 0; K < 8; ++K) {
-          const Dx = K & 1, Dy = (K >> 1) & 1, Dz = K >> 2;
-          const X = Math.min(Dims[0] - 1, Math.max(0, X0 + Dx)), Y = Math.min(Dims[1] - 1, Math.max(0, Y0 + Dy)), Z = Math.min(Dims[2] - 1, Math.max(0, Z0 + Dz));
-          const Wt = (Dx ? Fx - X0 : 1 - Fx + X0) * (Dy ? Fy - Y0 : 1 - Fy + Y0) * (Dz ? Fz - Z0 : 1 - Fz + Z0);
-          R += Wt * HalfToFloat(Tex[((Z * Dims[1] + Y) * Dims[0] + X) * C + Ch]);
-        }
-        return R;
-      };
-      let Seed = 11, WorstDist = 0, WorstRad = 0;
-      const Rnd = () => (Seed = (Seed * 16807) % 2147483647) / 2147483647;
-      const RefRgb = [0, 0, 0];
-      for (let I = 0; I < 600; ++I) {
-        const P = [Rnd() * 5 - 2.5, Rnd() * 5 - 2, Rnd() * 2.4 - 0.2];
-        const RefD = Sampler.TierDistance(F, ...P);
-        if (RefD < 1e4) {
-          const T = Sampler.Pick.Tier, Spc = F[22] * 2 ** T, Q = P.map((X) => X / Spc), F0 = Q.map(Math.floor);
-          const Gx = F0[0] - F[24 + T * 4], Gy = F0[1] - F[25 + T * 4], Gz = F0[2] - F[26 + T * 4];
-          const GpuD = Trilinear(V.Dist, V.DistDims, 1, 0, (Gx + Q[0] - F0[0] + 0.5) / 48, (Gy + Q[1] - F0[1] + 0.5) / 48, (T * 48 + Gz + Q[2] - F0[2] + 0.5) / V.DistDims[2]);
-          WorstDist = Math.max(WorstDist, Math.abs(GpuD - RefD) / Math.max(0.05, Math.abs(RefD)));
-        }
-        const Casc = I & 1, H = 36 + Casc * 24;
-        Sampler.CascadeRadiance(F, Casc, ...P, 0, RefRgb);
-        const Dims = [F[H + 8], F[H + 9], F[H + 10]];
-        const Fr = [0, 1, 2].map((K) => Math.min(Dims[K] - 1, Math.max(0, (P[K] - F[H + K]) * F[H + 4 + K] * (Dims[K] - 1))));
-        for (let Ch = 0; Ch < 3; ++Ch) {
-          const Gpu = Trilinear(V.Rad, V.RadDims, 4, Ch, (Fr[0] + 0.5) / F[90], (Fr[1] + 0.5) / F[91], (F[84 + Casc * 3] + Fr[2] + 0.5) / F[92]);
-          WorstRad = Math.max(WorstRad, Math.abs(Gpu - RefRgb[Ch]) / Math.max(0.02, Math.abs(RefRgb[Ch])));
-        }
-      }
-      assert.ok(WorstDist < 4e-3 && WorstRad < 4e-3, `GPU clipmap volumes match the packed reference (dist ${WorstDist.toExponential(2)}, radiance ${WorstRad.toExponential(2)})`);
-    }
-    const Lit = RenderFloor(Sc, F);
-    const Fallback = RenderFloor(Sc, null);
-    assert.ok(Number.isFinite(Lit) && Lit > 0.05, `${Engine} CPU frame renders (${Lit.toFixed(3)})`);
-    assert.ok(Math.abs(Lit - Fallback) > 0.002, `${Engine} field changes the CPU frame vs the pending-bake ambient fallback (${Lit.toFixed(3)} vs ${Fallback.toFixed(3)})`);
+  // GI parameter block shared by the WebGPU uniform buffer and the WebGL uniform arrays.
+  const Blk = Gdl.CreateGiParamBlock();
+  Gdl.PackGiParams(Blk, L, SceneA, Crs, 5, 0.5, 0.25, { Prims: PC, Lights: LC, Instances: 3 }, 3);
+  Gdl.StampGiDispatch(Blk, [1, 2, 3], [4, 5, 6], 1, 9);
+  assert.deepStrictEqual([Blk.I[12], Blk.I[15], Blk.I[16], Blk.I[19], Blk.F[3], Blk.F[31], Blk.F[35]], [1, 1, 4, 9, 5, 0.5, 0.25], "Dispatch box, frame and blend factors land in the documented slots");
+  assert.strictEqual(Blk.I[23], 1 | 2 | 4 | 8 | 16 | 32 | 64, "All GI injection switches on by default");
+  assert.strictEqual(Gdl.GiLightFlags({ ...Crs, ClipmapLightSun: false, SdfGiBilateral: false }) & (1 | 64), 0, "Sun / bilateral switches reach the GPU flags");
+  assert.strictEqual(Gdl.RadiosityBounces({ ...Crs, ClipmapRadiosityBounces: 0 }, 3), 0, "Radiosity bounce setting reaches the surface cache");
+
+  // GPU kernels: identical six passes on WebGPU (WGSL compute) and WebGL2 (fragment passes into 3D texture layers).
+  for (const E of ["StaticBuildEntry", "LocalBakeEntry", "ComposeEntry", "SurfaceLightEntry", "ProbeTraceEntry", "ProbeBlendEntry"]) {
+    assert.ok(GDF_GI_COMPUTE_WGSL.includes(`fn ${E}(`), `WGSL compute pass ${E}`);
   }
+  assert.deepStrictEqual(Object.keys(GDF_GL_KERNELS).sort(), ["Compose", "LocalBake", "ProbeBlend", "ProbeTrace", "StaticBuild", "SurfaceLight"], "WebGL2 runtime ports all six passes");
 
+  // Scene shaders: field gather / probe irradiance / AO from the GPU field, exact emitter integrals, no cone GI.
   const WgslSrc = fs.readFileSync(path.join(Folder, "WebgpuGtxRenderer.js"), "utf8");
   const GlslSrc = fs.readFileSync(path.join(Folder, "GtxWorldViewport.jsx"), "utf8");
-  assert.ok(GTX_WGSL_SCENE_SHADER.includes("fn rfConeGi(") && GTX_WGSL_SCENE_SHADER.includes("fn rfProbeIrradiance(") && GTX_WGSL_SCENE_SHADER.includes("fn rfAmbientOcclusion("), "WGSL scene shader carries cone GI, DDGI and AO ports");
-  assert.ok(GTX_WGSL_SCENE_SHADER.includes("@binding(12) var<storage, read> uRadianceField"), "WGSL binds the radiance field at binding 12");
-  assert.ok(WgslSrc.includes("{ binding: 12, visibility: GPUShaderStage.FRAGMENT, buffer: { type: \"read-only-storage\" } }"), "WebGPU bind group layout exposes binding 12");
-  assert.ok(GlslSrc.includes("${RADIANCE_FIELD_GLSL}") && GlslSrc.includes("uniform highp sampler2D uRadianceField"), "GLSL scene shader carries the radiance field port");
-  assert.ok(GlslSrc.includes("uGiAlg == 3 || uGiAlg == 4") && WgslSrc.includes("giAlg == 3 || giAlg == 4"), "Both GPU shaders branch on the C++ GI engines");
+  for (const Fn of ["fn rfFieldGather(", "fn rfProbeIrradiance(", "fn rfAmbientOcclusion(", "fn emitterIlluminance(", "fn emitterAreaVisibility(", "fn gdfQuadFF(", "fn gdfSphereIlluminance("]) {
+    assert.ok(GTX_WGSL_SCENE_SHADER.includes(Fn), `WGSL scene shader carries ${Fn.slice(3, -1)}`);
+  }
+  assert.ok(!GTX_WGSL_SCENE_SHADER.includes("rfConeGi") && !GlslSrc.includes("rfConeGi("), "No cone GI path left in either scene shader");
+  assert.ok(!/solidOmega \* 1\.45|coneSin = clamp\(rEff/.test(WgslSrc + GlslSrc), "Emissive primitives no longer use the solid-angle guess + cone-jittered shadow ray");
+  assert.ok(GlslSrc.includes("float emitterIlluminance(") && GlslSrc.includes("float emitterAreaVisibility(") && GlslSrc.includes("rfFieldGather(pos, N, gl_FragCoord.xy"), "GLSL scene shader matches the WGSL GI + emitter paths");
+
+  // GPU only: the live viewport, renderer and inspector never reach a CPU bake.
+  for (const F of ["GtxWorldViewport.jsx", "WebgpuGtxRenderer.js", "Inspectors.jsx"]) {
+    const Src = fs.readFileSync(path.join(Folder, F), "utf8");
+    assert.ok(!/RadianceFieldBaker|RadianceFieldLayout|VoxelSdfClipmap|DynamicProbeCache|RadianceFieldScene/.test(Src.replace(/^\s*\/\/.*$/gm, "")), `${F} has no CPU GI dependency`);
+  }
+  assert.ok(GlslSrc.includes("CreateGlobalDistanceFieldGiGl(Gl)") && WgslSrc.includes("CreateGlobalDistanceFieldGi(Device)"), "Both viewport backends own a persistent GPU field");
+  assert.ok(GlslSrc.includes("if (CurState.GiConverging) ScheduleDraw(true)") && GlslSrc.includes("Frame.GiConverging"), "Both backends keep drawing until the radiance converges, then idle");
+
+  // Render settings that used to be dead or clamped away.
+  const Enc = (Extra) => EncodeRenderSettingsUniforms({ ...Crs, ...Extra });
+  assert.strictEqual(Enc({ HalfResShadows: true }).shadowMapRes, 1024, "Half-resolution shadow pass halves the sun depth map");
+  assert.strictEqual(Enc({ AntiAliasing: false }).antiAliasing, 0, "Edge anti-aliasing toggle reaches the blit pass");
+  assert.ok(GlslSrc.includes("uniform int       uAntiAlias;") && WgslSrc.includes("if (uOutline.w != 0) { color = edgeAntiAlias("), "FXAA runs in both blit passes");
+  assert.strictEqual(Enc({ GiIntensity: undefined }).giIntensity, 1.25, "Missing GI intensity falls back instead of NaN");
+  assert.strictEqual(ResolveRenderSettings({ "render-settings": { FillBoost: "x" } }).FillBoost, 1.15, "Invalid fill boost falls back instead of NaN");
+  assert.strictEqual(Enc({ AoRaysPerPixel: 4 }).aoRays, 4, "AO rays honour the 4..32 slider");
+  assert.ok(WgslSrc.includes("clamp(U.uRenderCfg2.w, 1, 8)"), "WGSL reflections honour up to 8 rays");
+  assert.strictEqual(Enc({ ClipmapConeCount: 32 }).coneCount, 32, "Final gather ray count honours the slider");
+  assert.ok(WgslSrc.includes("coneSkyVisibility(pos, N, selfPrimIdx, U.uRenderCfg2.z)") && GlslSrc.includes("coneSkyVisibility(pos, N, selfPrimIdx, uGiCones)"), "GiCones drives traced sky visibility in the analytic GI");
+  assert.deepStrictEqual([CanonicalGiFieldSettings.ProbeCountX, CanonicalGiFieldSettings.ProbeCountY, CanonicalGiFieldSettings.ProbeCountZ, CanonicalGiFieldSettings.ProbeRayCount], [7, 6, 4, 64], "Probe lattice defaults (7x6x4, 64 rays)");
 }
 
 console.log(
-  "[WorldMirrorValidation] ALL 20 SUITES PASSED: C++ VoxelSdfClipmap + DynamicProbeCache GI, C++ AtmosphericSkySequence + CelestialEphemerisSolver parity, Blank ControlVehicle level, ShadowAlgorithmLab Parity (PCF/PCSS/SMRT/BVH, LTC Area Lights, Cone & 2-Bounce BVH GI, BVH Reflections, No SDF Shadows/Reflections), Sun+Moon+Starlight Illumination, Moon Atlas, Physical Sky/Clouds, RenderSettings, ControlVehicle BVH, and ProjectBrowser verified!",
+  "[WorldMirrorValidation] ALL 20 SUITES PASSED: GPU global distance field GI (persistent field, dirty-box updates, surface cache, probes, exact emitters), C++ AtmosphericSkySequence + CelestialEphemerisSolver parity, Blank ControlVehicle level, ShadowAlgorithmLab Parity (PCF/PCSS/SMRT/BVH, LTC Area Lights, Cone & 2-Bounce BVH GI, BVH Reflections, No SDF Shadows/Reflections), Sun+Moon+Starlight Illumination, Moon Atlas, Physical Sky/Clouds, RenderSettings, ControlVehicle BVH, and ProjectBrowser verified!",
 );
