@@ -2438,6 +2438,8 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
       const stCh = stmp.channels || ch;
       const stBlend = stmp.blend && stmp.blend !== "Inherit" ? stmp.blend : layer.blend;
       const hGain = stmp.heightStrength ?? 0.5;
+      const rOv = layer.kind === "decal" && stmp.roughness !== null && stmp.roughness !== undefined ? Math.round(clamp(Number(stmp.roughness), 0, 1) * 255) : -1;
+      const mOv = layer.kind === "decal" && stmp.metalness !== null && stmp.metalness !== undefined ? Math.round(clamp(Number(stmp.metalness), 0, 1) * 255) : -1;
       const wOpA = chOp("albedo"), wOpR = chOp("roughness"), wOpM = chOp("metalness"), wOpH = chOp("height");
       const extList = ALL_EXTENDED_PBR_KEYS.filter((k) => stCh[k] && chOp(k) > 0.001).map((k) => {
         if (isRgbChannelKey(k)) {
@@ -2492,8 +2494,8 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
             outA[i4 + 1] = Math.round(outA[i4 + 1] * (1 - wA) + blendChannelByte(outA[i4 + 1], Math.round(stAlb[si + 1] * tg), bA) * wA);
             outA[i4 + 2] = Math.round(outA[i4 + 2] * (1 - wA) + blendChannelByte(outA[i4 + 2], Math.round(stAlb[si + 2] * tb), bA) * wA);
           }
-          if (stCh.roughness && wR > 0.001 && st.roughness) outR[i] = Math.round(outR[i] * (1 - wR) + blendChannelByte(outR[i], st.roughness[si], chBlend("roughness")) * wR);
-          if (stCh.metalness && wM > 0.001 && st.metalness) outM[i] = Math.round(outM[i] * (1 - wM) + blendChannelByte(outM[i], st.metalness[si], chBlend("metalness")) * wM);
+          if (stCh.roughness && wR > 0.001 && (rOv >= 0 || st.roughness)) outR[i] = Math.round(outR[i] * (1 - wR) + blendChannelByte(outR[i], rOv >= 0 ? rOv : st.roughness[si], chBlend("roughness")) * wR);
+          if (stCh.metalness && wM > 0.001 && (mOv >= 0 || st.metalness)) outM[i] = Math.round(outM[i] * (1 - wM) + blendChannelByte(outM[i], mOv >= 0 ? mOv : st.metalness[si], chBlend("metalness")) * wM);
           if (stCh.height && wH > 0.001 && st.height) {
             const hByte = clamp(Math.round(128 + (st.height[si] - 128) * hGain), 0, 255);
             outH[i] = Math.round(outH[i] * (1 - wH) + blendChannelByte(outH[i], hByte, chBlend("height")) * wH);
@@ -2555,8 +2557,8 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
               outA[i4 + 1] = Math.round(outA[i4 + 1] * (1 - wA) + blendChannelByte(outA[i4 + 1], Math.round(stAlb[si + 1] * tg), bA) * wA);
               outA[i4 + 2] = Math.round(outA[i4 + 2] * (1 - wA) + blendChannelByte(outA[i4 + 2], Math.round(stAlb[si + 2] * tb), bA) * wA);
             }
-            if (stCh.roughness && wR > 0.001 && st.roughness) outR[i] = Math.round(outR[i] * (1 - wR) + blendChannelByte(outR[i], st.roughness[si], chBlend("roughness")) * wR);
-            if (stCh.metalness && wM > 0.001 && st.metalness) outM[i] = Math.round(outM[i] * (1 - wM) + blendChannelByte(outM[i], st.metalness[si], chBlend("metalness")) * wM);
+            if (stCh.roughness && wR > 0.001 && (rOv >= 0 || st.roughness)) outR[i] = Math.round(outR[i] * (1 - wR) + blendChannelByte(outR[i], rOv >= 0 ? rOv : st.roughness[si], chBlend("roughness")) * wR);
+            if (stCh.metalness && wM > 0.001 && (mOv >= 0 || st.metalness)) outM[i] = Math.round(outM[i] * (1 - wM) + blendChannelByte(outM[i], mOv >= 0 ? mOv : st.metalness[si], chBlend("metalness")) * wM);
             if (stCh.height && wH > 0.001 && st.height) {
               const hByte = clamp(Math.round(128 + (st.height[si] - 128) * hGain), 0, 255);
               outH[i] = Math.round(outH[i] * (1 - wH) + blendChannelByte(outH[i], hByte, chBlend("height")) * wH);
@@ -2709,6 +2711,31 @@ function linearToSrgb(c) {
   return v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
 }
 
+// Per-point surface values: roughness / metalness / height and any extended channel (extValues). A field left out
+// falls back to the brush when the gradient is applied (colour channels such as emissive fall back to the point colour).
+function normalizeGradientSurface(src) {
+  const out = {};
+  for (const [k, lo] of [["roughness", 0], ["metalness", 0], ["height", -1]]) {
+    if (src?.[k] !== null && src?.[k] !== undefined && src?.[k] !== "" && Number.isFinite(Number(src[k]))) out[k] = clamp(Number(src[k]), lo, 1);
+  }
+  if (src?.extValues && typeof src.extValues === "object") out.extValues = { ...src.extValues };
+  return out;
+}
+
+// Gradient whose every point (and the background) carries concrete surface values: missing ones come from `brush`.
+// Scalar extended channels are filled; colour channels stay open so they keep following each point's colour.
+export function fillPointGradientValues(input, brush = {}) {
+  const g = normalizePointGradient3D(input);
+  const scalarExt = Object.fromEntries(Object.entries(brush.extValues || {}).filter(([k, v]) => !isRgbChannelKey(k) && Number.isFinite(Number(v))));
+  const fill = (src) => ({
+    roughness: src.roughness ?? clamp(Number(brush.roughness ?? 0.34), 0, 1),
+    metalness: src.metalness ?? clamp(Number(brush.metalness ?? 0.12), 0, 1),
+    height: src.height ?? clamp(Number(brush.height ?? 0.25), -1, 1),
+    extValues: { ...scalarExt, ...(src.extValues || {}) },
+  });
+  return { ...g, backgroundSurface: fill(g.backgroundSurface), points: g.points.map((p) => ({ ...p, ...fill(p) })) };
+}
+
 /**
  * Normalize an AlloyStudio-compatible 3D object-space multi-point Gaussian gradient.
  */
@@ -2727,12 +2754,14 @@ export function normalizePointGradient3D(input) {
     color: p.color || "#e8c27a",
     radius: clamp(Number(p.radius ?? 1.1), 0.12, 3.5),
     weight: clamp(Number(p.weight ?? 1.0), 0.05, 1.0),
+    ...normalizeGradientSurface(p),
   }));
   return {
     schema: "alloy.point-gradient.v1",
     space: input?.space || "object-sphere",
     falloff: clamp(Number(input?.falloff ?? 1.0), 0.2, 3.0),
     background: input?.background || "#0b0b0b",
+    backgroundSurface: normalizeGradientSurface(input?.backgroundSurface),
     points,
   };
 }
@@ -2794,10 +2823,6 @@ export function applyPointGradient3DToLayer({ layer, cues, grad, brush, editingM
   const partFilter = layer.partFilter ?? -1;
   const op = clamp(brush?.opacity ?? 1.0, 0.05, 1.0);
   const fillCh = brush?.gradientChannels || (brush?.tool === "gradient" ? getToolChannels(brush) : brush?.fillChannels) || createDefaultChannelMap(false);
-  const roughByte = Math.round(clamp(brush?.roughness ?? 0.34, 0.02, 1) * 255);
-  const metalByte = Math.round(clamp(brush?.metalness ?? 0.12, 0, 1) * 255);
-  const heightByte = Math.round(clamp(((brush?.height ?? 0.25) * 0.5 + 0.5), 0, 1) * 255);
-
   const falloffScale = clamp(g.falloff ?? 1.0, 0.2, 3.0);
   const bgLin = hexToRgb01(g.background || "#0b0b0b").map(srgbToLinear);
   const prePts = g.points.map((pt) => {
@@ -2847,33 +2872,26 @@ export function applyPointGradient3DToLayer({ layer, cues, grad, brush, editingM
 
   const colorExtBufs = colorExtKeys.map((k) => ensureExtPixelChannel(px, k, res));
   const glowScalarBuf = fillCh.emissive || fillCh.emissiveIntensity ? ensureExtPixelChannel(px, "emissiveIntensity", res) : null;
-  const glowByte = encodeScalarChannelByte("emissiveIntensity", Number(brush?.extValues?.emissiveIntensity ?? 1.0));
   const scalarExtList = EXTENDED_PBR_KEYS
     .filter((k) => k !== "emissive" && k !== "emissiveIntensity" && !!fillCh[k])
-    .map((k) => {
-      const defVal = PAINT_PBR_CHANNELS.find((c) => c.key === k)?.default ?? 0.5;
-      const val = brush?.extValues?.[k] ?? defVal;
-      return {
-        key: k,
-        buf: ensureExtPixelChannel(px, k, res),
-        byteVal: encodeScalarChannelByte(k, Number(val)),
-      };
-    });
+    .map((k) => ({ key: k, buf: ensureExtPixelChannel(px, k, res), fallback: Number(brush?.extValues?.[k] ?? PAINT_PBR_CHANNELS.find((c) => c.key === k)?.default ?? 0.5) }));
   // If sheenColor or attenuationColor was enabled without manually enabling sheen/transmission scalar, populate visible default scalar coverage
-  if (fillCh.sheenColor && !fillCh.sheen) {
-    scalarExtList.push({
-      key: "sheen",
-      buf: ensureExtPixelChannel(px, "sheen", res),
-      byteVal: encodeScalarChannelByte("sheen", Number(brush?.extValues?.sheen || 0.85)),
-    });
-  }
-  if (fillCh.attenuationColor && !fillCh.transmission) {
-    scalarExtList.push({
-      key: "transmission",
-      buf: ensureExtPixelChannel(px, "transmission", res),
-      byteVal: encodeScalarChannelByte("transmission", Number(brush?.extValues?.transmission || 0.85)),
-    });
-  }
+  if (fillCh.sheenColor && !fillCh.sheen) scalarExtList.push({ key: "sheen", buf: ensureExtPixelChannel(px, "sheen", res), fallback: Number(brush?.extValues?.sheen || 0.85) });
+  if (fillCh.attenuationColor && !fillCh.transmission) scalarExtList.push({ key: "transmission", buf: ensureExtPixelChannel(px, "transmission", res), fallback: Number(brush?.extValues?.transmission || 0.85) });
+
+  // One surface record per point and one for the background: bytes for the scalar channels, linear RGB for colour ones.
+  const surfaceOf = (src, colourHex) => ({
+    rough: clamp(Number(src?.roughness ?? brush?.roughness ?? 0.34), 0.02, 1) * 255,
+    metal: clamp(Number(src?.metalness ?? brush?.metalness ?? 0.12), 0, 1) * 255,
+    height: clamp(Number(src?.height ?? brush?.height ?? 0.25) * 0.5 + 0.5, 0, 1) * 255,
+    glow: encodeScalarChannelByte("emissiveIntensity", Number(src?.extValues?.emissiveIntensity ?? brush?.extValues?.emissiveIntensity ?? 1.0)),
+    scalars: scalarExtList.map((se) => encodeScalarChannelByte(se.key, Number(src?.extValues?.[se.key] ?? se.fallback))),
+    colours: colorExtKeys.flatMap((k) => hexToRgb01(src?.extValues?.[k] || colourHex).map(srgbToLinear)),
+  });
+  const ptSurf = g.points.map((pt) => surfaceOf(pt, pt.color));
+  const bgSurf = surfaceOf(g.backgroundSurface, g.background || "#0b0b0b");
+  const nS = scalarExtList.length, nC = colorExtKeys.length * 3;
+  const accS = new Float64Array(nS), accC = new Float64Array(nC), outS = new Float64Array(nS), outC = new Float64Array(nC);
 
   for (let i = 0; i < n; i++) {
     if (partFilter >= 0 && cues.partAt[i] >= 0 && cues.partAt[i] !== partFilter) continue;
@@ -2883,6 +2901,8 @@ export function applyPointGradient3DToLayer({ layer, cues, grad, brush, editingM
     const lz = (cues.worldPos[i3 + 2] - cz) * invRad;
 
     let sumR = 0, sumG = 0, sumB = 0, totalW = 0, peakW = 0;
+    let sumRough = 0, sumMetal = 0, sumHeight = 0, sumGlow = 0;
+    accS.fill(0); accC.fill(0);
     for (let k = 0; k < prePts.length; k++) {
       const pt = prePts[k];
       const d2 = (lx - pt.x) ** 2 + (ly - pt.y) ** 2 + (lz - pt.z) ** 2;
@@ -2891,16 +2911,29 @@ export function applyPointGradient3DToLayer({ layer, cues, grad, brush, editingM
       sumR += pt.r * w;
       sumG += pt.g * w;
       sumB += pt.b * w;
+      const sf = ptSurf[k];
+      sumRough += sf.rough * w; sumMetal += sf.metal * w; sumHeight += sf.height * w; sumGlow += sf.glow * w;
+      for (let s = 0; s < nS; s++) accS[s] += sf.scalars[s] * w;
+      for (let c = 0; c < nC; c++) accC[c] += sf.colours[c] * w;
       totalW += w;
       if (w > peakW) peakW = w;
     }
 
     let linR = bgLin[0], linG = bgLin[1], linB = bgLin[2];
+    let roughByte = bgSurf.rough, metalByte = bgSurf.metal, heightByte = bgSurf.height, glowByte = bgSurf.glow;
+    for (let s = 0; s < nS; s++) outS[s] = bgSurf.scalars[s];
+    for (let c = 0; c < nC; c++) outC[c] = bgSurf.colours[c];
     if (totalW > 1e-4) {
-      const blend = clamp(peakW, 0, 1);
-      linR = bgLin[0] * (1 - blend) + (sumR / totalW) * blend;
-      linG = bgLin[1] * (1 - blend) + (sumG / totalW) * blend;
-      linB = bgLin[2] * (1 - blend) + (sumB / totalW) * blend;
+      const blend = clamp(peakW, 0, 1), keep = 1 - blend, inv = blend / totalW;
+      linR = bgLin[0] * keep + sumR * inv;
+      linG = bgLin[1] * keep + sumG * inv;
+      linB = bgLin[2] * keep + sumB * inv;
+      roughByte = bgSurf.rough * keep + sumRough * inv;
+      metalByte = bgSurf.metal * keep + sumMetal * inv;
+      heightByte = bgSurf.height * keep + sumHeight * inv;
+      glowByte = bgSurf.glow * keep + sumGlow * inv;
+      for (let s = 0; s < nS; s++) outS[s] = bgSurf.scalars[s] * keep + accS[s] * inv;
+      for (let c = 0; c < nC; c++) outC[c] = bgSurf.colours[c] * keep + accC[c] * inv;
     }
     const cr = Math.round(linearToSrgb(linR) * 255);
     const cg = Math.round(linearToSrgb(linG) * 255);
@@ -2918,9 +2951,10 @@ export function applyPointGradient3DToLayer({ layer, cues, grad, brush, editingM
       const oldA = cbBuf.alpha[i] / 255;
       const outA = op + oldA * (1 - op);
       if (outA > 1e-4) {
-        cbBuf.values[i3] = Math.round((cr * op + cbBuf.values[i3] * oldA * (1 - op)) / outA);
-        cbBuf.values[i3 + 1] = Math.round((cg * op + cbBuf.values[i3 + 1] * oldA * (1 - op)) / outA);
-        cbBuf.values[i3 + 2] = Math.round((cb * op + cbBuf.values[i3 + 2] * oldA * (1 - op)) / outA);
+        const er = Math.round(linearToSrgb(outC[c * 3]) * 255), eg = Math.round(linearToSrgb(outC[c * 3 + 1]) * 255), eb = Math.round(linearToSrgb(outC[c * 3 + 2]) * 255);
+        cbBuf.values[i3] = Math.round((er * op + cbBuf.values[i3] * oldA * (1 - op)) / outA);
+        cbBuf.values[i3 + 1] = Math.round((eg * op + cbBuf.values[i3 + 1] * oldA * (1 - op)) / outA);
+        cbBuf.values[i3 + 2] = Math.round((eb * op + cbBuf.values[i3 + 2] * oldA * (1 - op)) / outA);
       }
       cbBuf.alpha[i] = Math.min(255, Math.round(outA * 255));
     }
@@ -2945,9 +2979,9 @@ export function applyPointGradient3DToLayer({ layer, cues, grad, brush, editingM
     for (let s = 0; s < scalarExtList.length; s++) {
       const se = scalarExtList[s];
       const oldS = se.buf.alpha[i] / 255;
-      const outS = op + oldS * (1 - op);
-      if (outS > 1e-4) se.buf.values[i] = Math.round((se.byteVal * op + se.buf.values[i] * oldS * (1 - op)) / outS);
-      se.buf.alpha[i] = Math.min(255, Math.round(outS * 255));
+      const outSA = op + oldS * (1 - op);
+      if (outSA > 1e-4) se.buf.values[i] = Math.round((outS[s] * op + se.buf.values[i] * oldS * (1 - op)) / outSA);
+      se.buf.alpha[i] = Math.min(255, Math.round(outSA * 255));
     }
   }
   return true;

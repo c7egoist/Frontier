@@ -123,6 +123,7 @@ export function MountArtworkOutliner(Host, Hub) {
       { Act: "layer-dup", Glyph: "duplicate", Label: "Duplicate layer", Id: Sel?.id, Disabled: !Sel || SelFolder || Full },
       { Act: "layer-vis", Glyph: Sel?.visible === false ? "eye-off" : "eye", Label: Sel?.visible === false ? "Show layer" : "Hide layer", Id: Sel?.id, Disabled: !Sel },
       { Act: "layer-lock", Glyph: Sel?.locked ? "lock" : "unlock", Label: Sel?.locked ? "Unlock layer" : "Lock layer", Id: Sel?.id, Disabled: !Sel, On: !!Sel?.locked },
+      { Act: "layer-mask", Glyph: "mask", Label: Sel?.mask?.enabled ? "Remove mask" : "Add mask", Id: Sel?.id, Disabled: !Sel || SelFolder, On: !!Sel?.mask?.enabled },
       { Act: "layer-remove", Glyph: "trash", Label: "Delete layer", Id: Sel?.id, Disabled: !Sel || D.layers.length <= 1, Gap: true },
     ];
     return Shell({
@@ -173,6 +174,7 @@ export function MountArtworkOutliner(Host, Hub) {
     const Id = El.dataset.id?.replace(/^layer:/, ""), D = S.Doc;
     switch (Act) {
       case "layer-vis": { const L = A.FindLayer(D, Id); Commit(A.EditLayer(D, Id, (E) => { E.visible = E.visible === false; }), `${L.name} ${L.visible === false ? "shown" : "hidden"}`); return true; }
+      case "layer-mask": { const L = A.FindLayer(D, Id); if (L.locked) return Hub.Flash(`${L.name} is locked`), true; Commit(A.EditLayer(D, Id, (E) => { E.mask = { ...E.mask, enabled: !E.mask?.enabled }; }), `${L.name} mask ${L.mask?.enabled ? "removed" : "added"}`); return true; }
       case "layer-lock": { const L = A.FindLayer(D, Id); Commit(A.SetLocked(D, Id, !L.locked), `${L.name} ${L.locked ? "unlocked" : "locked"}`); return true; }
       case "layer-up": Commit(A.MoveLayer(D, Id, 1)); Outliner.FocusRow(`layer:${Id}`); return true;
       case "layer-down": Commit(A.MoveLayer(D, Id, -1)); Outliner.FocusRow(`layer:${Id}`); return true;

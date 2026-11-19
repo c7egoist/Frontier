@@ -265,3 +265,33 @@ Screenshots: `Experimental/TextureStudio/Screenshots/{fill-linear-scene,fill-poi
 | `CheckCardDock.mjs` | New checks: no amber border on open material rows; the material footer carries add / move / delete; the pattern footer adds a layer from its menu. |
 | Smoke: Material · Artwork · Paint · Bake | 0 errors |
 | Model checks: Material 17 · Artwork 12 · Paint 15 | 0 fails |
+
+## 10. Paint layers show their own values; gradient points have their own surface; mask in the footer
+
+### 10.1 Asks
+
+- A gradient layer has points, and each point has its own PBR values. The inspector showed wrong values: Roughness read "100 %", which was the channel opacity.
+- Text, stamp and generator layers each show the values that kind actually writes.
+- Add a mask button to the outliner footer.
+
+### 10.2 How
+
+| Piece | Change |
+| :--- | :--- |
+| `Engine/TexturePaintEngine.js` | Each gradient point (and the background, `backgroundSurface`) keeps its own `roughness`, `metalness`, `height` and `extValues`. `applyPointGradient3DToLayer` blends every channel with the same Gaussian weights as colour. Colour channels such as emissive default to the point's colour. `fillPointGradientValues(grad, brush)` fills any missing values from the brush. A decal stamp's `roughness` / `metalness`, once set, replace the values from the stamp image. |
+| `Workspaces/TexturePaintWorkspace.js` | A gradient layer is a paint layer that keeps `layer.gradient`. The gradient tool writes into the selected gradient layer, or starts a new one, so it never paints over hand-painted texels. Card edits to the points or channels rewrite the layer's texels at full strength. The viewport handles follow the selected gradient layer. `assignLayers` now also carries the stamp fields from the card (transform, tint, overrides, channels, extended values); the raster stays in the workspace. |
+| `PaintInspector/PaintModel.js` | `TypeOf(L)` reads a paint layer that has a gradient as **Gradient**, which is also a new add type. `LayerStack(L, Pick)` / `AssignLayerStack(…, Pick)` read and write values by kind: gradient → the picked point or the background; text → the text spec plus the stamp's extended values; stamp → the picked stamp (tint, roughness/metalness override, height gain); fill / material / generator → their own block; paint → no values, because the brush decides. The model also adds `AddPoint`, `RemovePoint` and `EditPoint`. |
+| `PaintInspector.js` | The Gradient points section lists each point and the background. A point row shows its colour and R/M/H values; picking it makes Channels show and edit that point's values, with a title such as "Channels · Point 2". The section also adds Add / Remove point, Radius, Strength and Falloff controls. When a channel has no value of its own, its readout says "Brush" (paint layers) or "From stamp" (stamp roughness/metalness before an override). It no longer shows the opacity in the value column. |
+| `PaintOutliner.js` | Gradient layers expand to one row per point plus the background, and picking a row picks that point. The footer gains Add / Remove mask, and the Add menu includes Gradient. |
+| `ArtworkOutliner.js` | The footer gains a mask toggle. |
+
+### 10.3 Gates
+
+| Gate | Result |
+| :--- | :--- |
+| `CheckCardDock.mjs` | **42 / 42**. New checks: a gradient layer from the footer reaches the engine with its points; point 2's roughness of 90 shows in the inspector and rewrites the texels (max byte 210); the footer mask button works; a stamp edit reaches the engine stamp with its raster kept. |
+| `CheckPaintInspector.mjs` | 17 / 0. New checks: text and stamp values; gradient per-point values, add / edit / remove, and a lossless round trip. |
+| `SmokePaintInspector` | 0 errors. New step: point rows, the per-point readout, add / remove point, and the footer mask button. |
+| `SmokeOutliners` | All suites green; the footer step now covers the mask button. |
+| Engine blend (synthetic cues) | On point A: rough 26, metal 255, emissive green (its own). On point B: rough 229, emissive blue (the point colour). Background: 128. |
+| Note | The headless viewport does not redraw after card edits, including a plain base-coat colour change, so the texel checks cover the result. |

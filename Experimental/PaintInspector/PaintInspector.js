@@ -21,7 +21,7 @@ import * as B from "./PaintModel.js";
 const Store = (() => { try { return globalThis.localStorage; } catch { return null; } })();
 
 export function Mount(Root, Options = {}) {
-  const S = { P: null, Docked: !!Options.docked, Stack: StackUi(), Folds: {}, Status: "", StatusTimer: 0, Stamp: {} };
+  const S = { P: null, Docked: !!Options.docked, Stack: StackUi(), Folds: {}, Status: "", StatusTimer: 0, Stamp: {}, Point: {} };
   const H = History();
   const Peers = new Set();
   const Notify = (Live) => { for (const Fn of Peers) Fn(Live); };
@@ -45,11 +45,14 @@ export function Mount(Root, Options = {}) {
   }
   const L = () => B.Selected(S.P);
   const Locked = () => !!L()?.locked;
+  // The gradient point (or background) / stamp whose values the Channels list shows and edits.
+  const PickOf = (Ly) => (Ly ? B.Focus(Ly, B.TypeOf(Ly) === "gradient" ? S.Point[Ly.id] : S.Stamp[Ly.id]) : null);
+  const PointLabel = (G, Id) => (Id === B.BACKGROUND ? "Background" : `Point ${G.points.findIndex((Pt) => Pt.id === Id) + 1}`);
 
   // -------------------------------------------------------------------------------------------- sections
   const LayerOptions = () => {
     const Out = [];
-    const Walk = (EnclosingId, Depth) => { for (const E of B.TopFirst(S.P, EnclosingId)) { Out.push([`${"  ".repeat(Depth)}${E.name}`, E.id, B.LAYER_TYPE[E.kind].Icon, B.LAYER_TYPE[E.kind].Label]); if (E.kind === "folder") Walk(E.id, Depth + 1); } };
+    const Walk = (EnclosingId, Depth) => { for (const E of B.TopFirst(S.P, EnclosingId)) { Out.push([`${"  ".repeat(Depth)}${E.name}`, E.id, B.LAYER_TYPE[B.TypeOf(E)].Icon, B.LAYER_TYPE[B.TypeOf(E)].Label]); if (E.kind === "folder") Walk(E.id, Depth + 1); } };
     Walk(null, 0);
     return Out;
   };
@@ -57,7 +60,7 @@ export function Mount(Root, Options = {}) {
   function StatsHtml(Ly) {
     const Stack = B.LayerStack(Ly), On = Stack.on.length;
     return StatTile({ Key: "opacity", Label: "Opacity", Value: String(Math.round(Ly.opacity * 100)), Unit: "%", Hot: true, Caption: `${Ly.blend} blend${Ly.visible ? "" : " · hidden"}`,
-        Meter: { Kind: "fill", At: Ly.opacity, Colour: B.LAYER_TONES[Ly.kind] }, Title: "Layer master opacity — every channel is scaled by it" })
+        Meter: { Kind: "fill", At: Ly.opacity, Colour: B.LAYER_TONES[B.TypeOf(Ly)] }, Title: "Layer master opacity — every channel is scaled by it" })
       + StatTile({ Key: "channels", Label: "Channels", Value: Ly.kind === "folder" ? "—" : String(On), Unit: Ly.kind === "folder" ? "" : `/ ${B.PAINT_CHANNELS.length}`,
         Caption: Ly.kind === "folder" ? "Folders group layers" : PAINT_GROUPS.filter((G) => B.PAINT_CHANNELS.some((C) => C.Group === G && Stack.on.includes(C.Id))).join(" · ") || "Nothing written",
         Meter: { Kind: "stack", Parts: PAINT_GROUPS.map((G, I) => ({ Share: B.PAINT_CHANNELS.filter((C) => C.Group === G && Stack.on.includes(C.Id)).length / B.PAINT_CHANNELS.length, Colour: ["#e8c27a", "#c9d2dc", "#cfe3ff", "#9ee6d8", "#ff7a3b"][I], Title: G })) },
@@ -70,7 +73,7 @@ export function Mount(Root, Options = {}) {
   function LayerSection(Ly) {
     const Lk = Locked();
     return `<section class="pi-section">
-      <div class="mi-section-title"><h3>Layer</h3><small>${Esc(B.LAYER_TYPE[Ly.kind].Hint.toUpperCase())}</small></div>
+      <div class="mi-section-title"><h3>Layer</h3><small>${Esc(B.LAYER_TYPE[B.TypeOf(Ly)].Hint.toUpperCase())}</small></div>
       <div class="pi-pair">
         <div class="pi-field"><span class="pi-label">Blend</span>${Dropdown("blend", B.BLENDS.map((V) => [V, V]), Ly.blend, { Label: "Layer blend", Class: "compact", Disabled: Lk, Search: false })}</div>
         <div class="pi-field"><span class="pi-label">Part</span>${Dropdown("part", B.PartOptions(S.P), Ly.partFilter, { Label: "Part filter", Class: "compact", Disabled: Lk, Search: false })}</div>
@@ -83,8 +86,27 @@ export function Mount(Root, Options = {}) {
 
   function KindSection(Ly) {
     const Lk = Locked(), Fold = (Id, Title, Small, Body, Open = true) => `<details class="mi-fold" data-fold="${Id}" ${(S.Folds[Id] ?? Open) ? "open" : ""}>
-      <summary>${icon(B.LAYER_TYPE[Ly.kind].Icon, 14)}<span>${Esc(Title)}</span><small>${Esc(Small)}</small><span class="mi-chev">${icon("chevron", 11)}</span></summary>
+      <summary>${icon(B.LAYER_TYPE[B.TypeOf(Ly)].Icon, 14)}<span>${Esc(Title)}</span><small>${Esc(Small)}</small><span class="mi-chev">${icon("chevron", 11)}</span></summary>
       <div class="mi-fold-body">${Body}</div></details>`;
+    if (B.TypeOf(Ly) === "gradient") {
+      const G = Ly.gradient, Pick = PickOf(Ly), Sel = Pick === B.BACKGROUND ? null : G.points.find((Pt) => Pt.id === Pick);
+      const Surface = (E) => `R ${Math.round((E.roughness ?? 0) * 100)} · M ${Math.round((E.metalness ?? 0) * 100)} · H ${Math.round((E.height ?? 0) * 100)}`;
+      const Row = (Id, Colour, Small) => `<button type="button" class="pi-stamp pi-point ${Id === Pick ? "active" : ""}" data-act="point-pick" data-id="${Esc(Id)}"><i style="background:${Esc(Colour)}"></i><span>${Esc(PointLabel(G, Id))}<small>${Esc(Small)}</small></span></button>`;
+      const Rows = G.points.map((Pt) => Row(Pt.id, Pt.color, `${Surface(Pt)} · ${Math.round(Pt.radius * 100)}% RADIUS`)).join("") + Row(B.BACKGROUND, G.background, `${Surface(G.backgroundSurface)} · WHERE NO POINT REACHES`);
+      return Fold("gradient", "Gradient points", `${G.points.length} POINT${G.points.length === 1 ? "" : "S"} · ${PointLabel(G, Pick).toUpperCase()}`, `
+        <p class="mi-note">Each point has its own colour and surface. Pick one: Channels below shows and edits its values. Drag points on the model with the Gradient tool.</p>
+        <div class="pi-stamps">${Rows}</div>
+        <div class="pi-point-tools">
+          <button type="button" class="mi-text-btn" data-act="point-add" ${Lk || G.points.length >= B.MAX_POINTS ? "disabled" : ""}>${icon("plus", 10)}Add point</button>
+          <button type="button" class="mi-text-btn" data-act="point-remove" ${Lk || !Sel || G.points.length <= 1 ? "disabled" : ""}>${icon("trash", 10)}Remove point</button>
+        </div>
+        <div class="mi-sub-label">${Esc(PointLabel(G, Pick))}</div>
+        <div class="pi-field"><span class="pi-label">Colour</span>${ColourField("point:color", `${PointLabel(G, Pick)} colour`, Sel ? Sel.color : G.background, "")}</div>
+        <div class="mi-knob-grid">
+          ${Sel ? Knob({ Bind: "point:radius", Label: "Radius", Value: Math.round(Sel.radius * 100), Min: 12, Max: 350, Step: 1, Unit: "%" }) + Knob({ Bind: "point:weight", Label: "Strength", Value: Math.round(Sel.weight * 100), Min: 5, Max: 100, Step: 1, Unit: "%" }) : ""}
+          ${Knob({ Bind: "gradient:falloff", Label: "Falloff", Value: Math.round(G.falloff * 100), Min: 20, Max: 300, Step: 1, Unit: "%", Hint: "Every point" })}
+        </div>`);
+    }
     switch (Ly.kind) {
       case "fill": return Fold("fill", "Fill & pattern", `${Ly.fill.color.toUpperCase()} · ${Ly.fill.patternRepeats}× REPEAT`, `
         <p class="mi-note">Colour and channel values live in Channels below — open Albedo, Roughness, … for each.</p>
@@ -135,15 +157,17 @@ export function Mount(Root, Options = {}) {
 
   function ChannelSection(Ly) {
     if (Ly.kind === "folder") return "";
-    const Stack = B.LayerStack(Ly);
+    const Pick = PickOf(Ly), Stack = B.LayerStack(Ly, Pick), Type = B.TypeOf(Ly), Values = B.QueryLayerValues(Ly);
+    // Whose values these are: the picked gradient point / stamp, or the layer itself.
+    const Owner = Type === "gradient" ? PointLabel(Ly.gradient, Pick) : (Type === "decal" || Type === "text") && Ly.stamps.length > 1 ? Ly.stamps.find((St) => St.id === Pick)?.name : "";
     return `<section class="pi-section">${ChannelStack({
-      Bind: "layer:stack", Title: "Channels", Value: Stack, Card: B.LayerCard(Ly), Ui: S.Stack, Hint: B.QueryLayerValues(Ly) ? "value · opacity · blend" : "opacity · blend",
-      Albedo: B.QueryLayerValues(Ly) ? undefined : Ly.kind === "text" ? Ly.text.color : Ly.kind === "decal" ? Ly.stamps[0]?.tint || "#ffffff" : undefined,
+      Bind: "layer:stack", Title: Owner ? `Channels · ${Owner}` : "Channels", Value: Stack, Card: B.LayerCard(Ly), Ui: S.Stack, Hint: Values ? "value · opacity · blend" : "opacity · blend",
       Readout: (C) => {
         if (!Stack.on.includes(C.Id)) return { Text: "Off", Kind: "off" };
         const P = Stack.per[C.Id], Op = P.opacity < 100 ? ` · ${P.opacity}%` : "", Bl = P.blend !== "Inherit" ? ` · ${P.blend}` : "";
         if ("value" in P) return { Text: `${C.Type === "colour" ? String(P.value).toUpperCase() : `${P.value} %`}${Op}${Bl}`, Kind: "value" };
-        return { Text: `${P.opacity} %${Bl}`, Kind: "value" };
+        if (Values) return { Text: `From stamp${Op}${Bl}`, Kind: "on" };   // decal roughness / metalness before an override
+        return { Text: `Brush${Op}${Bl}`, Kind: "on" };                     // paint layers: the brush decides
       },
     })}</section>`;
   }
@@ -167,7 +191,7 @@ export function Mount(Root, Options = {}) {
   function CardHtml() {
     const Ly = L();
     const Head = `<header class="mi-head">
-      <span class="mi-mark pi-mark" style="--c:${Ly ? B.LAYER_TONES[Ly.kind] : "#888"}">${icon(Ly ? B.LAYER_TYPE[Ly.kind].Icon : "layers", 15)}</span>
+      <span class="mi-mark pi-mark" style="--c:${Ly ? B.LAYER_TONES[B.TypeOf(Ly)] : "#888"}">${icon(Ly ? B.LAYER_TYPE[B.TypeOf(Ly)].Icon : "layers", 15)}</span>
       <div class="mi-head-title"><b>Layer Inspector</b><small>TEXTURE PAINT · ${Esc(B.MeshLabel(S.P).toUpperCase())}</small></div>
       <div class="mi-head-tools">
         <button type="button" class="icon-btn" data-act="undo" ${H.Past.length ? "" : "disabled"} title="Undo (Ctrl+Z)" aria-label="Undo">${icon("undo", 14)}</button>
@@ -182,7 +206,7 @@ export function Mount(Root, Options = {}) {
     return `<article class="mi-card pi-card ${Ly.locked ? "locked" : ""}" aria-label="Layer Inspector">
       ${Head}
       <section class="mi-ident">
-        <span class="mi-eyebrow">${Esc(B.LAYER_TYPE[Ly.kind].Label.toUpperCase())} LAYER / ${String(Index).padStart(2, "0")}${Ly.parentId ? ` · IN ${Esc(B.Layer(S.P, Ly.parentId).name.toUpperCase())}` : ""}${Ly.locked ? " · LOCKED" : ""}</span>
+        <span class="mi-eyebrow">${Esc(B.LAYER_TYPE[B.TypeOf(Ly)].Label.toUpperCase())} LAYER / ${String(Index).padStart(2, "0")}${Ly.parentId ? ` · IN ${Esc(B.Layer(S.P, Ly.parentId).name.toUpperCase())}` : ""}${Ly.locked ? " · LOCKED" : ""}</span>
         <input class="mi-name" data-act="layer-name" data-fid="layer-name" value="${Esc(Ly.name)}" maxlength="80" spellcheck="false" aria-label="Layer name">
         <div class="mi-ident-row">
           <span class="mi-sub">${Esc(Ly.blend.toUpperCase())} · ${Math.round(Ly.opacity * 100)}%${Ly.kind === "folder" ? "" : ` · ${B.LayerStack(Ly).on.length} CH`}${Ly.mask ? " · MASK" : ""}</span>
@@ -215,7 +239,10 @@ export function Mount(Root, Options = {}) {
     if (!Ly) return S.P;
     const At = ParseStackBind(Bind);
     if (Locked()) return S.P;   // a locked layer only takes visibility and the lock itself
-    if (At) return B.AssignChannelField(S.P, Ly.id, At.Ch, At.Key, Raw);
+    if (At) return B.AssignChannelField(S.P, Ly.id, At.Ch, At.Key, Raw, PickOf(Ly));
+    if (Bind === "point:color") return /^#[0-9a-f]{6}$/i.test(Raw) ? B.EditPoint(S.P, Ly.id, PickOf(Ly), { color: Raw }) : S.P;
+    if (Bind === "point:radius" || Bind === "point:weight") return B.EditPoint(S.P, Ly.id, PickOf(Ly), { [Bind.slice(6)]: +Raw / 100 });
+    if (Bind === "gradient:falloff") return B.EditPoint(S.P, Ly.id, PickOf(Ly), { falloff: +Raw / 100 });
     const [Scope, Key] = Bind.split(":");
     if (Scope === "layer" && Key === "opacity") return B.Edit(S.P, Ly.id, { opacity: Pct(Raw) });
     if (Scope === "mask" && Ly.mask) return B.Edit(S.P, Ly.id, { mask: { ...Ly.mask, opacity: Pct(Raw) } });
@@ -231,8 +258,9 @@ export function Mount(Root, Options = {}) {
   function OnStack(Act, El) {
     const Ly = L();
     if (!Ly) return;
-    const Res = StackAction(Act, El, B.LayerStack(Ly), S.Stack, B.LayerCard(Ly), { Min: 0 });
-    if (Res?.Next) { if (Locked()) return Flash("Layer is locked"); Apply(B.AssignLayerStack(S.P, Ly.id, Res.Next)); }
+    const Pick = PickOf(Ly);
+    const Res = StackAction(Act, El, B.LayerStack(Ly, Pick), S.Stack, B.LayerCard(Ly), { Min: 0 });
+    if (Res?.Next) { if (Locked()) return Flash("Layer is locked"); Apply(B.AssignLayerStack(S.P, Ly.id, Res.Next, Pick)); }
     Render();
     if (Act === "cs-open" && S.Stack.Open) Root.querySelector(`[data-fid="cs:layer:stack:${CSS.escape(S.Stack.Open)}"]`)?.focus({ preventScroll: true });
   }
@@ -257,6 +285,9 @@ export function Mount(Root, Options = {}) {
       case "gen-preset": if (!Guard()) Apply(B.Edit(S.P, Ly.id, (E) => ({ generator: { ...E.generator, preset: V } }))); break;
       case "gen-invert": if (!Guard()) Apply(B.Edit(S.P, Ly.id, (E) => ({ generator: { ...E.generator, invert: !E.generator.invert } }))); break;
       case "stamp-pick": S.Stamp[Ly.id] = El.dataset.id; break;
+      case "point-pick": S.Point[Ly.id] = El.dataset.id; break;
+      case "point-add": if (!Guard()) { const { Next, Point } = B.AddPoint(S.P, Ly.id, PickOf(Ly)); if (Point) { Apply(Next); S.Point[Ly.id] = Point; Flash("Point added · drag it on the model"); } } break;
+      case "point-remove": if (!Guard()) { const Gone = PickOf(Ly); Apply(B.RemovePoint(S.P, Ly.id, Gone)); delete S.Point[Ly.id]; Flash(`${PointLabel(Ly.gradient, Gone)} removed · Ctrl+Z restores`); } break;
       case "stamp-projection": if (!Guard()) { const Id = S.Stamp[Ly.id] || Ly.selectedStampId; Apply(B.Edit(S.P, Ly.id, (E) => ({ stamps: E.stamps.map((St) => (St.id === Id ? { ...St, projection: V } : St)) }))); } break;
       case "mask-add": if (!Guard()) { Apply(B.AssignMask(S.P, Ly.id, true)); Flash("Mask added"); } break;
       case "mask-remove": if (!Guard()) { Apply(B.AssignMask(S.P, Ly.id, false)); Flash("Mask removed · Ctrl+Z restores"); } break;
@@ -344,6 +375,8 @@ export function Mount(Root, Options = {}) {
     State: S, Model: B, History: H, Render, Apply, Settle, Flash, Step, OpenLayer,
     Subscribe(Fn) { Peers.add(Fn); return () => Peers.delete(Fn); },
     Add(Type) { const { Next, Id } = B.AddLayer(S.P, Type); Apply(Next); Render(); Flash(`${B.LAYER_TYPE[Type].Label} layer added`); return Id; },
+    Mask(Id, On) { const Ly = B.Layer(S.P, Id); if (!Ly) return false; if (Ly.locked) { Flash(`${Ly.name} is locked`); return false; } Apply(B.AssignMask(S.P, Id, On)); Render(); Flash(On ? "Mask added" : "Mask removed · Ctrl+Z restores"); return true; },
+    PickPoint(Id, Point) { S.Point[Id] = Point; Render(); },
     Duplicate(Id) { const { Next, Id: New } = B.Duplicate(S.P, Id); Apply(Next); Render(); Flash("Layer duplicated"); return New; },
     Remove(Id) { if (S.P.layers.length <= 1) return Flash("Keep at least one layer"); const Name = B.Layer(S.P, Id)?.name; Apply(B.Remove(S.P, Id)); Render(); Flash(`${Name} removed · Ctrl+Z restores`); },
     Move(Drag, Target, Where) { const Next = B.Move(S.P, Drag, Target, Where); if (Next === S.P) return false; Apply(Next); Render(); return true; },

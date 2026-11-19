@@ -11,10 +11,12 @@
 //   Layer(P, Id) · TopFirst(P, EnclosingId) · Depth(P, Id) · Descends(P, Id, OuterId)
 //   AddLayer(P, Type) → { Next, Id } · Duplicate(P, Id) → { Next, Id } · Remove(P, Id) · Move(P, Drag, Target, Where)
 //   Edit(P, Id, Patch | Fn) · Select(P, Id) · AssignMask(P, Id, On) · UseMaterial(P, Id, PresetId)
-//   LayerCard(L) · LayerStack(L) → { on, per } · AssignLayerStack(P, Id, Full) · AssignChannelField(P, Id, Ch, Key, Raw)
+//   TypeOf(L) → LAYER_TYPE id (a paint layer holding a point gradient reads as "gradient")
+//   Focus(L, Pick) → the point / stamp the values belong to · AddPoint · RemovePoint · EditPoint (gradient layers)
+//   LayerCard(L) · LayerStack(L, Pick) → { on, per } · AssignLayerStack(P, Id, Full, Pick) · AssignChannelField(P, Id, Ch, Key, Raw, Pick)
 //   Painted(P) → channel ids written by visible layers · Stats(P)
 
-import { createPaintLayer, createPaintDocument, createMaterialLayerOverridesFromPreset, PAINT_BLENDS, PAINT_MESH_PRESETS } from "../TextureStudio/Engine/TexturePaintEngine.js";
+import { createPaintLayer, createPaintDocument, createMaterialLayerOverridesFromPreset, normalizePointGradient3D, fillPointGradientValues, PAINT_BLENDS, PAINT_MESH_PRESETS } from "../TextureStudio/Engine/TexturePaintEngine.js";
 import { materials as MATERIALS } from "../TextureStudio/Engine/Materials/materials.js";
 import { PAINT_CHANNELS, PAINT_CHANNEL, FromEngine, ToEngine, AssignStackField } from "../MaterialInspector/ChannelStack.js";
 
@@ -30,10 +32,13 @@ export const LAYER_TYPES = Object.freeze([
   { Id: "decal", Label: "Stamp", Icon: "stamp", Hint: "Decal stamps placed on the surface" },
   { Id: "text", Label: "Text", Icon: "text", Hint: "Lettering stamped into the texture" },
   { Id: "generator", Label: "Generator", Icon: "noise", Hint: "Procedural wear, dirt and dust" },
+  { Id: "gradient", Label: "Gradient", Icon: "gradient", Hint: "Placed points, each with its own surface" },
   { Id: "folder", Label: "Folder", Icon: "folder", Hint: "Groups layers" },
 ]);
 export const LAYER_TYPE = Object.freeze(Object.fromEntries(LAYER_TYPES.map((K) => [K.Id, K])));
-export const LAYER_TONES = Object.freeze({ paint: "#ff6b9a", fill: "#4d9bff", material: "#46d267", decal: "#36d3c4", text: "#f08cff", generator: "#ffb238", folder: "#9aa4b2" });
+export const LAYER_TONES = Object.freeze({ paint: "#ff6b9a", fill: "#4d9bff", material: "#46d267", decal: "#36d3c4", text: "#f08cff", generator: "#ffb238", gradient: "#b58cff", folder: "#9aa4b2" });
+// A gradient layer is an engine paint layer that keeps its point gradient; everything else is its engine kind.
+export const TypeOf = (L) => (L?.kind === "paint" && L.gradient ? "gradient" : L?.kind);
 export const BLENDS = Object.freeze([...PAINT_BLENDS]);
 export const CHANNEL_BLENDS = Object.freeze(["Inherit", ...PAINT_BLENDS]);
 export const GENERATORS = Object.freeze([["Edge wear", "edge-wear"], ["Crevice dirt", "crevice-dirt"], ["Top dust", "top-dust"], ["Grunge", "triplanar-grunge"]]);
@@ -65,8 +70,56 @@ function Rehydrate(L) {
     Layer.channelOpacity[C.Id] = Clamp(Num(Layer.channelOpacity[C.Id], 1), 0, 1);
     if (!CHANNEL_BLENDS.includes(Layer.channelBlends[C.Id])) Layer.channelBlends[C.Id] = "Inherit";
   }
+  if (L.gradient && Layer.kind === "paint") Layer.gradient = GradientOf(L.gradient, Layer.extValues);
   if (Layer.mask) Layer.mask = { opacity: Clamp(Num(Layer.mask.opacity, 1), 0, 1), invert: !!Layer.mask.invert, enabled: Layer.mask.enabled !== false, preset: MASK_PRESETS.some(([, V]) => V === Layer.mask.preset) ? Layer.mask.preset : "none" };
   return Layer;
+}
+
+// ------------------------------------------------------------------------------------------------ gradient layers
+// Surface values for points the card has not seen filled (the workspace fills new points from the brush).
+const GRADIENT_DEFAULTS = Object.freeze({ roughness: 0.34, metalness: 0.12, height: 0.25, extValues: {} });
+const GradientOf = (Raw, Ext = {}) => fillPointGradientValues(Raw, { ...GRADIENT_DEFAULTS, extValues: Ext });
+export const BACKGROUND = "background";
+export const MAX_POINTS = 12;
+function StarterGradient() {
+  const G = normalizePointGradient3D();
+  const Looks = [{ roughness: 0.22, metalness: 0.85, height: 0.2 }, { roughness: 0.72, metalness: 0, height: -0.1 }];
+  return GradientOf({ ...G, backgroundSurface: { roughness: 0.5, metalness: 0, height: 0 }, points: G.points.map((Pt, I) => ({ ...Pt, ...(Looks[I] || {}) })) });
+}
+const Entry = (G, Pick) => (Pick === BACKGROUND ? { id: BACKGROUND, color: G.background, ...G.backgroundSurface } : G.points.find((Pt) => Pt.id === Pick) || G.points[0] || { id: BACKGROUND, color: G.background, ...G.backgroundSurface });
+// The gradient entry or stamp the inspector's values belong to (Pick is the card's choice, kept per layer).
+export function Focus(L, Pick) {
+  if (TypeOf(L) === "gradient") return Entry(L.gradient, Pick).id;
+  if (L?.kind === "decal" || L?.kind === "text") return (L.stamps.find((St) => St.id === Pick) || L.stamps.find((St) => St.id === L.selectedStampId) || L.stamps[0])?.id || null;
+  return null;
+}
+const WriteEntry = (G, Pick, Fn) => {
+  if (Pick === BACKGROUND) { const Next = Fn({ color: G.background, ...G.backgroundSurface }); const { color, ...Surface } = Next; return { ...G, background: color, backgroundSurface: Surface }; }
+  return { ...G, points: G.points.map((Pt) => (Pt.id === Pick ? Fn(Pt) : Pt)) };
+};
+export function EditPoint(P, Id, Pick, Patch) {
+  const L = Layer(P, Id);
+  if (!L?.gradient) return P;
+  const Clean = { ...Patch };
+  if ("radius" in Clean) Clean.radius = Clamp(Num(Clean.radius, 1.1), 0.12, 3.5);
+  if ("weight" in Clean) Clean.weight = Clamp(Num(Clean.weight, 1), 0.05, 1);
+  if ("falloff" in Clean) return Edit(P, Id, { gradient: { ...L.gradient, falloff: Clamp(Num(Clean.falloff, 1), 0.2, 3) } });
+  return Edit(P, Id, { gradient: WriteEntry(L.gradient, Pick, (E) => ({ ...E, ...Clean })) });
+}
+// A new point copies the picked one, mirrored across the object so it lands somewhere visible.
+export function AddPoint(P, Id, Pick) {
+  const L = Layer(P, Id), G = L?.gradient;
+  if (!G || G.points.length >= MAX_POINTS) return { Next: P, Point: null };
+  const From = G.points.find((Pt) => Pt.id === Pick) || G.points.at(-1);
+  let N = G.points.length + 1;
+  while (G.points.some((Pt) => Pt.id === `gp_${N}`)) N++;
+  const Point = { ...structuredClone(From || G.points[0] || {}), id: `gp_${N}`, position: From ? From.position.map((V, I) => (I === 1 ? V : -V)) : [0, 0.6, 0.6] };
+  return { Next: Edit(P, Id, { gradient: { ...G, points: [...G.points, Point] } }), Point: Point.id };
+}
+export function RemovePoint(P, Id, Pick) {
+  const L = Layer(P, Id), G = L?.gradient;
+  if (!G || G.points.length <= 1 || Pick === BACKGROUND) return P;
+  return Edit(P, Id, { gradient: { ...G, points: G.points.filter((Pt) => Pt.id !== Pick) } });
 }
 
 export function Normalise(Raw) {
@@ -133,7 +186,9 @@ export const Rename = (P, Id, Name) => Edit(P, Id, { name: String(Name).replace(
 export function AddLayer(P, Type) {
   const Sel = Selected(P);
   const EnclosingId = Sel?.kind === "folder" ? Sel.id : Sel?.parentId || null;
-  const New = Rehydrate(createPaintLayer(Type, { res: RES, parentId: EnclosingId }));
+  const New = Type === "gradient"
+    ? Rehydrate({ ...createPaintLayer("paint", { res: RES, parentId: EnclosingId, name: "Gradient Layer" }), gradient: StarterGradient() })
+    : Rehydrate(createPaintLayer(Type, { res: RES, parentId: EnclosingId }));
   const At = Sel ? P.layers.indexOf(Sel) + 1 : P.layers.length;
   const Layers = [...P.layers];
   Layers.splice(At, 0, New);
@@ -182,63 +237,139 @@ export function UseMaterial(P, Id, PresetId) {
 }
 
 // ------------------------------------------------------------------------------------------------ channels
-// Where a kind keeps its per-channel values: fill / material / generator hold colour + roughness / metalness / height +
-// the extended values in their own block (the engine spreads createDefaultExtendedValues into each).  Paint layers keep
-// texels; stamps and text take their values from the stamp — those kinds expose opacity and blend per channel only.
+// Where each kind keeps the values its channels write:
+//   fill / material / generator → their own block (colour + roughness / metalness / height + extended values),
+//   gradient → the picked point (or the background): every point has its own colour and surface values,
+//   text → the text spec (colour, roughness, metalness, height; the raster is rebuilt) + the stamp's extended values,
+//   stamp (decal) → the picked stamp: tint, roughness / metalness overrides (unset = the stamp image), height gain,
+//   paint → texels; the brush decides what a stroke writes, so the layer shows opacity and blend only.
 const VALUE_HOME = { fill: "fill", material: "material", generator: "generator" };
-export const QueryLayerValues = (L) => !!VALUE_HOME[L?.kind];
-const ReadValue = (L, Ch) => { const H = L[VALUE_HOME[L.kind]]; return Ch === "albedo" ? H.color : H[Ch]; };
+export const QueryLayerValues = (L) => !!L && (!!VALUE_HOME[L.kind] || ["gradient", "text", "decal"].includes(TypeOf(L)));
+const COLOUR = (Ch) => PAINT_CHANNEL[Ch]?.Type === "colour";
+const Stamp = (L, Pick) => L.stamps.find((St) => St.id === Focus(L, Pick)) || null;
 
+function ReadValue(L, Ch, Pick) {
+  const Type = TypeOf(L);
+  if (VALUE_HOME[L.kind]) { const H = L[VALUE_HOME[L.kind]]; return Ch === "albedo" ? H.color : H[Ch]; }
+  if (Type === "gradient") {
+    const E = Entry(L.gradient, Focus(L, Pick));
+    if (Ch === "albedo") return E.color;
+    if (Ch in E && Ch !== "extValues") return E[Ch];
+    return E.extValues?.[Ch] ?? (COLOUR(Ch) ? E.color : L.extValues?.[Ch]);
+  }
+  const St = Stamp(L, Pick);
+  if (Type === "text") {
+    if (Ch === "albedo" || Ch === "roughness" || Ch === "metalness" || Ch === "height") return L.text[Ch === "albedo" ? "color" : Ch];
+    return St?.extValues?.[Ch] ?? L.extValues?.[Ch];
+  }
+  if (Type === "decal") {
+    if (!St) return undefined;
+    if (Ch === "albedo") return St.tint;
+    if (Ch === "roughness" || Ch === "metalness") return St[Ch] ?? undefined;   // unset: the stamp image decides
+    if (Ch === "height") return St.heightStrength;
+    return St.extValues?.[Ch] ?? L.extValues?.[Ch];
+  }
+  return undefined;
+}
+
+const NOTES = {
+  paint: "Painted texels live in the layer; the brush decides what each stroke writes. This layer sets how much of each channel shows.",
+  gradient: "Values belong to the picked point (or the background). Points blend into each other in every channel, colour and surface alike.",
+  text: "Colour, roughness, metalness and height style the lettering; the other channels set what the text writes.",
+  decal: "Values belong to the picked stamp. Roughness and metalness follow the stamp image until you set them here.",
+};
 export function LayerCard(L) {
   const Value = QueryLayerValues(L) ? [
     { K: "value", L: "Value", T: "slider", For: ["scalar"], Def: (Ch) => Ch.Def },
     { K: "value", L: "Colour", T: "colour", For: ["colour"], Def: (Ch) => Ch.Def },
   ] : [];
+  const Note = NOTES[TypeOf(L)];
   return [
     ...Value,
     { K: "opacity", L: "Channel opacity", T: "slider", Def: 100, Hint: "Scales this channel only" },
     { K: "blend", L: "Channel blend", T: "select", Opts: CHANNEL_BLENDS, Def: "Inherit", Hint: "Inherit uses the layer blend" },
-    ...(L?.kind === "paint" ? [{ K: "note", T: "note", Text: "Painted texels live in the layer; the brush decides what is written (Brush page → Materials)." }] : []),
-    ...(L?.kind === "decal" || L?.kind === "text" ? [{ K: "note", T: "note", Text: "Values come from the stamp; this sets how much of it lands in the channel." }] : []),
+    ...(Note ? [{ K: "note", T: "note", Text: Note }] : []),
   ];
 }
 
-export function LayerStack(L) {
+export function LayerStack(L, Pick) {
+  const Values = QueryLayerValues(L);
   return {
     on: PAINT_CHANNELS.filter((C) => L.channels[C.Id]).map((C) => C.Id),
-    per: Object.fromEntries(PAINT_CHANNELS.map((C) => [C.Id, {
-      ...(QueryLayerValues(L) ? { value: FromEngine(C.Id, ReadValue(L, C.Id) ?? ToEngine(C.Id, C.Def)) } : {}),
-      opacity: Math.round(L.channelOpacity[C.Id] * 100), blend: L.channelBlends[C.Id],
-    }])),
+    per: Object.fromEntries(PAINT_CHANNELS.map((C) => {
+      const Raw = Values ? ReadValue(L, C.Id, Pick) : undefined;
+      const Value = Raw === undefined || Raw === null ? (Values && TypeOf(L) !== "decal" ? FromEngine(C.Id, ToEngine(C.Id, C.Def)) : undefined) : FromEngine(C.Id, Raw);
+      return [C.Id, { ...(Value !== undefined ? { value: COLOUR(C.Id) ? Value : Math.round(Value) } : {}), opacity: Math.round(L.channelOpacity[C.Id] * 100), blend: L.channelBlends[C.Id] }];
+    })),
   };
 }
 
-export function AssignLayerStack(P, Id, Full) {
+const SURFACE = ["roughness", "metalness", "height"];
+export function AssignLayerStack(P, Id, Full, Pick) {
   return Edit(P, Id, (L) => {
+    const Channels = Object.fromEntries(PAINT_CHANNELS.map((C) => [C.Id, Full.on.includes(C.Id)]));
     const Patch = {
-      channels: Object.fromEntries(PAINT_CHANNELS.map((C) => [C.Id, Full.on.includes(C.Id)])),
+      channels: Channels,
       channelOpacity: Object.fromEntries(PAINT_CHANNELS.map((C) => [C.Id, Clamp(Num(Full.per[C.Id]?.opacity, 100), 0, 100) / 100])),
       channelBlends: Object.fromEntries(PAINT_CHANNELS.map((C) => [C.Id, CHANNEL_BLENDS.includes(Full.per[C.Id]?.blend) ? Full.per[C.Id].blend : "Inherit"])),
     };
-    if (QueryLayerValues(L)) {
+    if (!QueryLayerValues(L)) return Patch;
+    const Before = LayerStack(L, Pick).per;
+    // Only values that changed are written, so an untouched decal roughness stays "from the stamp image".
+    const Changed = PAINT_CHANNELS.filter((C) => Full.per[C.Id]?.value !== undefined && Full.per[C.Id].value !== Before[C.Id]?.value);
+    const Engine = (C) => (COLOUR(C.Id) ? Full.per[C.Id].value : ToEngine(C.Id, Full.per[C.Id].value));
+    const Type = TypeOf(L);
+    if (VALUE_HOME[L.kind]) {
       const Home = VALUE_HOME[L.kind], Block = { ...L[Home] }, Ext = { ...L.extValues };
-      for (const C of PAINT_CHANNELS) {
-        const V = Full.per[C.Id]?.value;
-        if (V === undefined) continue;
-        if (C.Id === "albedo") Block.color = V;
-        else { Block[C.Id] = ToEngine(C.Id, V); if (C.Id in Ext) Ext[C.Id] = Block[C.Id]; }
+      for (const C of Changed) {
+        if (C.Id === "albedo") Block.color = Engine(C);
+        else { Block[C.Id] = Engine(C); if (C.Id in Ext) Ext[C.Id] = Block[C.Id]; }
       }
       Patch[Home] = Block;
       if (L.kind === "material") Patch.extValues = Ext;
+    } else if (Type === "gradient") {
+      Patch.gradient = WriteEntry(L.gradient, Focus(L, Pick), (E) => {
+        const Next = { ...E, extValues: { ...(E.extValues || {}) } };
+        for (const C of Changed) {
+          if (C.Id === "albedo") Next.color = Engine(C);
+          else if (SURFACE.includes(C.Id)) Next[C.Id] = Engine(C);
+          else Next.extValues[C.Id] = Engine(C);
+        }
+        return Next;
+      });
+    } else if (Type === "text") {
+      const Text = { ...L.text }, Ext = {};
+      for (const C of Changed) {
+        if (C.Id === "albedo") Text.color = Engine(C);
+        else if (SURFACE.includes(C.Id)) Text[C.Id] = Engine(C);
+        else Ext[C.Id] = Engine(C);
+      }
+      const Restyled = JSON.stringify(Text) !== JSON.stringify(L.text);
+      Patch.text = Text;
+      Patch.stamps = L.stamps.map((St) => ({ ...St, channels: { ...Channels }, extValues: { ...(St.extValues || {}), ...Ext }, ...(Restyled ? { text: { ...(St.text || L.text), ...Text }, stampData: null } : {}) }));
+    } else if (Type === "decal") {
+      const Target = Focus(L, Pick);
+      Patch.stamps = L.stamps.map((St) => {
+        const Next = { ...St, channels: { ...Channels } };
+        if (St.id !== Target) return Next;
+        Next.extValues = { ...(St.extValues || {}) };
+        for (const C of Changed) {
+          if (C.Id === "albedo") Next.tint = Engine(C);
+          else if (C.Id === "roughness" || C.Id === "metalness") Next[C.Id] = Engine(C);
+          else if (C.Id === "height") Next.heightStrength = Clamp(Engine(C), -1, 1);
+          else Next.extValues[C.Id] = Engine(C);
+        }
+        return Next;
+      });
     }
     return Patch;
   });
 }
 
-export function AssignChannelField(P, Id, Ch, Key, Raw) {
+export function AssignChannelField(P, Id, Ch, Key, Raw, Pick) {
   const L = Layer(P, Id);
   if (!L || !PAINT_CHANNEL[Ch]) return P;
-  return AssignLayerStack(P, Id, AssignStackField(LayerStack(L), Ch, Key, Raw, LayerCard(L)));
+  return AssignLayerStack(P, Id, AssignStackField(LayerStack(L, Pick), Ch, Key, Raw, LayerCard(L)), Pick);
 }
 
 // ------------------------------------------------------------------------------------------------ statistics

@@ -409,6 +409,41 @@ try {
   });
   Check("paint · layer channel rows open side by side", R.Ids.length === 2 && R.Ids.every((Id) => R.Open.includes(Id)), JSON.stringify(R));
 
+  // ------------------------------------------------------------------------------------------ gradient / stamp layers
+  R = await Run(async () => {
+    const T = window.__frontierTextureStudio, Card = T.card("paint"), Api = T.workspaceApi(), M = Card.Model, Wait = (Ms) => new Promise((Ok) => setTimeout(Ok, Ms));
+    const Id = Card.Add("gradient");
+    await Wait(500);
+    const Fresh = Api.currentDocument().layers.find((L) => L.id === Id);
+    const Second = Card.State.P.layers.find((L) => L.id === Id).gradient.points[1].id;
+    Card.PickPoint(Id, Second);
+    Card.Apply(M.AssignChannelField(Card.State.P, Id, "roughness", "value", "90", Second)); Card.Render();
+    await Wait(600);
+    const Layer = Api.currentDocument().layers.find((L) => L.id === Id);
+    let Rough = -1; for (const V of Layer?.pixels?.roughness || []) if (V > Rough) Rough = V;
+    const Readout = document.querySelector('.cd-paint .cs-row[data-row="roughness"] .mi-readout')?.textContent || "";
+    const PointRows = document.querySelectorAll(`.cd-paint-outliner [data-row^="point:${Id}:"]`).length;
+    // footer mask button
+    document.querySelector('.cd-paint-outliner .ol-actions [data-act="layer-mask"]')?.click();
+    await Wait(400);
+    const Masked = !!Api.currentDocument().layers.find((L) => L.id === Id)?.mask;
+    // stamp layer: a card edit to the stamp reaches the engine's stamp, raster kept
+    if (!Card.State.P.layers.some((L) => L.kind === "decal")) { Card.Add("decal"); await Wait(500); }
+    const Decal = Card.State.P.layers.find((L) => L.kind === "decal");
+    let StampScale = null, Raster = null;
+    if (Decal) {
+      const St = Decal.stamps[0];
+      Card.Apply(M.Edit(Card.State.P, Decal.id, (E) => ({ stamps: E.stamps.map((X) => (X.id === St.id ? { ...X, scale: 0.61, tint: "#33aa55" } : X)) }))); Card.Render();
+      await Wait(400);
+      const Es = Api.currentDocument().layers.find((L) => L.id === Decal.id)?.stamps.find((X) => X.id === St.id);
+      StampScale = Es?.scale; Raster = !!Es?.stampData || Es?.stampData === St.stampData;
+    }
+    return { Kind: Fresh?.kind, Gradient: !!Fresh?.gradient, Point2: Layer?.gradient?.points?.[1]?.roughness, Rough, Readout, PointRows, Masked, StampScale, Raster };
+  });
+  Check("paint · gradient layer from the footer reaches the engine with its points", R.Kind === "paint" && R.Gradient && R.PointRows >= 3, JSON.stringify(R));
+  Check("paint · a gradient point's own roughness shows in the inspector and rewrites the texels", Math.abs(R.Point2 - 0.9) < 1e-6 && R.Readout.startsWith("90") && R.Rough >= 200, JSON.stringify(R));
+  Check("paint · footer mask button adds a mask; stamp edits reach the engine stamp", R.Masked && Math.abs(R.StampScale - 0.61) < 1e-6, JSON.stringify(R));
+
   // ------------------------------------------------------------------------------------------ remount
   await Switch("material");
   R = await Run(() => ({ Cards: document.querySelectorAll(".cd-material").length, Menu: document.querySelectorAll(".cd-brush-menu").length, Hidden: document.querySelector(".cd-brush-menu").hidden }));

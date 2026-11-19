@@ -62,6 +62,7 @@ import {
   normalizePointGradient3D,
   evaluatePointGradient3DAt,
   applyPointGradient3DToLayer,
+  fillPointGradientValues,
 } from "../Engine/TexturePaintEngine.js";
 import { GpuPaintSession } from "../Engine/GpuPaintEngine.js";
 import { createLayerStackPanel } from "./LayerStackKit.js";
@@ -708,6 +709,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   let shiftStrokeAnchor2D = null;
   let isShiftHeld = false;
   let activeGradientPointDrag = null;
+  let gradientLayerShown = null;
   let activeCurvePointDrag = -1;
   let smoothedHit3D = null;
   let smoothedUv2D = null;
@@ -2399,20 +2401,24 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     return committed;
   }
 
+  // A gradient layer is a paint layer that keeps its point gradient (layer.gradient): every point carries its own colour
+  // and surface values, and the Layer Inspector edits them.  The gradient tool writes into the selected gradient layer, or
+  // starts a new one above the selection, so it never paints over hand-painted texels.
   function applyPointGradient3D({ pushUndo = true, autoCreate = true } = {}) {
     if (!meshCues) return false;
     let layer = getActiveLayer();
-    if (!state.doc.editingMask && (!layer || layer.kind !== "paint")) {
+    if (!state.doc.editingMask && (!layer || layer.kind !== "paint" || !layer.gradient)) {
       if (!autoCreate) return false;
-      layer = state.doc.layers.find((l) => l.kind === "paint" && l.name === "3D Gradient Layer");
-      if (!layer) {
-        layer = createPaintLayer("paint", { res, name: "3D Gradient Layer" });
-        state.doc.layers.push(layer);
-      }
+      const at = layer ? state.doc.layers.indexOf(layer) + 1 : state.doc.layers.length;
+      const enclosing = layer?.kind === "folder" ? layer.id : layer?.parentId || null;
+      layer = createPaintLayer("paint", { res, name: "Gradient Layer", parentId: enclosing });
+      if (gpuPaint.isActive) gpuPaint.syncCpuPixelsToLayerGpu(layer);
+      state.doc.layers.splice(at, 0, layer);
       state.doc.selectedLayerId = layer.id;
-      renderLeftColumn();
+      gradientLayerShown = layer.id;
     }
     if (!layer || layer.locked) return false;
+    if (!state.doc.editingMask) state.pointGradient3D = fillPointGradientValues(state.pointGradient3D, state.brush);
     const snap = pushUndo ? snapshotSelectedLayer() : null;
     const ok = applyPointGradient3DToLayer({
       layer,
@@ -2421,6 +2427,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       brush: state.brush,
       editingMask: state.doc.editingMask,
     });
+    if (ok && !state.doc.editingMask) layer.gradient = structuredClone(state.pointGradient3D);
     if (ok) {
       if (gpuPaint.isActive) {
         if (state.doc.editingMask) gpuPaint.syncMaskCpuToGpu(layer);
@@ -3878,6 +3885,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       skipDefaultStamp: src.kind === "text" && !!(src.stamps?.length),
     });
     if (src.pixels) copy.pixels = clonePixels(src.pixels);
+    if (src.gradient) copy.gradient = structuredClone(src.gradient);
     if (src.stamps?.length) {
       copy.stamps = src.stamps.map((s) => ({
         ...s,
@@ -3905,6 +3913,27 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     return copy;
   }
 
+  // Rewrites a gradient layer's texels from its own points at full strength (the card edited the points or channels).
+  function regenerateGradientLayer(layer) {
+    if (!meshCues || !layer?.gradient || !layer.pixels) return false;
+    const ok = applyPointGradient3DToLayer({
+      layer, cues: meshCues, grad: layer.gradient,
+      brush: { ...state.brush, tool: "gradient", opacity: 1, gradientChannels: { ...layer.channels } },
+    });
+    if (ok && gpuPaint.isActive) gpuPaint.syncCpuPixelsToLayerGpu(layer);
+    if (ok) invalidateLayerThumb(layer.id);
+    return ok;
+  }
+  // The viewport's gradient handles follow the selected gradient layer (gradientLayerShown, declared with the drag state).
+  function showSelectedGradient(force = false) {
+    const layer = getActiveLayer();
+    if (!layer?.gradient || (!force && gradientLayerShown === layer.id)) { if (!layer?.gradient) gradientLayerShown = null; return; }
+    gradientLayerShown = layer.id;
+    state.pointGradient3D = structuredClone(layer.gradient);
+    if (!state.pointGradient3D.points.some((p) => p.id === state.selectedGradientPointId)) state.selectedGradientPointId = state.pointGradient3D.points[0]?.id || "";
+    rebuildGradient3DHandles();
+  }
+
   // CardDock: the Layer Inspector / Paint Outliner cards hear about every layer change the workspace makes; a document the
   // card pushes in (assignLayers) is not echoed back.
   const layerListeners = new Set();
@@ -3919,20 +3948,38 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   // holds keeps its pixels, mask texels and stamp rasters and takes the card's properties; a new id is built at full
   // resolution; a missing id is removed; the order follows the card.
   const CARD_LAYER_KEYS = ["name", "parentId", "visible", "locked", "blend", "opacity", "partFilter", "channels", "channelOpacity", "channelBlends", "extValues", "fill", "material", "generator"];
+  // Stamp instance fields the card edits (the raster, stampData, stays here).
+  const CARD_STAMP_KEYS = ["name", "visible", "projection", "u", "v", "anchorPos", "anchorNormal", "scale", "scaleX", "scaleY", "rotation", "opacity", "blend", "heightStrength", "tint", "roughness", "metalness", "channels", "extValues"];
   function assignLayers(next) {
     if (disposed || !next || !Array.isArray(next.layers) || !next.layers.length) return false;
     const held = new Map(state.doc.layers.map((l) => [l.id, l]));
     const layers = [];
+    const regenerate = [];
     for (const src of next.layers) {
       let layer = held.get(src.id);
       if (!layer || layer.kind !== src.kind) {
         layer = createPaintLayer(src.kind, { ...src, res, pixels: undefined, mask: undefined, stamps: src.kind === "decal" || src.kind === "text" ? src.stamps : undefined });
         layer.id = src.id;
         if (gpuPaint.isActive && layer.pixels) gpuPaint.syncCpuPixelsToLayerGpu(layer);
+        if (src.gradient && layer.kind === "paint") { layer.gradient = structuredClone(src.gradient); regenerate.push(layer); }
       } else {
+        const channelsBefore = JSON.stringify(layer.channels);
         for (const key of CARD_LAYER_KEYS) {
           if (src[key] === undefined) continue;
           layer[key] = src[key] && typeof src[key] === "object" ? structuredClone(src[key]) : src[key];
+        }
+        if (src.gradient && layer.kind === "paint" && (JSON.stringify(src.gradient) !== JSON.stringify(layer.gradient || null) || (layer.gradient && JSON.stringify(layer.channels) !== channelsBefore))) {
+          layer.gradient = structuredClone(src.gradient);
+          regenerate.push(layer);
+        }
+        if (Array.isArray(src.stamps) && Array.isArray(layer.stamps)) {
+          const cardStamps = new Map(src.stamps.map((st) => [st.id, st]));
+          for (const st of layer.stamps) {
+            const from = cardStamps.get(st.id);
+            if (!from) continue;
+            for (const key of CARD_STAMP_KEYS) if (from[key] !== undefined) st[key] = from[key] && typeof from[key] === "object" ? structuredClone(from[key]) : from[key];
+          }
+          if (src.selectedStampId && layer.stamps.some((st) => st.id === src.selectedStampId)) layer.selectedStampId = src.selectedStampId;
         }
         if (layer.kind === "text" && src.text && JSON.stringify(src.text) !== JSON.stringify(layer.text)) {
           layer.text = structuredClone(src.text);
@@ -3958,6 +4005,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       state.doc.layers = layers;
       if (next.name) state.doc.name = next.name;
       state.doc.selectedLayerId = layers.some((l) => l.id === next.selectedLayerId) ? next.selectedLayerId : layers.at(-1).id;
+      for (const layer of regenerate) regenerateGradientLayer(layer);
+      if (regenerate.some((l) => l.id === state.doc.selectedLayerId)) showSelectedGradient(true);
       invalidateAllLayerThumbs();
       renderLeftColumn();
       refreshComposite();
@@ -3970,6 +4019,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
   function renderLeftColumn() {
     announceLayers();
+    showSelectedGradient();
     const meshLabel = PAINT_MESH_LIST.find((m) => m.id === state.meshId)?.label || state.meshId;
 
     layerStackUI.render({

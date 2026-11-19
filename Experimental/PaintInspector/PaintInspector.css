@@ -38,3 +38,6 @@
 .ol-row.locked .ol-tools { display: flex; }
 .ol-row.locked .ol-tool { color: var(--amber); }
 .pi-add .mi-dd.compact > .mi-dd-btn { min-width: 74px; }
+
+/* gradient layers: point list tools */
+.pi-point-tools { display: flex; gap: 8px; justify-content: flex-end; margin: 6px 0 2px; }

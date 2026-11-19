@@ -94,10 +94,31 @@ await step("outliner select + add every type", async () => {
   expect(sel().name === "Base Ceramic Coat" && q(".mi-name", Card).value === "Base Ceramic Coat", "select from outliner");
   for (const T of B.LAYER_TYPES) {
     const n = St.P.layers.length; pick("layer-add", T.Id, Tree);
-    expect(St.P.layers.length === n + 1 && sel().kind === T.Id, `add ${T.Id}`);
+    expect(St.P.layers.length === n + 1 && B.TypeOf(sel()) === T.Id, `add ${T.Id}`);
   }
   for (let i = 0; i < B.LAYER_TYPES.length; i++) key("z", { ctrlKey: true });
   expect(St.P.layers.length === 6, `undo adds (${St.P.layers.length})`);
+});
+
+await step("gradient layer: point rows, per-point values in the inspector, add / remove point, mask from the footer", async () => {
+  pick("layer-add", "gradient", Tree);
+  const L = sel();
+  expect(B.TypeOf(L) === "gradient", "gradient added");
+  const PointRows = qa(`[data-row^="point:${L.id}:"]`, Tree);
+  expect(PointRows.length === L.gradient.points.length + 1, `point rows ${PointRows.length}`);
+  click(PointRows[1]); await sleep(20);
+  expect(q(".cs-stack h3, .cs-stack .mi-section-title h3", Card)?.textContent.includes("Point 2"), "channels title names the point");
+  const Rough = q('.cs-row[data-row="roughness"] .mi-readout', Card)?.textContent || "";
+  expect(Rough.startsWith(`${Math.round(L.gradient.points[1].roughness * 100)} %`), `roughness readout ${Rough}`);
+  click(q('[data-act="point-add"]', Card)); await sleep(20);
+  expect(sel().gradient.points.length === 3, "point added");
+  click(q('[data-act="point-remove"]', Card)); await sleep(20);
+  expect(sel().gradient.points.length === 2, "point removed");
+  click(q('.ol-actions [data-act="layer-mask"]', Tree)); await sleep(20);
+  expect(!!sel().mask, "mask added from the footer");
+  click(q('.ol-actions [data-act="layer-mask"]', Tree)); await sleep(20);
+  expect(!sel().mask, "mask removed from the footer");
+  for (let i = 0; i < 5; i++) key("z", { ctrlKey: true });
 });
 
 await step("eye, lock and the lock guard", async () => {

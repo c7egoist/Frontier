@@ -54,8 +54,9 @@ await Check("every layer type adds through createPaintLayer with all 22 engine k
   for (const T of B.LAYER_TYPES) {
     const R = B.AddLayer(P, T.Id); P = R.Next;
     const L = B.Layer(P, R.Id);
-    Expect(L && L.kind === T.Id && P.selectedLayerId === R.Id, `${T.Id} added + selected`);
-    Expect(Object.keys(L).sort().join() === Keys, `${T.Id} keys`);
+    Expect(L && B.TypeOf(L) === T.Id && P.selectedLayerId === R.Id, `${T.Id} added + selected`);
+    // a gradient layer is an engine paint layer plus its point gradient
+    Expect(Object.keys(L).filter((K) => K !== "gradient").sort().join() === Keys && (T.Id === "gradient") === !!L.gradient, `${T.Id} keys`);
   }
   return `${B.LAYER_TYPES.length} types`;
 });
@@ -95,14 +96,53 @@ await Check("channel stack view ↔ engine fields (scalars ×100, colours verbat
   Expect(B.LayerStack(B.Layer(T, Id)).on.join() === "albedo,emissive", "switches");
 });
 
-await Check("stack-only layer types expose opacity + blend, no values", () => {
+await Check("paint layers expose opacity + blend only (the brush decides values)", () => {
   const P = B.Create();
-  for (const L of P.layers.filter((E) => ["paint", "decal", "text"].includes(E.kind))) {
+  for (const L of P.layers.filter((E) => E.kind === "paint" && !E.gradient)) {
     Expect(!B.QueryLayerValues(L), `${L.kind} values`);
     const Keys = CS.CardFields(B.LayerCard(L), CS.PAINT_CHANNEL.roughness).map((F) => F.K);
     Expect(!Keys.includes("value") && Keys.includes("opacity") && Keys.includes("blend"), `${L.kind} card ${Keys}`);
     Expect(!("value" in B.LayerStack(L).per.albedo), `${L.kind} stack value`);
   }
+});
+
+await Check("text and stamp layers show their own values; edits land in the text spec / the picked stamp", () => {
+  let P = B.Create();
+  const T = P.layers.find((E) => E.kind === "text"), D = P.layers.find((E) => E.kind === "decal");
+  Expect(B.QueryLayerValues(T) && B.LayerStack(T).per.roughness.value === Math.round(T.text.roughness * 100) && B.LayerStack(T).per.albedo.value === T.text.color, "text reads the text spec");
+  P = B.AssignChannelField(P, T.id, "metalness", "value", "64");
+  const T2 = B.Layer(P, T.id);
+  Expect(T2.text.metalness === 0.64 && T2.stamps.every((St) => St.text.metalness === 0.64), "text metalness → spec + stamps");
+  Expect(B.LayerStack(D).per.albedo.value === D.stamps[0].tint && !("value" in B.LayerStack(D).per.roughness), "stamp: tint, roughness from the image");
+  P = B.AssignChannelField(P, D.id, "roughness", "value", "40");
+  const D2 = B.Layer(P, D.id);
+  Expect(D2.stamps[0].roughness === 0.4 && D2.stamps[0].metalness === null, "stamp roughness override only");
+  P = B.AssignChannelField(P, D.id, "emissive", "on", false);
+  return "text + stamp";
+});
+
+await Check("gradient layers: every point (and the background) has its own surface values", () => {
+  let P = B.Create();
+  const { Next, Id } = B.AddLayer(P, "gradient"); P = Next;
+  const L = B.Layer(P, Id), [A, Bp] = L.gradient.points;
+  Expect(L.kind === "paint" && B.TypeOf(L) === "gradient", "paint layer + gradient");
+  Expect(B.LayerStack(L, A.id).per.metalness.value === Math.round(A.metalness * 100) && B.LayerStack(L, Bp.id).per.metalness.value === Math.round(Bp.metalness * 100) && A.metalness !== Bp.metalness, "per-point values");
+  Expect(B.LayerStack(L, B.BACKGROUND).per.albedo.value === L.gradient.background, "background entry");
+  P = B.AssignChannelField(P, Id, "roughness", "value", "81", Bp.id);
+  let G = B.Layer(P, Id).gradient;
+  Expect(G.points[1].roughness === 0.81 && G.points[0].roughness === A.roughness, "edit lands on the picked point only");
+  P = B.AssignChannelField(P, Id, "emissive", "value", "#00ff88", B.BACKGROUND);
+  Expect(B.Layer(P, Id).gradient.backgroundSurface.extValues.emissive === "#00ff88", "background extended value");
+  const Add = B.AddPoint(P, Id, A.id); P = Add.Next;
+  G = B.Layer(P, Id).gradient;
+  Expect(G.points.length === 3 && G.points[2].metalness === A.metalness, "added point copies the picked one");
+  P = B.EditPoint(P, Id, Add.Point, { radius: 2, color: "#123456" });
+  P = B.RemovePoint(P, Id, A.id);
+  G = B.Layer(P, Id).gradient;
+  Expect(G.points.length === 2 && G.points[1].radius === 2 && G.points[1].color === "#123456", "edit + remove");
+  const Back = B.Normalise(JSON.parse(B.Export(P)));
+  Expect(JSON.stringify(B.Layer(Back, Id).gradient) === JSON.stringify(G), "round trip keeps the gradient");
+  return `${G.points.length} points`;
 });
 
 await Check("duplicate gets a fresh id and sits above the source", () => {

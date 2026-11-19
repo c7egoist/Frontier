@@ -210,11 +210,11 @@ if (q(".ol-actions")) await step("footer action bar: add from its menu, move, du
   expect(!q(".ol-act-menu"), "menu closes after a pick");
   expect(Count() === Rows + 1, `a layer was added (${Rows} → ${Count()})`);
   const Done = [];
-  for (const A of ["layer-up", "layer-down", "layer-dup", "layer-vis", "layer-eye", "layer-toggle", "layer-lock"]) {
+  for (const A of ["layer-up", "layer-down", "layer-dup", "layer-vis", "layer-eye", "layer-toggle", "layer-lock", "layer-mask"]) {
     const B = qa(`.ol-actions [data-act="${A}"]`).find((E) => !E.disabled);
     if (!B) continue;
     click(B); await sleep(20); Done.push(A);
-    if (/vis|eye|toggle|lock/.test(A)) { const Again = qa(`.ol-actions [data-act="${A}"]`).find((E) => !E.disabled); if (Again) { click(Again); await sleep(20); } }
+    if (/vis|eye|toggle|lock|mask/.test(A)) { const Again = qa(`.ol-actions [data-act="${A}"]`).find((E) => !E.disabled); if (Again) { click(Again); await sleep(20); } }
   }
   const Del = qa('.ol-actions [data-act="layer-remove"]').find((E) => !E.disabled);
   if (Del) { const N = Count(); click(Del); await sleep(20); expect(Count() === N - 1, "delete removes the selected layer"); Done.push("layer-remove"); }
