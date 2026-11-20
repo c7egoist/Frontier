@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>World Inspector · Frontier</title>
+<link rel="stylesheet" href="../MaterialInspector/MaterialInspector.css">
+<link rel="stylesheet" href="./WorldInspector.css">
+</head>
+<body class="pz-scope">
+<!-- World Mirror environment + object inspector cards, cards only (no viewport).  ?card=sun|atmosphere|clouds|moon|stars|
+     flare|post|camera|wind|fog|weather|object|light|group shows one card; no parameter shows them all. -->
+<main class="wi-dock" id="World"></main>
+<script type="module">
+  import { Mount } from "./WorldInspector.js";
+  Mount(document.getElementById("World")).then((Api) => { globalThis.WorldInspector = Api; }).catch((Err) => {
+    document.getElementById("World").innerHTML = `<p class="mi-empty">World Inspector failed to start: ${String(Err.message || Err).replace(/[<>&]/g, "")}</p>`;
+    console.error(Err);
+  });
+</script>
+</body>
+</html>
