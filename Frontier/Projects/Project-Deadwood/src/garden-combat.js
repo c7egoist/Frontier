@@ -1,0 +1,14 @@
+import {wallContact,moveInMaze,trapPose} from './garden-level.js';
+export const HUNT={warning:.78,eruption:1.04,lock:.32,bite:1.25,end:2.8,reach:8.5,radius:3.1,slots:2,grace:2.2};
+export function clearSight(a,b,walls){const n=Math.max(1,Math.ceil(Math.hypot(a.x-b.x,a.z-b.z)/.65));for(let i=1;i<=n;i++){const t=i/n;if(wallContact(a.x+(b.x-a.x)*t,a.z+(b.z-a.z)*t,walls,.25))return false;}return true;}
+export function shouldHunt(p,car,walls){const distance=Math.hypot(p.x-car.x,p.z-car.z);if(distance>25||!clearSight(p,car,walls))return false;const lead={x:car.x+car.vx*.7,z:car.z+car.vz*.7};return distance<13.5||Math.hypot(p.x-lead.x,p.z-lead.z)<15;}
+export function aimHunt(p,car,walls){let dx=car.x+car.vx*.60-p.x,dz=car.z+car.vz*.60-p.z;const d=Math.hypot(dx,dz),scale=d>HUNT.reach?HUNT.reach/d:1;return moveInMaze(p.x,p.z,dx*scale,dz*scale,walls,1.8);}
+export function huntMouth(p,age){const aim=p.aim||p;let reach=age<.78?0:age<1.30?Math.min(1,(age-.78)/.52):age<1.92?1:Math.max(0,1-(age-1.92)/.88);reach=reach*reach*(3-2*reach);return{x:p.x+(aim.x-p.x)*reach,z:p.z+(aim.z-p.z)*reach};}
+export function sweptBite(p,age,car,previous,walls){if(!trapPose(age,p.buried).danger)return false;const now=huntMouth(p,age),old=p.previousMouth||now,n=Math.max(1,Math.ceil((Math.hypot(now.x-old.x,now.z-old.z)+Math.hypot(car.x-previous.x,car.z-previous.z))/.55));for(let i=0;i<=n;i++){const t=i/n,m={x:old.x+(now.x-old.x)*t,z:old.z+(now.z-old.z)*t},c={x:previous.x+(car.x-previous.x)*t,z:previous.z+(car.z-previous.z)*t};if(Math.hypot(c.x-m.x,c.z-m.z)<HUNT.radius&&clearSight(m,c,walls))return true;}return false;}
+export function chooseHunters(plants,car,walls,time,delay){if(time<HUNT.grace||delay>0)return[];const active=plants.filter(p=>p.age>=0&&p.age<HUNT.end).length;if(active>=HUNT.slots)return[];return plants.filter(p=>p.age<0&&p.cooldown<=0&&shouldHunt(p,car,walls)).sort((a,b)=>Math.hypot(a.x-car.x,a.z-car.z)-Math.hypot(b.x-car.x,b.z-car.z)).slice(0,1);}
+// A concealed hunter can travel underground, but its new eruption site must be
+// on navigable soil, preferentially ahead of the driver, and never through a hedge.
+export function burrowSite(car,random,walls){for(let i=0;i<14;i++){const angle=car.yaw+(random()-.5)*(i<8?2.5:Math.PI*2),distance=8+random()*3.5,point={x:car.x+Math.sin(angle)*distance+car.vx*.12,z:car.z+Math.cos(angle)*distance+car.vz*.12};if(!wallContact(point.x,point.z,walls,1.2)&&clearSight(point,car,walls))return point;}return null;}
+// Consume elapsed render time in small simulation slices. A slow render must not
+// turn fast plants into slow-motion plants; a long stall is capped at 250 ms.
+export function advanceGarden(garden,elapsed,keys){const dt=Math.max(0,Math.min(elapsed,.25)),steps=Math.max(1,Math.ceil(dt/(1/60)));let state;for(let i=0;i<steps;i++)state=garden.update(dt/steps,keys,i===steps-1);return state;}
