@@ -242,7 +242,7 @@ ControlContact ConstructDirectiveSheet(
             SheetBounds.Width - 2.0f * ControlMetrics::DropdownPaddingX,
             34.0f,
         };
-        const bool Hover = ControlAppearance::QueryPointerOver(Row, Pointer);
+        const bool Hover = !Entry.Disabled && ControlAppearance::QueryPointerOver(Row, Pointer);
         if (Hover)
         {
             Contact.Hovered = true;
@@ -281,21 +281,35 @@ ControlContact ConstructDirectiveSheet(
                 Row.X + PadX,
                 Row.Y + (Row.Height - 14.0f) * 0.5f,
                 14.0f,
-                (Entry.Destructive ? Colors.Danger : (Hover || Entry.Selected ? Colors.Text : Colors.TextDim)).Faded(Opacity),
+                (Entry.Disabled
+                     ? Colors.TextFaint
+                     : (Entry.Destructive ? Colors.Danger : (Hover || Entry.Selected ? Colors.Text : Colors.TextDim))).Faded(Opacity),
                 Entry.LeadingIcon,
                 1.7f);
             PadX += 20.0f;
         }
 
-        const ColorQuad LabelTone = Entry.Destructive
-                                        ? Colors.Danger
-                                        : ((Entry.Selected || Hover) ? Colors.Text : Colors.Text.Faded(0.76f));
-        ControlAppearance::TextLeading(Surface, Row, PadX, LabelTone.Faded(Opacity), Entry.Label, 12.5f);
+        const ColorQuad LabelTone = Entry.Disabled
+                                        ? Colors.TextFaint
+                                        : (Entry.Destructive
+                                               ? Colors.Danger
+                                               : ((Entry.Selected || Hover) ? Colors.Text : Colors.Text.Faded(0.76f)));
+        ControlAppearance::TextLeading(
+            Surface,
+            Row,
+            PadX,
+            LabelTone.Faded(Entry.Disabled ? 0.62f * Opacity : Opacity),
+            Entry.Label,
+            12.5f);
 
         if (Entry.ShortcutHint != nullptr && Entry.ShortcutHint[0] != '\0')
         {
             const Rectangle2D HintBounds{ Row.X, Row.Y, Row.Width - 12.0f, Row.Height };
-            Surface.TextRightAligned(HintBounds, 10.5f, Colors.TextFaint.Faded(Opacity).ToRgba8(), Entry.ShortcutHint);
+            Surface.TextRightAligned(
+                HintBounds,
+                10.5f,
+                Colors.TextFaint.Faded(Entry.Disabled ? 0.42f * Opacity : Opacity).ToRgba8(),
+                Entry.ShortcutHint);
         }
         else if (Entry.Selected)
         {

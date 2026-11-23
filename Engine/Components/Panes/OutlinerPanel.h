@@ -32,6 +32,17 @@ enum class OutlinerTitleVariant : uint8_t
     LayerStack = 1, // [-] - Ordered compositing LayerStack heading
 };
 
+enum class OutlinerWorldSubject : uint8_t
+{
+    None       = 0, // [-] - Authored row with no world-specification owner
+    Atmosphere = 1, // [-] - Rayleigh/Mie/Ozone sky dome and aerial medium
+    Sun        = 2, // [-] - Solar directional source and direct disc
+    Moons      = 3, // [-] - Lunar disc slot
+    Stars      = 4, // [-] - Nocturnal procedural starfield
+    Clouds     = 5, // [-] - Volumetric planetary cloud deck
+    LocalCloud = 6, // [-] - Bounded local cloud volume in world meters
+};
+
 enum class OutlinerVisibilityFilter : uint8_t
 {
     All         = 0, // [-] - Show both visible and hidden entries
@@ -87,6 +98,7 @@ struct OutlinerConstructTemplate
     std::string          CategoryTitle {};                                           // [-] - Inspector breadcrumb category label
     std::string           DefaultDetail {};                                         // [-] - Secondary row summary caption
     ConstructSlotCategory Category      = ConstructSlotCategory::GeometryVolume;    // [-] - Visual icon and filter category
+    OutlinerWorldSubject  Subject       = OutlinerWorldSubject::None;               // [-] - World specification owner activated on construction
 };
 
 struct OutlinerRecordEntry
@@ -114,6 +126,8 @@ struct OutlinerRecordEntry
     bool                 DynamicMotion     = false;                                    // [-]  - Dynamic simulation switch
     bool                 CastShadows       = true;                                     // [-]  - Shadow caster capability switch
     std::string          MotionTagText     {};                                         // [-]  - Optional compact motion indicator
+    OutlinerWorldSubject Subject           = OutlinerWorldSubject::None;               // [-]  - World specification owner bound to this row
+    bool                 Permanent         = false;                                    // [-]  - Row refuses rename, visibility, and removal directives
 };
 
 struct OutlinerVisibleRow

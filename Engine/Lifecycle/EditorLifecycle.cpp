@@ -174,6 +174,21 @@ bool EditorLifecycle::Initialize(const EditorStartupConfiguration& Configuration
         Templates.push_back({ "Add Torus Geometry",    "Torus Specimen",    "Geometry", "Torus · OpenPBR Surface",    ConstructSlotCategory::GeometryVolume   });
         Templates.push_back({ "Add Area Light",        "Area Quad Light",   "Lighting", "LTC Polygonal Quad Light",   ConstructSlotCategory::PointLuminaire   });
         Templates.push_back({ "Add Scene Camera",      "Scene Camera",      "Camera",   "Perspective Optical Camera", ConstructSlotCategory::OpticsCamera     });
+
+        // World subjects: each constructs one single-instance sky subsystem row inside the World collection
+        Templates.push_back({ "Add Atmosphere", "Atmosphere", "World", "Rayleigh · Mie · Ozone sky dome", ConstructSlotCategory::LayerGroup,
+                              OutlinerWorldSubject::Atmosphere });
+        Templates.push_back({ "Add Sun",        "Sun",        "World", "Solar ephemeris & direct disc",    ConstructSlotCategory::LayerGroup,
+                              OutlinerWorldSubject::Sun });
+        Templates.push_back({ "Add Moons",      "Moon",       "World", "Lunar disc · 29.53 d phase",       ConstructSlotCategory::LayerGroup,
+                              OutlinerWorldSubject::Moons });
+        Templates.push_back({ "Add Stars",      "Stars",      "World", "Limiting 5.5 mag · scintillation", ConstructSlotCategory::LayerGroup,
+                              OutlinerWorldSubject::Stars });
+        Templates.push_back({ "Add Clouds",     "Volumetric Clouds", "World", "Cumulus · 34% cover · 1.40 km floor", ConstructSlotCategory::LayerGroup,
+                              OutlinerWorldSubject::Clouds });
+        Templates.push_back({ "Add Local Cloud", "Local Cloud", "World", "Bounded 3D cloud box · 200x200x100 m", ConstructSlotCategory::LayerGroup,
+                              OutlinerWorldSubject::LocalCloud });
+
         Templates.push_back({ "Generate Apocalyptic City Level", "Apocalyptic City Level", "WorldGenerator", "Procedural Ruined Warzone Racing Level", ConstructSlotCategory::LayerGroup });
         Panes->Outliner.ConfigureConstructTemplates(std::move(Templates));
 
@@ -447,6 +462,13 @@ void EditorLifecycle::PopulateWorldSceneSession(uint32_t RenderWidthPx, uint32_t
                         RefreshShowcaseViewportRaster();
                         return;
                     }
+                    if (Tpl.Subject != OutlinerWorldSubject::None)
+                    {
+                        // World subjects are authored as Outliner rows; the live sync adopts them into the world specification
+                        (void)ActivePanes->Outliner.ConstructFromTemplate(static_cast<uint32_t>(TemplateIndex));
+                        RefreshShowcaseViewportRaster();
+                        return;
+                    }
                     const std::string_view Title = Tpl.DefaultTitle.empty() ? std::string_view(Tpl.DropdownLabel) : std::string_view(Tpl.DefaultTitle);
                     (void)GeometricRaster::ConstructShowcaseModelInOutliner(
                         ActivePanes->Outliner,
@@ -627,6 +649,7 @@ void EditorLifecycle::SynchronizeShowcaseGizmoAnchor() noexcept
         Entry->Category == ConstructSlotCategory::Folder ||
         Entry->Token == ShowcaseBundle->EditorCameraToken ||
         Entry->Token == ShowcaseBundle->SunEmitterToken ||
+        Entry->Subject != OutlinerWorldSubject::None ||
         Entry->Locked)
     {
         LastGizmoSlot = {};
@@ -659,7 +682,8 @@ void EditorLifecycle::FrameShowcaseCameraSelection() noexcept
     if (Entry != nullptr &&
         Entry->Category != ConstructSlotCategory::Folder &&
         Entry->Token != ShowcaseBundle->EditorCameraToken &&
-        Entry->Token != ShowcaseBundle->SunEmitterToken)
+        Entry->Token != ShowcaseBundle->SunEmitterToken &&
+        Entry->Subject == OutlinerWorldSubject::None)
     {
         const Mathematics::Axis3D TargetPos{ Entry->PositionX, Entry->PositionY, Entry->PositionZ };
         const float MaxExtent = std::max(0.45f, std::max({ std::fabs(Entry->ScaleX), std::fabs(Entry->ScaleY), std::fabs(Entry->ScaleZ) }));

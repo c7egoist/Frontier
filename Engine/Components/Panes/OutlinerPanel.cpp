@@ -61,6 +61,23 @@ namespace
     return false;
 }
 
+//------------------------------------------------------------------------------------------------------------------------
+//                                                   DIRECTIVE ROUTING
+//------------------------------------------------------------------------------------------------------------------------
+
+enum class OutlinerRowDirective : uint8_t
+{
+    None             = 0, // [-] - Row carries no executable directive (caption or unsupported action)
+    Rename           = 1, // [-] - Rename the targeted row (native rename editing not yet ported)
+    ToggleVisibility = 2, // [-] - Flip the direct visibility switch of the targeted row
+    Inspect          = 3, // [-] - Select the targeted row so the Inspector shows it
+    ToggleFracture   = 4, // [-] - Flip fracture simulation on the targeted geometry row (not yet ported)
+    Duplicate        = 5, // [-] - Clone the targeted row inside its enclosure
+    Remove           = 6, // [-] - Delete the targeted row and every row nested under it
+    ConstructFirst   = 7, // [-] - Construct the first configured template (root sheet only)
+    ConstructFolder  = 8, // [-] - Construct an empty folder (root sheet only)
+};
+
 } // namespace
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -163,6 +180,7 @@ OutlinerSlotToken OutlinerPanel::ConstructFromTemplate(uint32_t TemplateIndex, O
     Created.Token             = OutlinerSlotToken{ NextTokenCounter++ };
     Created.EnclosingToken    = (FindEntry(TargetEnclosure) != nullptr) ? TargetEnclosure : OutlinerSlotToken{};
     Created.Category          = Preset.Category;
+    Created.Subject           = Preset.Subject;
     Created.Title             = GenerateUniqueTitle(Preset.DefaultTitle);
     Created.CategoryLabel     = Preset.CategoryTitle;
     Created.Subtitle          = Preset.DefaultDetail;
@@ -1686,25 +1704,60 @@ void OutlinerPanel::Render(
     {
         OutlinerRecordEntry* TargetEntry   = AccessEntry(DirectiveTargetToken);
         const bool           TargetPresent = (TargetEntry != nullptr);
-        const bool           Nested        = TargetPresent && TargetEntry->EnclosingToken.Valid();
 
+        // ⑦ HTML row sheet parity: title caption, Rename, Hide/Show, Inspect in workspace, fracture, Duplicate, Remove.
+        // Directives whose native owner is not ported yet stay visible but greyed (Disabled) instead of being invented.
         std::vector<DropdownDirectiveEntry> DirectiveRows{};
+        std::vector<OutlinerRowDirective>   RowDirectives{};
+        DirectiveRows.reserve(8u);
+        RowDirectives.reserve(8u);
+        auto AppendDirective = [&](DropdownDirectiveEntry Row, OutlinerRowDirective Directive) noexcept
+        {
+            DirectiveRows.push_back(Row);
+            RowDirectives.push_back(Directive);
+        };
+
         if (TargetPresent)
         {
-            DirectiveRows.push_back({ "Inspect", "Enter", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, false });
-            DirectiveRows.push_back({ TargetEntry->VisibilityEnabled ? "Hide" : "Show", "H", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, false });
-            DirectiveRows.push_back({ "Duplicate", "Ctrl+D", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, false });
-            DirectiveRows.push_back({ "Group in Folder", "Ctrl+G", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, false });
-            if (Nested)
+            const bool PermanentRow = TargetEntry->Permanent;
+            AppendDirective(
+                { TargetEntry->Title.c_str(), "", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, true, false },
+                OutlinerRowDirective::None);
+            AppendDirective(
+                { "Rename", "F2", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, false, true },
+                OutlinerRowDirective::Rename);
+            AppendDirective(
+                { TargetEntry->VisibilityEnabled ? "Hide" : "Show", "H", { 0u, 0u, 0u, 0u }, ControlIcon::Count,
+                  false, false, false, false, PermanentRow },
+                OutlinerRowDirective::ToggleVisibility);
+            AppendDirective(
+                { "Inspect in workspace", "Enter", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, false, false },
+                OutlinerRowDirective::Inspect);
+            if (TargetEntry->Category == ConstructSlotCategory::GeometryVolume)
             {
-                DirectiveRows.push_back({ "Move to Root", "", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, false });
+                AppendDirective(
+                    { "Enable fracture", "", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, false, true },
+                    OutlinerRowDirective::ToggleFracture);
             }
-            DirectiveRows.push_back({ "Delete", "Del", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, true, true, false });
+            AppendDirective(
+                { "Duplicate", "Ctrl+D", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, false, false },
+                OutlinerRowDirective::Duplicate);
+            if (TargetEntry->Category != ConstructSlotCategory::Folder)
+            {
+                AppendDirective(
+                    { "Remove from scene", "Del", { 0u, 0u, 0u, 0u }, ControlIcon::Count,
+                      false, true, true, false, PermanentRow },
+                    OutlinerRowDirective::Remove);
+            }
         }
         else
         {
-            DirectiveRows.push_back({ "Add Item 1", "", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, false });
-            DirectiveRows.push_back({ "+ Add Folder", "Ctrl+G", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, false });
+            AppendDirective(
+                { "Add Item 1", "", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, false, false },
+                OutlinerRowDirective::ConstructFirst);
+            AppendDirective(
+                { "+ Add Folder", "Ctrl+G", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, false, false },
+                OutlinerRowDirective::ConstructFolder);
         }
 
         const float       SheetW   = 222.0f;
@@ -1717,49 +1770,55 @@ void OutlinerPanel::Render(
         };
 
         int32_t ChosenRow = -1;
-        if (DropdownSelector::ConstructDirectiveSheet(ActiveOverlay, Sheet, DirectiveRows, Input.PrimaryPointer, ChosenRow).Clicked && ChosenRow >= 0)
+        if (DropdownSelector::ConstructDirectiveSheet(ActiveOverlay, Sheet, DirectiveRows, Input.PrimaryPointer, ChosenRow).Clicked &&
+            ChosenRow >= 0 &&
+            static_cast<std::size_t>(ChosenRow) < RowDirectives.size())
         {
-            if (TargetPresent)
+            const OutlinerSlotToken TargetToken = TargetPresent ? TargetEntry->Token : OutlinerSlotToken{};
+            switch (RowDirectives[static_cast<std::size_t>(ChosenRow)])
             {
-                if (ChosenRow == 0)
-                {
-                    SelectSingle(TargetEntry->Token);
-                }
-                else if (ChosenRow == 1)
-                {
-                    TargetEntry->VisibilityEnabled = !TargetEntry->VisibilityEnabled;
-                }
-                else if (ChosenRow == 2)
-                {
-                    DuplicateSlot(TargetEntry->Token);
-                }
-                else if (ChosenRow == 3)
-                {
-                    GroupSelectionIntoFolder("Folder");
-                }
-                else if (Nested && ChosenRow == 4)
-                {
-                    AttachToEnclosure(TargetEntry->Token, OutlinerSlotToken{});
-                }
-                else
-                {
-                    if (SelectedTokens.size() > 1u && QuerySlotSelected(TargetEntry->Token))
+                case OutlinerRowDirective::ToggleVisibility:
+                    if (TargetPresent && !TargetEntry->Permanent)
                     {
-                        DeleteSelection();
+                        TargetEntry->VisibilityEnabled = !TargetEntry->VisibilityEnabled;
                     }
-                    else
+                    break;
+
+                case OutlinerRowDirective::Inspect:
+                    SelectSingle(TargetToken);
+                    break;
+
+                case OutlinerRowDirective::Duplicate:
+                    (void)DuplicateSlot(TargetToken);
+                    break;
+
+                case OutlinerRowDirective::Remove:
+                    if (TargetPresent && !TargetEntry->Permanent)
                     {
-                        DeleteSlot(TargetEntry->Token);
+                        if (SelectedTokens.size() > 1u && QuerySlotSelected(TargetToken))
+                        {
+                            (void)DeleteSelection();
+                        }
+                        else
+                        {
+                            (void)DeleteSlot(TargetToken);
+                        }
                     }
-                }
-            }
-            else if (ChosenRow == 0)
-            {
-                ConstructFromTemplate(0u);
-            }
-            else if (ChosenRow == 1)
-            {
-                ConstructFolder("Folder");
+                    break;
+
+                case OutlinerRowDirective::ConstructFirst:
+                    (void)ConstructFromTemplate(0u);
+                    break;
+
+                case OutlinerRowDirective::ConstructFolder:
+                    (void)ConstructFolder("Folder");
+                    break;
+
+                case OutlinerRowDirective::None:
+                case OutlinerRowDirective::Rename:
+                case OutlinerRowDirective::ToggleFracture:
+                default:
+                    break;
             }
             DirectiveSheetOpen = false;
         }

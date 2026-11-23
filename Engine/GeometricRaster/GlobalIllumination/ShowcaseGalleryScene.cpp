@@ -1307,6 +1307,278 @@ void BuildVehicleClearSkyDefaultScene(
     OutBundle.EditorCamera.ViewportHeightPx   = std::max(1u, ViewportHeightPx);
 }
 
+namespace
+{
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                              WORLD SUBJECT ROUTING
+//------------------------------------------------------------------------------------------------------------------------
+
+constexpr std::size_t WorldSubjectSlotCount = 7u; // [count] - Ordinal range of OutlinerWorldSubject (None .. LocalCloud)
+
+[[nodiscard]] constexpr std::size_t WorldSubjectOrdinal(OutlinerWorldSubject Subject) noexcept
+{
+    return static_cast<std::size_t>(Subject);
+}
+
+// Solar irradiance applied while the Sun row is authored into the world (zero once the row is removed)
+[[nodiscard]] Mathematics::LinearRGB QuerySolarIrradiance(bool PresenceEnabled) noexcept
+{
+    return PresenceEnabled ? Mathematics::LinearRGB{ 5.40f, 5.10f, 4.65f } : Mathematics::LinearRGB{ 0.0f, 0.0f, 0.0f };
+}
+
+// Authoritative Outliner token slot for one single-instance world subsystem (nullptr for OutlinerWorldSubject::None)
+[[nodiscard]] OutlinerSlotToken* AccessWorldSubjectToken(
+    ShowcaseWorldSceneBundle& InOutBundle,
+    OutlinerWorldSubject      Subject) noexcept
+{
+    switch (Subject)
+    {
+        case OutlinerWorldSubject::Atmosphere:
+            return &InOutBundle.AtmosphereToken;
+        case OutlinerWorldSubject::Sun:
+            return &InOutBundle.SunEmitterToken;
+        case OutlinerWorldSubject::Moons:
+            return &InOutBundle.MoonBodyToken;
+        case OutlinerWorldSubject::Stars:
+            return &InOutBundle.StarfieldToken;
+        case OutlinerWorldSubject::Clouds:
+            return &InOutBundle.VolumetricCloudsToken;
+        case OutlinerWorldSubject::LocalCloud:
+            return &InOutBundle.LocalCloudToken;
+        case OutlinerWorldSubject::None:
+            break;
+    }
+    return nullptr;
+}
+
+// Enables or retires the physical world specification owned by one world subject row
+void AssignWorldSubjectPresence(
+    ShowcaseWorldSceneBundle& InOutBundle,
+    OutlinerWorldSubject      Subject,
+    bool                      PresenceEnabled) noexcept
+{
+    WorldAtmosphereConfiguration& Atmosphere = InOutBundle.Scene.Atmosphere;
+
+    switch (Subject)
+    {
+        case OutlinerWorldSubject::Atmosphere:
+            Atmosphere.Medium.AtmosphereEnabled = PresenceEnabled;
+            break;
+
+        case OutlinerWorldSubject::Sun:
+            InOutBundle.Scene.Sun.SolarIrradiance = QuerySolarIrradiance(PresenceEnabled);
+            Atmosphere.Solar.SolarEnabled         = PresenceEnabled;
+            break;
+
+        case OutlinerWorldSubject::Moons:
+            Atmosphere.Moons[0].Visible = PresenceEnabled;
+            break;
+
+        case OutlinerWorldSubject::Stars:
+            Atmosphere.Stars.StarfieldEnabled = PresenceEnabled;
+            break;
+
+        case OutlinerWorldSubject::Clouds:
+            Atmosphere.Clouds.CloudsEnabled             = PresenceEnabled;
+            Atmosphere.Clouds.CloudShadow.ShadowEnabled = PresenceEnabled;
+            break;
+
+        case OutlinerWorldSubject::LocalCloud:
+            Atmosphere.LocalCloud.LocalEnabled = PresenceEnabled;
+            break;
+
+        case OutlinerWorldSubject::None:
+            break;
+    }
+}
+
+// World collection folder that receives every constructed world subject row
+[[nodiscard]] OutlinerSlotToken EnsureWorldFolderToken(
+    OutlinerPanel&            TargetOutliner,
+    ShowcaseWorldSceneBundle& InOutBundle)
+{
+    if (InOutBundle.WorldFolderToken.Valid() && TargetOutliner.FindEntry(InOutBundle.WorldFolderToken) != nullptr)
+    {
+        return InOutBundle.WorldFolderToken;
+    }
+
+    InOutBundle.WorldFolderToken = TargetOutliner.ConstructFolder("World");
+    if (OutlinerRecordEntry* Folder = TargetOutliner.AccessEntry(InOutBundle.WorldFolderToken))
+    {
+        Folder->FolderTint  = WorkspaceSurfaceColors::ShowcaseWarmGold;
+        Folder->Subtitle    = "Atmosphere, Sun, Moons, Stars & Volumetric Clouds";
+        Folder->AuthorNotes = "Physical Rayleigh/Mie/Ozone sky dome, solar source, lunar discs, starfield, and 3D FBM cloud deck.";
+        Folder->Expanded    = true;
+    }
+    return InOutBundle.WorldFolderToken;
+}
+
+// Writes the canonical row text, category, and scene-driven visibility of one world subject row
+void PopulateWorldSubjectRow(
+    OutlinerPanel&            TargetOutliner,
+    ShowcaseWorldSceneBundle& InOutBundle,
+    OutlinerWorldSubject      Subject,
+    OutlinerSlotToken         SlotToken)
+{
+    OutlinerRecordEntry* Entry = TargetOutliner.AccessEntry(SlotToken);
+    if (Entry == nullptr)
+    {
+        return;
+    }
+
+    WorldAtmosphereConfiguration& Atmosphere = InOutBundle.Scene.Atmosphere;
+
+    Entry->Subject     = Subject;
+    Entry->Category    = ConstructSlotCategory::LayerGroup;
+    Entry->CastShadows = false;
+
+    switch (Subject)
+    {
+        case OutlinerWorldSubject::Atmosphere:
+            Entry->Title             = "Atmosphere";
+            Entry->CategoryLabel     = "World / Sky";
+            Entry->Subtitle          = "Rayleigh · Mie · Ozone sky dome";
+            Entry->AuthorNotes       = "Physical atmosphere medium driving every transmittance, sky-view, and aerial-perspective integral.";
+            Entry->VisibilityEnabled = Atmosphere.Medium.AtmosphereEnabled;
+            break;
+
+        case OutlinerWorldSubject::Sun:
+            Entry->Title             = "Sun";
+            Entry->CategoryLabel     = "World / Solar Light";
+            Entry->Subtitle          = "Solar ephemeris & direct disc";
+            Entry->AuthorNotes       = "3.91 mm/tx GTX Contact-Clip + BVH4 Penumbra directional sun and physical SkyView LUT driver.";
+            Entry->PositionX         = InOutBundle.Scene.Sun.DirectionToSun.X;
+            Entry->PositionY         = InOutBundle.Scene.Sun.DirectionToSun.Y;
+            Entry->PositionZ         = InOutBundle.Scene.Sun.DirectionToSun.Z;
+            Entry->VisibilityEnabled = Atmosphere.Solar.SolarEnabled;
+            Entry->CastShadows       = true;
+            break;
+
+        case OutlinerWorldSubject::Moons:
+            Entry->Title             = "Moon";
+            Entry->CategoryLabel     = "World / Lunar Disc";
+            Entry->Subtitle          = "Luna · Slot 0 · 29.53 d phase";
+            Entry->AuthorNotes       = "Multi-slot lunar disc (6 presets: Luna, Ember, Glacier, Sulfur, Shroud, Shard).";
+            Entry->VisibilityEnabled = Atmosphere.Moons[0].Visible;
+            break;
+
+        case OutlinerWorldSubject::Stars:
+            Entry->Title             = "Stars";
+            Entry->CategoryLabel     = "World / Starfield";
+            Entry->Subtitle          = "Limiting 5.5 mag · scintillation";
+            Entry->AuthorNotes       = "Deterministic nocturnal starfield modulated by limiting magnitude and atmospheric scintillation.";
+            Entry->VisibilityEnabled = Atmosphere.Stars.StarfieldEnabled;
+            break;
+
+        case OutlinerWorldSubject::Clouds:
+            Entry->Title             = "Volumetric Clouds";
+            Entry->CategoryLabel     = "World / Volumetric Clouds";
+            Entry->Subtitle          = "Cumulus · 34% cover · 1.40 km floor";
+            Entry->AuthorNotes       = "Raymarched 3D FBM cloud deck with dual-lobe Henyey-Greenstein and Beer-Powder self-shadowing.";
+            Entry->VisibilityEnabled = Atmosphere.Clouds.CloudsEnabled;
+            Entry->CastShadows       = Atmosphere.Clouds.CloudShadow.ShadowEnabled;
+            break;
+
+        case OutlinerWorldSubject::LocalCloud:
+            Entry->Title             = "Local Cloud";
+            Entry->CategoryLabel     = "World / Local Cloud Volume";
+            Entry->Subtitle          = "Bounded 3D cloud box · 200x200x100 m";
+            Entry->AuthorNotes       = "Spatially bounded 3D FBM cloud box in world meters.";
+            Entry->VisibilityEnabled = Atmosphere.LocalCloud.LocalEnabled;
+            break;
+
+        case OutlinerWorldSubject::None:
+            break;
+    }
+}
+
+// Binds freshly constructed world-subject rows to their world specification owner and files them into the World folder
+void AdoptConstructedWorldSubjects(
+    OutlinerPanel&            InOutOutliner,
+    ShowcaseWorldSceneBundle& InOutBundle,
+    bool&                     InOutChanged)
+{
+    std::vector<std::pair<OutlinerSlotToken, OutlinerWorldSubject>> Candidates{};
+    for (const OutlinerRecordEntry& Entry : InOutOutliner.QueryEntries())
+    {
+        if (Entry.Subject != OutlinerWorldSubject::None)
+        {
+            Candidates.emplace_back(Entry.Token, Entry.Subject);
+        }
+    }
+
+    for (const auto& [CandidateToken, Subject] : Candidates)
+    {
+        if (WorldSubjectOrdinal(Subject) >= WorldSubjectSlotCount ||
+            InOutOutliner.FindEntry(CandidateToken) == nullptr)
+        {
+            continue;
+        }
+
+        OutlinerSlotToken* RegisteredToken = AccessWorldSubjectToken(InOutBundle, Subject);
+        if (RegisteredToken == nullptr)
+        {
+            continue;
+        }
+
+        if (RegisteredToken->Valid() && InOutOutliner.FindEntry(*RegisteredToken) != nullptr)
+        {
+            if (*RegisteredToken == CandidateToken)
+            {
+                continue;
+            }
+
+            // Each sky subsystem is a single world specification entry: keep the registered row authoritative
+            (void)InOutOutliner.DeleteSlot(CandidateToken);
+            InOutOutliner.SelectSingle(*RegisteredToken);
+            InOutChanged = true;
+            continue;
+        }
+
+        *RegisteredToken = CandidateToken;
+        InOutBundle.WorldSubjectPresent[WorldSubjectOrdinal(Subject)] = true;
+        AssignWorldSubjectPresence(InOutBundle, Subject, true);
+        PopulateWorldSubjectRow(InOutOutliner, InOutBundle, Subject, CandidateToken);
+        (void)InOutOutliner.AttachToEnclosure(CandidateToken, EnsureWorldFolderToken(InOutOutliner, InOutBundle));
+        InOutOutliner.SelectSingle(CandidateToken);
+        InOutChanged = true;
+    }
+}
+
+// Retires the world specification of every world subject row the author deleted from the Outliner
+void RetireDetachedWorldSubjects(
+    OutlinerPanel&            InOutOutliner,
+    ShowcaseWorldSceneBundle& InOutBundle,
+    bool&                     InOutChanged)
+{
+    for (std::size_t Ordinal = 1u; Ordinal < WorldSubjectSlotCount; ++Ordinal)
+    {
+        const auto         Subject         = static_cast<OutlinerWorldSubject>(Ordinal);
+        OutlinerSlotToken* RegisteredToken = AccessWorldSubjectToken(InOutBundle, Subject);
+        if (RegisteredToken == nullptr || !RegisteredToken->Valid())
+        {
+            continue;
+        }
+        if (InOutOutliner.FindEntry(*RegisteredToken) != nullptr)
+        {
+            continue;
+        }
+
+        *RegisteredToken = {};
+        InOutBundle.WorldSubjectPresent[Ordinal] = false;
+        AssignWorldSubjectPresence(InOutBundle, Subject, false);
+        InOutChanged = true;
+    }
+
+    if (InOutBundle.WorldFolderToken.Valid() && InOutOutliner.FindEntry(InOutBundle.WorldFolderToken) == nullptr)
+    {
+        InOutBundle.WorldFolderToken = {};
+    }
+}
+
+} // namespace
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                           OUTLINER REGISTRATION & SYNC
 //------------------------------------------------------------------------------------------------------------------------
@@ -1384,6 +1656,7 @@ void RegisterShowcaseGalleryInOutliner(
         if (OutlinerRecordEntry* Entry = TargetOutliner.AccessEntry(Slot))
         {
             Entry->Category          = ConstructSlotCategory::GeometryVolume;
+            Entry->Subject           = OutlinerWorldSubject::None;
             Entry->Title             = Obj.Title;
             Entry->CategoryLabel     = "Geometry · " + Obj.MaterialTitle;
             Entry->Subtitle          = Obj.Subtitle;
@@ -1413,6 +1686,7 @@ void RegisterShowcaseGalleryInOutliner(
     if (OutlinerRecordEntry* CamEntry = TargetOutliner.AccessEntry(InOutBundle.EditorCameraToken))
     {
         CamEntry->Category          = ConstructSlotCategory::OpticsCamera;
+        CamEntry->Subject           = OutlinerWorldSubject::None;
         CamEntry->Title             = "Editor Camera";
         CamEntry->CategoryLabel     = "Scene / Cameras";
         CamEntry->Subtitle          = "Editor · permanent · 43.0 deg FOV";
@@ -1428,79 +1702,36 @@ void RegisterShowcaseGalleryInOutliner(
         CamEntry->ScaleZ            = 1.0f;
         CamEntry->VisibilityEnabled = true;
         CamEntry->CastShadows       = false;
+        CamEntry->Permanent         = true;
     }
 
     InOutBundle.WorldFolderToken = TargetOutliner.ConstructFolder("World");
     if (OutlinerRecordEntry* Folder = TargetOutliner.AccessEntry(InOutBundle.WorldFolderToken))
     {
         Folder->FolderTint  = WorkspaceSurfaceColors::ShowcaseWarmGold;
-        Folder->Subtitle    = "Sun, Moon, Stars & Volumetric Clouds";
-        Folder->AuthorNotes = "Physical Rayleigh/Mie/Ozone sky dome, 6-slot lunar discs, deterministic starfield, and 3D FBM volumetric clouds.";
+        Folder->Subtitle    = "Atmosphere, Sun, Moons, Stars & Volumetric Clouds";
+        Folder->AuthorNotes = "Physical Rayleigh/Mie/Ozone sky dome, solar source, 6-slot lunar discs, deterministic starfield, and 3D FBM clouds.";
         Folder->Expanded    = true;
     }
 
-    InOutBundle.SunEmitterToken = TargetOutliner.ConstructFromTemplate(LightTemplateOrd, InOutBundle.WorldFolderToken);
-    if (OutlinerRecordEntry* SunEntry = TargetOutliner.AccessEntry(InOutBundle.SunEmitterToken))
+    // Each single-instance sky subsystem owns one Outliner row; retired subjects stay absent until reconstructed
+    const auto AppendWorldSubject = [&](OutlinerWorldSubject Subject) -> OutlinerSlotToken
     {
-        SunEntry->Category          = ConstructSlotCategory::LayerGroup;
-        SunEntry->Title             = "Sun";
-        SunEntry->CategoryLabel     = "World / Solar Light";
-        SunEntry->Subtitle          = "Solar ephemeris & direct disc";
-        SunEntry->AuthorNotes       = "3.91 mm/tx GTX Contact-Clip + BVH4 Penumbra directional sun and physical SkyView LUT driver.";
-        SunEntry->PositionX         = InOutBundle.Scene.Sun.DirectionToSun.X;
-        SunEntry->PositionY         = InOutBundle.Scene.Sun.DirectionToSun.Y;
-        SunEntry->PositionZ         = InOutBundle.Scene.Sun.DirectionToSun.Z;
-        SunEntry->VisibilityEnabled = InOutBundle.Scene.Atmosphere.Solar.SolarEnabled;
-        SunEntry->CastShadows       = true;
-    }
+        if (!InOutBundle.WorldSubjectPresent[WorldSubjectOrdinal(Subject)])
+        {
+            return {};
+        }
+        const OutlinerSlotToken SlotToken = TargetOutliner.ConstructFromTemplate(LightTemplateOrd, InOutBundle.WorldFolderToken);
+        PopulateWorldSubjectRow(TargetOutliner, InOutBundle, Subject, SlotToken);
+        return SlotToken;
+    };
 
-    InOutBundle.MoonBodyToken = TargetOutliner.ConstructFromTemplate(LightTemplateOrd, InOutBundle.WorldFolderToken);
-    if (OutlinerRecordEntry* MoonEntry = TargetOutliner.AccessEntry(InOutBundle.MoonBodyToken))
-    {
-        MoonEntry->Category          = ConstructSlotCategory::LayerGroup;
-        MoonEntry->Title             = "Moon";
-        MoonEntry->CategoryLabel     = "World / Lunar Disc";
-        MoonEntry->Subtitle          = "Luna · Slot 0 · 29.53 d phase";
-        MoonEntry->AuthorNotes       = "Multi-slot lunar disc (6 presets: Luna, Ember, Glacier, Sulfur, Shroud, Shard).";
-        MoonEntry->VisibilityEnabled = InOutBundle.Scene.Atmosphere.Moons[0].Visible;
-        MoonEntry->CastShadows       = false;
-    }
-
-    InOutBundle.StarfieldToken = TargetOutliner.ConstructFromTemplate(LightTemplateOrd, InOutBundle.WorldFolderToken);
-    if (OutlinerRecordEntry* StarsEntry = TargetOutliner.AccessEntry(InOutBundle.StarfieldToken))
-    {
-        StarsEntry->Category          = ConstructSlotCategory::LayerGroup;
-        StarsEntry->Title             = "Stars";
-        StarsEntry->CategoryLabel     = "World / Starfield";
-        StarsEntry->Subtitle          = "Limiting 5.5 mag · scintillation";
-        StarsEntry->AuthorNotes       = "Deterministic nocturnal starfield modulated by limiting magnitude and atmospheric scintillation.";
-        StarsEntry->VisibilityEnabled = InOutBundle.Scene.Atmosphere.Stars.StarfieldEnabled;
-        StarsEntry->CastShadows       = false;
-    }
-
-    InOutBundle.VolumetricCloudsToken = TargetOutliner.ConstructFromTemplate(LightTemplateOrd, InOutBundle.WorldFolderToken);
-    if (OutlinerRecordEntry* CloudsEntry = TargetOutliner.AccessEntry(InOutBundle.VolumetricCloudsToken))
-    {
-        CloudsEntry->Category          = ConstructSlotCategory::LayerGroup;
-        CloudsEntry->Title             = "Volumetric Clouds";
-        CloudsEntry->CategoryLabel     = "World / Volumetric Clouds";
-        CloudsEntry->Subtitle          = "Cumulus · 34% cover · 1.40 km floor";
-        CloudsEntry->AuthorNotes       = "Raymarched 3D FBM cloud deck with dual-lobe Henyey-Greenstein and Beer-Powder self-shadowing.";
-        CloudsEntry->VisibilityEnabled = InOutBundle.Scene.Atmosphere.Clouds.CloudsEnabled;
-        CloudsEntry->CastShadows       = InOutBundle.Scene.Atmosphere.Clouds.CloudShadow.ShadowEnabled;
-    }
-
-    InOutBundle.LocalCloudToken = TargetOutliner.ConstructFromTemplate(LightTemplateOrd, InOutBundle.WorldFolderToken);
-    if (OutlinerRecordEntry* LocalEntry = TargetOutliner.AccessEntry(InOutBundle.LocalCloudToken))
-    {
-        LocalEntry->Category          = ConstructSlotCategory::LayerGroup;
-        LocalEntry->Title             = "Local Cloud";
-        LocalEntry->CategoryLabel     = "World / Local Cloud Volume";
-        LocalEntry->Subtitle          = "Bounded 3D cloud box · 200x200x100 m";
-        LocalEntry->AuthorNotes       = "Spatially bounded 3D FBM cloud box in world meters.";
-        LocalEntry->VisibilityEnabled = InOutBundle.Scene.Atmosphere.LocalCloud.LocalEnabled;
-        LocalEntry->CastShadows       = false;
-    }
+    InOutBundle.AtmosphereToken       = AppendWorldSubject(OutlinerWorldSubject::Atmosphere);
+    InOutBundle.SunEmitterToken       = AppendWorldSubject(OutlinerWorldSubject::Sun);
+    InOutBundle.MoonBodyToken         = AppendWorldSubject(OutlinerWorldSubject::Moons);
+    InOutBundle.StarfieldToken        = AppendWorldSubject(OutlinerWorldSubject::Stars);
+    InOutBundle.VolumetricCloudsToken = AppendWorldSubject(OutlinerWorldSubject::Clouds);
+    InOutBundle.LocalCloudToken       = AppendWorldSubject(OutlinerWorldSubject::LocalCloud);
 
     InOutBundle.AreaLightBindings.clear();
     InOutBundle.CeilingSoftboxToken = {};
@@ -1520,6 +1751,7 @@ void RegisterShowcaseGalleryInOutliner(
         {
             const auto& Softbox = InOutBundle.Scene.AreaLights.front();
             LightEntry->Category          = ConstructSlotCategory::PointLuminaire;
+            LightEntry->Subject           = OutlinerWorldSubject::None;
             LightEntry->Title             = "Ceiling Softbox";
             LightEntry->CategoryLabel     = "Lighting / LTC Area Quad";
             LightEntry->Subtitle          = "LTC Quad · 1.70 × 1.30 m · 7.5, 6.6, 5.4 nit";
@@ -1760,10 +1992,8 @@ bool SynchronizeShowcaseGalleryFromOutliner(
 
     if (const OutlinerRecordEntry* SunEntry = SourceOutliner.FindEntry(InOutBundle.SunEmitterToken))
     {
-        const bool SunVisible = SourceOutliner.QueryEffectiveVisibility(InOutBundle.SunEmitterToken);
-        const Mathematics::LinearRGB TargetIrr = SunVisible
-            ? Mathematics::LinearRGB{ 5.40f, 5.10f, 4.65f }
-            : Mathematics::LinearRGB{ 0.0f, 0.0f, 0.0f };
+        const bool                   SunVisible = SourceOutliner.QueryEffectiveVisibility(InOutBundle.SunEmitterToken);
+        const Mathematics::LinearRGB TargetIrr  = QuerySolarIrradiance(SunVisible);
         if (!NearlyEqualFloat(InOutBundle.Scene.Sun.SolarIrradiance.R, TargetIrr.R))
         {
             InOutBundle.Scene.Sun.SolarIrradiance = TargetIrr;
@@ -1783,6 +2013,16 @@ bool SynchronizeShowcaseGalleryFromOutliner(
         {
             InOutBundle.Scene.Sun.DirectionToSun = NextDir;
             Changed                              = true;
+        }
+    }
+
+    if (SourceOutliner.FindEntry(InOutBundle.AtmosphereToken) != nullptr)
+    {
+        const bool AtmosphereVis = SourceOutliner.QueryEffectiveVisibility(InOutBundle.AtmosphereToken);
+        if (InOutBundle.Scene.Atmosphere.Medium.AtmosphereEnabled != AtmosphereVis)
+        {
+            InOutBundle.Scene.Atmosphere.Medium.AtmosphereEnabled = AtmosphereVis;
+            Changed                                               = true;
         }
     }
 
@@ -1879,10 +2119,15 @@ bool SynchronizeShowcaseGallerySceneLive(
     OutRequiresAccelerationRebuild = false;
     bool Changed                   = false;
 
+    // 0. Bind or retire every constructed world subject (Atmosphere, Sun, Moons, Stars, Clouds)
+    AdoptConstructedWorldSubjects(InOutOutliner, InOutBundle, Changed);
+    RetireDetachedWorldSubjects(InOutOutliner, InOutBundle, Changed);
+
     // 1. Adopt newly constructed geometry (CategoryOne) and LTC area lights (CategoryThree) from OutlinerPanel
     for (const OutlinerRecordEntry& Entry : InOutOutliner.QueryEntries())
     {
         if (Entry.Category == ConstructSlotCategory::Folder ||
+            Entry.Subject != OutlinerWorldSubject::None ||
             Entry.Token == InOutBundle.EditorCameraToken ||
             Entry.Token == InOutBundle.SunEmitterToken ||
             Entry.Token == InOutBundle.MoonBodyToken ||
@@ -2143,6 +2388,7 @@ OutlinerSlotToken ConstructShowcasePrimitiveInOutliner(
     if (OutlinerRecordEntry* Entry = InOutOutliner.AccessEntry(Slot))
     {
         Entry->Category          = ConstructSlotCategory::GeometryVolume;
+        Entry->Subject           = OutlinerWorldSubject::None;
         Entry->Title             = std::string(Label) + " Specimen";
         Entry->CategoryLabel     = "Geometry · ConstructedSpecimenSurface";
         Entry->PositionX         = WorldPosition.X;
@@ -2311,6 +2557,7 @@ OutlinerSlotToken ConstructShowcaseModelInOutliner(
         if (OutlinerRecordEntry* Entry = InOutOutliner.AccessEntry(Slot))
         {
             Entry->Category          = ConstructSlotCategory::PointLuminaire;
+            Entry->Subject           = OutlinerWorldSubject::None;
             Entry->Title             = std::string(DisplayTitle);
             Entry->CategoryLabel     = "Photometry · LTC Area Luminaire";
             Entry->Subtitle          = "LTC Quad Light · 1.20 × 0.90 m";
@@ -2362,6 +2609,7 @@ OutlinerSlotToken ConstructShowcaseModelInOutliner(
         if (OutlinerRecordEntry* Entry = InOutOutliner.AccessEntry(Slot))
         {
             Entry->Category          = ConstructSlotCategory::OpticsCamera;
+            Entry->Subject           = OutlinerWorldSubject::None;
             Entry->Title             = std::string(DisplayTitle);
             Entry->CategoryLabel     = "Camera · Perspective Optical Rig";
             Entry->Subtitle          = "FOV 43° · Near 0.15 m";

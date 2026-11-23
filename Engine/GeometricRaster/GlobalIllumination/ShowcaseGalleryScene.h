@@ -99,7 +99,10 @@ struct ShowcaseWorldSceneBundle
     OutlinerSlotToken                                      CamerasFolderToken   {}; // [id] - "Cameras" collection folder token
     OutlinerSlotToken                                      WorldFolderToken     {}; // [id] - "World" collection folder token
     OutlinerSlotToken                                      LightingFolderToken  {}; // [id] - "Lighting" collection folder token
+    // Authored presence of every single-instance world subsystem row (ordinal = OutlinerWorldSubject); removal clears it
+    std::array<bool, 7u>                                   WorldSubjectPresent  {{ false, true, true, true, true, true, true }};
     OutlinerSlotToken                                      EditorCameraToken     {}; // [id] - "Editor Camera" entry token
+    OutlinerSlotToken                                      AtmosphereToken       {}; // [id] - "Atmosphere" sky & aerial medium token
     OutlinerSlotToken                                      SunEmitterToken       {}; // [id] - "Sun" directional emitter token
     OutlinerSlotToken                                      MoonBodyToken         {}; // [id] - "Moon" multi-instance lunar disc token
     OutlinerSlotToken                                      StarfieldToken        {}; // [id] - "Stars" procedural starfield token
