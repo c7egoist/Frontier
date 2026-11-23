@@ -1615,44 +1615,59 @@ void OutlinerPanel::Render(
     // 6. Reusable Studio Controls Dropdown Sheets (+ Construct, Outliner Settings, Right-Click Directives — zero shadow)
     if (ConstructDropdownOpen)
     {
+        constexpr int32_t CaptionRow  = -2;
+        constexpr int32_t FolderRowId = -1;
+
         std::vector<DropdownDirectiveEntry> SheetRows{};
-        SheetRows.reserve(ConstructTemplates.size() + 2u);
-
-        DropdownDirectiveEntry HeaderRow{};
-        HeaderRow.Label          = "CONSTRUCT";
-        HeaderRow.SectionCaption = true;
-        SheetRows.push_back(HeaderRow);
-
-        for (const auto& Preset : ConstructTemplates)
+        std::vector<int32_t>                RowTemplateOrdinals{};
+        SheetRows.reserve(ConstructTemplates.size() + 3u);
+        RowTemplateOrdinals.reserve(ConstructTemplates.size() + 3u);
+        auto AppendSheetRow = [&](DropdownDirectiveEntry Row, int32_t TemplateOrdinal)
         {
-            DropdownDirectiveEntry Row{};
-            Row.Label       = Preset.DropdownLabel.c_str();
-            Row.LeadingTint = WorkspaceAppearance::QueryCategoryAccent(Preset.Category, WorkspaceSurfaceColors::ShowcaseSage);
             SheetRows.push_back(Row);
+            RowTemplateOrdinals.push_back(TemplateOrdinal);
+        };
+
+        AppendSheetRow({ "CONSTRUCT", "", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, true, false }, CaptionRow);
+
+        bool WorldCaptionAppended = false;
+        for (std::size_t Ordinal = 0u; Ordinal < ConstructTemplates.size(); ++Ordinal)
+        {
+            const OutlinerConstructTemplate& Preset = ConstructTemplates[Ordinal];
+            if (Preset.Subject != OutlinerWorldSubject::None && !WorldCaptionAppended)
+            {
+                WorldCaptionAppended = true;
+                AppendSheetRow(
+                    { "WORLD", "", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, true, true, false },
+                    CaptionRow);
+            }
+            AppendSheetRow(
+                { Preset.DropdownLabel.c_str(), "", WorkspaceAppearance::QueryCategoryAccent(Preset.Category, WorkspaceSurfaceColors::ShowcaseSage),
+                  ControlIcon::Count, false, false, false, false, false },
+                static_cast<int32_t>(Ordinal));
         }
 
-        DropdownDirectiveEntry FolderRow{};
-        FolderRow.Label        = "+ Add Folder";
-        FolderRow.ShortcutHint = "Ctrl+G";
-        FolderRow.LeadingTint  = WorkspaceSurfaceColors::ShowcaseSage;
-        FolderRow.DividerAbove = true;
-        SheetRows.push_back(FolderRow);
+        AppendSheetRow(
+            { "+ Add Folder", "Ctrl+G", WorkspaceSurfaceColors::ShowcaseSage, ControlIcon::Count, false, false, true, false, false },
+            FolderRowId);
 
         const float       SheetW = 216.0f;
         const float       SheetX = std::clamp(ConstructDropdownAnchor.X - SheetW, Bounds.X + 8.0f, std::max(Bounds.X + 8.0f, Bounds.Right() - SheetW - 8.0f));
         const Rectangle2D Sheet  = DropdownSelector::QueryDirectiveSheetBounds({ SheetX, ConstructDropdownAnchor.Y }, SheetW, SheetRows);
 
         int32_t ChosenRow = -1;
-        if (DropdownSelector::ConstructDirectiveSheet(ActiveOverlay, Sheet, SheetRows, Input.PrimaryPointer, ChosenRow).Clicked && ChosenRow >= 1)
+        if (DropdownSelector::ConstructDirectiveSheet(ActiveOverlay, Sheet, SheetRows, Input.PrimaryPointer, ChosenRow).Clicked &&
+            ChosenRow >= 0 &&
+            static_cast<std::size_t>(ChosenRow) < RowTemplateOrdinals.size())
         {
-            const auto TemplateIdx = static_cast<std::size_t>(ChosenRow - 1);
-            if (TemplateIdx < ConstructTemplates.size())
+            const int32_t TargetOrdinal = RowTemplateOrdinals[static_cast<std::size_t>(ChosenRow)];
+            if (TargetOrdinal == FolderRowId)
             {
-                ConstructFromTemplate(static_cast<uint32_t>(TemplateIdx));
+                (void)ConstructFolder("Folder");
             }
-            else
+            else if (TargetOrdinal >= 0 && static_cast<std::size_t>(TargetOrdinal) < ConstructTemplates.size())
             {
-                ConstructFolder("Folder");
+                (void)ConstructFromTemplate(static_cast<uint32_t>(TargetOrdinal));
             }
             ConstructDropdownOpen = false;
         }

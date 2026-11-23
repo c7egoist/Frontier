@@ -10,7 +10,7 @@
 
 | Request | Implementation |
 | :--- | :--- |
-| Add objects to the scene from the Construct menu | Five world-subject presets (`Add Atmosphere`, `Add Sun`, `Add Moons`, `Add Stars`, `Add Clouds`, plus `Add Local Cloud`) are configured on the Outliner Construct sheet and are also accepted as viewport canvas drops |
+| Add objects to the scene from the Construct menu | Five world-subject presets (`Add Atmosphere`, `Add Sun`, `Add Moons`, `Add Stars`, `Add Clouds`, plus `Add Local Cloud`) are configured on the Outliner Construct sheet under a new `WORLD` section caption, and are also accepted as viewport canvas drops |
 | “Registered to the world and added” | `OutlinerPanel` rows carry a new `OutlinerWorldSubject` identity; `SynchronizeShowcaseGallerySceneLive` adopts the row into `WorldSceneSpecification` (`Atmosphere.Medium`, `Solar`, `Moons[0]`, `Stars`, `Clouds`, `LocalCloud`) and activates the subsystem |
 | One default folder for all of them | Every constructed world subject is filed into the `World` collection folder; the folder is created on demand, so removing it and constructing again rebuilds a single folder |
 | Remove cleanly | Deleting the row (or the whole `World` folder) retires the subsystem: solar irradiance → `0`, `SolarEnabled` / `Moons[0].Visible` / `StarfieldEnabled` / `CloudsEnabled` / `LocalEnabled` / `Medium.AtmosphereEnabled` → `false`, the token is released, and the authored-presence latch blocks resurrection on the next re-registration |
