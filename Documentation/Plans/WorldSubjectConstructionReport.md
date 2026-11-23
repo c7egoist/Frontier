@@ -46,6 +46,7 @@
 | Delete `Showcase` / geometry rows | Unchanged legacy path (geometry rows disable by zero scale) |
 | Host template list missing camera/light presets | Clamped template lookup must never stamp a world subject onto foreign rows; camera, LTC light, and constructed geometry rows are forced back to `OutlinerWorldSubject::None` |
 | Right-click the Editor Camera | `Rename`, `Hide`/`Show`, and `Remove from scene` are greyed (`Permanent`), matching the HTML “editor camera cannot be deleted” rule |
+| Right-click a folder | Same HTML rows; folder removal stays available because the HTML demo never deletes its collections (documented superset) |
 
 ---
 

@@ -1742,13 +1742,11 @@ void OutlinerPanel::Render(
             AppendDirective(
                 { "Duplicate", "Ctrl+D", { 0u, 0u, 0u, 0u }, ControlIcon::Count, false, false, false, false, false },
                 OutlinerRowDirective::Duplicate);
-            if (TargetEntry->Category != ConstructSlotCategory::Folder)
-            {
-                AppendDirective(
-                    { "Remove from scene", "Del", { 0u, 0u, 0u, 0u }, ControlIcon::Count,
-                      false, true, true, false, PermanentRow },
-                    OutlinerRowDirective::Remove);
-            }
+            // Native folders remain removable (the HTML demo never deletes its collections); every other row follows HTML
+            AppendDirective(
+                { "Remove from scene", "Del", { 0u, 0u, 0u, 0u }, ControlIcon::Count,
+                  false, true, true, false, PermanentRow },
+                OutlinerRowDirective::Remove);
         }
         else
         {
