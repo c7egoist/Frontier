@@ -1499,6 +1499,27 @@ void AdoptConstructedWorldSubjects(
     ShowcaseWorldSceneBundle& InOutBundle,
     bool&                     InOutChanged)
 {
+    // Steady-state fast path: every authored world subject row is already bound to its specification owner
+    bool UnboundRowPresent = false;
+    for (const OutlinerRecordEntry& Entry : InOutOutliner.QueryEntries())
+    {
+        if (Entry.Subject == OutlinerWorldSubject::None ||
+            WorldSubjectOrdinal(Entry.Subject) >= WorldSubjectSlotCount)
+        {
+            continue;
+        }
+        const OutlinerSlotToken* RegisteredToken = AccessWorldSubjectToken(InOutBundle, Entry.Subject);
+        if (RegisteredToken != nullptr && (!RegisteredToken->Valid() || *RegisteredToken != Entry.Token))
+        {
+            UnboundRowPresent = true;
+            break;
+        }
+    }
+    if (!UnboundRowPresent)
+    {
+        return;
+    }
+
     std::vector<std::pair<OutlinerSlotToken, OutlinerWorldSubject>> Candidates{};
     for (const OutlinerRecordEntry& Entry : InOutOutliner.QueryEntries())
     {
