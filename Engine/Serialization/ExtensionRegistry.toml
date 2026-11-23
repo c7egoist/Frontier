@@ -1,0 +1,428 @@
+# Frontier approved extension registry — proposed authored schema.
+# Companion: Documentation/Plans/EngineComponentSerializationDagPlan.md
+# Status: proposed; not yet consumed by a codec.
+# Read is case-insensitive; canonical write is PascalCase.
+
+SchemaVersion = 1
+HashingPolicy = 'Frontier.XXH64.V1'
+DefaultCacheRoot = 'Build/Cache'
+
+[[Extensions]]
+CanonicalExtension = '.WorldSpace'
+LowercaseName = '.worldspace'
+TypeId = 'Frontier.World'
+SchemaVersion = 1
+OwnerPath = 'Engine/Lifecycle'
+WireFormat = 'TomlManifest+BinarySections'
+CachedArtifact = 'SceneResourceBundle'
+LegacyRelation = 'ReplacesAdHocWorldModel'
+
+[[Extensions]]
+CanonicalExtension = '.GameObject'
+LowercaseName = '.gameobject'
+TypeId = 'Frontier.GameObject'
+SchemaVersion = 1
+OwnerPath = 'Engine/Lifecycle'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'InstanceRecordSet'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.Component'
+LowercaseName = '.component'
+TypeId = 'Frontier.Component'
+SchemaVersion = 1
+OwnerPath = 'Engine/ComponentClass'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'ComponentDefinitionRegister'
+LegacyRelation = 'NarrowsComponentSpace'
+
+[[Extensions]]
+CanonicalExtension = '.TriggerZone'
+LowercaseName = '.triggerzone'
+TypeId = 'Frontier.TriggerZone'
+SchemaVersion = 1
+OwnerPath = 'Engine/SimulationSpace'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'SensorVolumeSet'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.EventBus'
+LowercaseName = '.eventbus'
+TypeId = 'Frontier.EventBus'
+SchemaVersion = 1
+OwnerPath = 'Engine/Input'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'SignalDefinitionSet'
+LegacyRelation = 'NarrowsInputSpace'
+
+[[Extensions]]
+CanonicalExtension = '.VariableTable'
+LowercaseName = '.variabletable'
+TypeId = 'Frontier.VariableTable'
+SchemaVersion = 1
+OwnerPath = 'Engine/Configuration'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'VariableSetSnapshot'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.TimerProfile'
+LowercaseName = '.timerprofile'
+TypeId = 'Frontier.TimerProfile'
+SchemaVersion = 1
+OwnerPath = 'Engine/Threading'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'TimerProfile'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.Curve'
+LowercaseName = '.curve'
+TypeId = 'Frontier.Curve'
+SchemaVersion = 1
+OwnerPath = 'Engine/Components/Motion'
+WireFormat = 'TomlManifest+OptionalBinaryKeys'
+CachedArtifact = 'SampledCurveLut'
+LegacyRelation = 'NarrowsMotion'
+
+[[Extensions]]
+CanonicalExtension = '.Timeline'
+LowercaseName = '.timeline'
+TypeId = 'Frontier.Timeline'
+SchemaVersion = 1
+OwnerPath = 'Engine/Components/Motion'
+WireFormat = 'TomlManifest+BinarySections'
+CachedArtifact = 'TrackEvaluationCache'
+LegacyRelation = 'NarrowsMotion'
+
+[[Extensions]]
+CanonicalExtension = '.EngineConfig'
+LowercaseName = '.engineconfig'
+TypeId = 'Frontier.EngineConfig'
+SchemaVersion = 1
+OwnerPath = 'Engine/Configuration'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'BootDescriptor'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.GraphicsSettings'
+LowercaseName = '.graphicssettings'
+TypeId = 'Frontier.GraphicsSettings'
+SchemaVersion = 1
+OwnerPath = 'Engine/Configuration'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'ResolvedPresetKey'
+LegacyRelation = 'SeparatesPlayerOverrides'
+
+[[Extensions]]
+CanonicalExtension = '.UserProfile'
+LowercaseName = '.userprofile'
+TypeId = 'Frontier.UserProfile'
+SchemaVersion = 1
+OwnerPath = 'PlatformUserStorage'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'LocalProfileDocument'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.Soundscape'
+LowercaseName = '.soundscape'
+TypeId = 'Frontier.Soundscape'
+SchemaVersion = 1
+OwnerPath = 'Engine/AudioSpace'
+WireFormat = 'TomlManifest+PcmOpus'
+CachedArtifact = 'DecodedBusGraph'
+LegacyRelation = 'CoexistsWithAcoustic'
+
+[[Extensions]]
+CanonicalExtension = '.Interface'
+LowercaseName = '.interface'
+TypeId = 'Frontier.Interface'
+SchemaVersion = 1
+OwnerPath = 'Engine/Components'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'LayoutHierarchyRuntime'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.FontSpace'
+LowercaseName = '.fontspace'
+TypeId = 'Frontier.FontSpace'
+SchemaVersion = 1
+OwnerPath = 'Engine/Codecs/FontCodec'
+WireFormat = 'TomlManifest+SfntStyleBinary'
+CachedArtifact = 'GlyphChartPages+Metrics'
+LegacyRelation = 'ExistingBase'
+
+[[Extensions]]
+CanonicalExtension = '.PixelAtlas'
+LowercaseName = '.pixelatlas'
+TypeId = 'Frontier.PixelAtlas'
+SchemaVersion = 1
+OwnerPath = 'Engine/Components/VectorIcons'
+WireFormat = 'TomlManifest+Bc7Rgba'
+CachedArtifact = 'PackedChart+MipChain'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.Tooltip'
+LowercaseName = '.tooltip'
+TypeId = 'Frontier.Tooltip'
+SchemaVersion = 1
+OwnerPath = 'Engine/Components'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'HoverCardBinding'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.EditorLayout'
+LowercaseName = '.editorlayout'
+TypeId = 'Frontier.EditorLayout'
+SchemaVersion = 1
+OwnerPath = 'Engine/Workspaces'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'WorkspacePanelArrangement'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.RenderGraph'
+LowercaseName = '.rendergraph'
+TypeId = 'Frontier.RenderGraph'
+SchemaVersion = 1
+OwnerPath = 'Engine/GeometricRaster'
+WireFormat = 'TomlManifestToDag'
+CachedArtifact = 'PassOrder+TransientAssignment'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.ShaderGraph'
+LowercaseName = '.shadergraph'
+TypeId = 'Frontier.ShaderGraph'
+SchemaVersion = 1
+OwnerPath = 'Engine/Shaders/Compiler'
+WireFormat = 'TomlManifestToSpv'
+CachedArtifact = 'SpirVModule+Reflection'
+LegacyRelation = 'AuthoringSource'
+
+[[Extensions]]
+CanonicalExtension = '.ComputeKernel'
+LowercaseName = '.computekernel'
+TypeId = 'Frontier.ComputeKernel'
+SchemaVersion = 1
+OwnerPath = 'Engine/Shaders/Compute'
+WireFormat = 'TomlManifestToSpv'
+CachedArtifact = 'SpirVComputeModule+PermutationIndex'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.PostStack'
+LowercaseName = '.poststack'
+TypeId = 'Frontier.PostStack'
+SchemaVersion = 1
+OwnerPath = 'Engine/GeometricRaster'
+WireFormat = 'TomlManifest+ThreeDimensionalLut'
+CachedArtifact = 'EffectOrder+GradingLut'
+LegacyRelation = 'NarrowsRenderSpace'
+
+[[Extensions]]
+CanonicalExtension = '.IesProfile'
+LowercaseName = '.iesprofile'
+TypeId = 'Frontier.IesProfile'
+SchemaVersion = 1
+OwnerPath = 'Engine/Codecs/PhotometricProfile'
+WireFormat = 'TomlManifest+Lut'
+CachedArtifact = 'ResampledIntensityGrid'
+LegacyRelation = 'NarrowsPhotometrySpace'
+
+[[Extensions]]
+CanonicalExtension = '.SkyAtmosphere'
+LowercaseName = '.skyatmosphere'
+TypeId = 'Frontier.SkyAtmosphere'
+SchemaVersion = 1
+OwnerPath = 'Engine/GeometricRaster/Atmosphere'
+WireFormat = 'TomlManifest+Lut'
+CachedArtifact = 'ScatteringAbsorptionFogLuts'
+LegacyRelation = 'NarrowsVolumetricSpace'
+
+[[Extensions]]
+CanonicalExtension = '.Irradiance'
+LowercaseName = '.irradiance'
+TypeId = 'Frontier.Irradiance'
+SchemaVersion = 1
+OwnerPath = 'Engine/GeometricRaster/GlobalIllumination'
+WireFormat = 'BinarySections+TomlManifest'
+CachedArtifact = 'DiffuseLightField+DirectionalLobes'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.RadianceCache'
+LowercaseName = '.radiancecache'
+TypeId = 'Frontier.RadianceCache'
+SchemaVersion = 1
+OwnerPath = 'Engine/GeometricRaster/GlobalIllumination'
+WireFormat = 'BinarySections+TomlManifest'
+CachedArtifact = 'ProbeCheckpoint+Provenance'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.SpectralCurve'
+LowercaseName = '.spectralcurve'
+TypeId = 'Frontier.SpectralCurve'
+SchemaVersion = 1
+OwnerPath = 'Engine/ColourSpace'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'DispersionSampleSet'
+LegacyRelation = 'NarrowsColourSpace'
+
+[[Extensions]]
+CanonicalExtension = '.LensAperture'
+LowercaseName = '.lensaperture'
+TypeId = 'Frontier.LensAperture'
+SchemaVersion = 1
+OwnerPath = 'Engine/GeometricRaster'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'OpticalParameterSet'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.RayStructure'
+LowercaseName = '.raystructure'
+TypeId = 'Frontier.RayStructure'
+SchemaVersion = 1
+OwnerPath = 'Engine/SpatialAcceleration'
+WireFormat = 'BinarySections+TomlRecipe'
+CachedArtifact = 'BlasTlasArtifact'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.DistanceField'
+LowercaseName = '.distancefield'
+TypeId = 'Frontier.DistanceField'
+SchemaVersion = 1
+OwnerPath = 'Engine/DistanceFieldSpace'
+WireFormat = 'BinaryThreeDimensionalGrid+TomlHeader'
+CachedArtifact = 'SignedDistanceGrid'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.ParticleSystem'
+LowercaseName = '.particlesystem'
+TypeId = 'Frontier.ParticleSystem'
+SchemaVersion = 1
+OwnerPath = 'ParticleDomain'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'MasterSimulationTimeline'
+LegacyRelation = 'DeferredRedoContract'
+
+[[Extensions]]
+CanonicalExtension = '.EmitterNode'
+LowercaseName = '.emitternode'
+TypeId = 'Frontier.EmitterNode'
+SchemaVersion = 1
+OwnerPath = 'ParticleDomain'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'SpawnBurstLifetimeConfiguration'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.VectorField'
+LowercaseName = '.vectorfield'
+TypeId = 'Frontier.VectorField'
+SchemaVersion = 1
+OwnerPath = 'ForceFieldDomain'
+WireFormat = 'BinaryThreeDimensionalGrid+TomlRecipe'
+CachedArtifact = 'VelocityGrid'
+LegacyRelation = 'DeferredRedoContract'
+
+[[Extensions]]
+CanonicalExtension = '.RibbonTrail'
+LowercaseName = '.ribbontrail'
+TypeId = 'Frontier.RibbonTrail'
+SchemaVersion = 1
+OwnerPath = 'ParticleDomain'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'StripGeneratorParameters'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.SwarmBehavior'
+LowercaseName = '.swarmbehavior'
+TypeId = 'Frontier.SwarmBehavior'
+SchemaVersion = 1
+OwnerPath = 'SwarmSimulation'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'FlockingRuleSet'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.FluidGrid'
+LowercaseName = '.fluidgrid'
+TypeId = 'Frontier.FluidGrid'
+SchemaVersion = 1
+OwnerPath = 'FluidSimulation'
+WireFormat = 'BinarySections+TomlManifest'
+CachedArtifact = 'SolverDomainFields'
+LegacyRelation = 'DeferredRedoContract'
+
+[[Extensions]]
+CanonicalExtension = '.NoiseGraph'
+LowercaseName = '.noisegraph'
+TypeId = 'Frontier.NoiseGraph'
+SchemaVersion = 1
+OwnerPath = 'ProceduralGeneration'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'DeterministicNoiseOrder'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.FractureTree'
+LowercaseName = '.fracturetree'
+TypeId = 'Frontier.FractureTree'
+SchemaVersion = 1
+OwnerPath = 'Engine/GeometrySpace/Fracture'
+WireFormat = 'BinarySections+TomlManifest'
+CachedArtifact = 'VoronoiHierarchy+Connectivity'
+LegacyRelation = 'NarrowsFractureWorkspaceOutput'
+
+[[Extensions]]
+CanonicalExtension = '.ShardCluster'
+LowercaseName = '.shardcluster'
+TypeId = 'Frontier.ShardCluster'
+SchemaVersion = 1
+OwnerPath = 'DestructionPhysics'
+WireFormat = 'BinarySections+TomlManifest'
+CachedArtifact = 'DebrisChunkSet'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.ConstraintSet'
+LowercaseName = '.constraintset'
+TypeId = 'Frontier.ConstraintSet'
+SchemaVersion = 1
+OwnerPath = 'Engine/SimulationSpace/PhysicsSpace'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'MechanicalJointSet'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.ConvexHull'
+LowercaseName = '.convexhull'
+TypeId = 'Frontier.ConvexHull'
+SchemaVersion = 1
+OwnerPath = 'Engine/GeometrySpace'
+WireFormat = 'BinarySections'
+CachedArtifact = 'OuterHullPolyhedra'
+LegacyRelation = 'New'
+
+[[Extensions]]
+CanonicalExtension = '.ImpactProfile'
+LowercaseName = '.impactprofile'
+TypeId = 'Frontier.ImpactProfile'
+SchemaVersion = 1
+OwnerPath = 'Engine/SimulationSpace/PhysicsSpace'
+WireFormat = 'TomlManifest'
+CachedArtifact = 'MaterialContactResponseLookup'
+LegacyRelation = 'New'
